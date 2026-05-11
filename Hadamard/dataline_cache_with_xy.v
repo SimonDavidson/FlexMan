@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 /*
  * dataline_read_only_cache.v
  *
@@ -6,7 +8,7 @@
  */
 
 
-`include "constants.v"
+`include "../shared/constants.v"
 
 module dataline_cache_with_xy #(
     parameter IN_DATA_BITS      = 32,

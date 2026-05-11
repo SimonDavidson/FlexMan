@@ -1,4 +1,6 @@
 #! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
 
 sams_code="/home/davidsos/Sam_code"
 sam_matrix_mul="${sams_code}/convolve/rtl/matrix_mul/src"

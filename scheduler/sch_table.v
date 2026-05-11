@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 module sch_table  #(parameter SCH_ENTRY_SZ    = 32,
                     parameter NUM_HW_ACCELERATORS = 2,
 	            parameter TGT_ACC_SZ      = 2,
 		    parameter NUM_BUFFERS     = 16,
                     parameter COL_BUFF_ID_SZ  = 16,
-		    parameter NUM_SCH_ENTRIES = 4
+		    parameter NUM_SCH_ENTRIES = 4,
+                    parameter ACC_ID_BTM      = 0
 	    )
              (input  wire                      clk,
               input  wire                      reset,
@@ -25,7 +28,6 @@ module sch_table  #(parameter SCH_ENTRY_SZ    = 32,
               output wire [SCH_ENTRY_SZ-1:0]   entry_data_o
              );
 
-localparam NUM_SCHEDULABLE = 4;
 localparam CMD_SZ          = 3;
 
 localparam TGT_ACC_BTM = 0;
@@ -38,8 +40,8 @@ localparam CMD_BTM     = OUTBUFF_TOP + 1;
 localparam CMD_TOP     = CMD_BTM + CMD_SZ;
 
 wire [SCH_ENTRY_SZ-1:0] entry_data_r [0:NUM_SCH_ENTRIES-1];
-wire [NUM_SCH_ENTRIES:0]   entry_valid_r;
-wire [NUM_SCH_ENTRIES:0]   shift_out_valid;
+wire  [NUM_SCH_ENTRIES:0]  entry_valid_r;
+wire  [NUM_SCH_ENTRIES:0]  shift_out_valid;
 reg  [NUM_SCH_ENTRIES:0]   shift_entry;
 wire [NUM_SCH_ENTRIES-1:0] new_entry_valid_r;
 wire [NUM_SCH_ENTRIES-1:0] ready_to_go;
@@ -47,7 +49,7 @@ wire [NUM_SCH_ENTRIES-1:0] load_entry;
 wire [NUM_SCH_ENTRIES-1:0] delete_entry;
 wire [NUM_SCH_ENTRIES-1:0] delete_launched_entry;
 reg  [NUM_SCH_ENTRIES-1:0] delete_shifted_entry;
-wire [NUM_SCHEDULABLE:0]   select_to_go;
+reg  [NUM_SCH_ENTRIES:0]   select_to_go;
 wire                       launching;
 wire                       free_to_add_entry;
 wire                       table_empty;
@@ -56,7 +58,7 @@ wire                       table_empty;
 //
 //Indicate if we have any free table entry slots:
 
-assign table_slot_free_o = ~&entry_valid_r;
+assign table_slot_free_o = free_to_add_entry;
 
 // Top level will not try to load an entry if there
 // are no slots free.
@@ -66,19 +68,21 @@ assign table_slot_free_o = ~&entry_valid_r;
 // Select one entry to execute and generate control
 // signals for shifting, adding and deleting entries
 //
-// Select the earliest slot that is ready to go:
-assign select_to_go =  {1'b0, ready_to_go[NUM_SCHEDULABLE-1:0]}         &  // TODO!
-                      ~{1'b0, ready_to_go[NUM_SCHEDULABLE-2:0], 1'b0}   &
-                      ~{1'b0, ready_to_go[NUM_SCHEDULABLE-3:0], 2'b00}  &
-                      ~{1'b0, ready_to_go[NUM_SCHEDULABLE-4:0], 3'b000};
+// Select the earliest (lowest-index) slot that is ready to go:
+integer j;
+always @(*) begin
+   select_to_go = {(NUM_SCH_ENTRIES+1){1'b0}};
+   for (j = NUM_SCH_ENTRIES-1; j >= 0; j = j - 1)
+      if (ready_to_go[j]) select_to_go = ({{NUM_SCH_ENTRIES{1'b0}}, 1'b1} << j);
+end
 
 //assign free_to_add_entry = ~&entry_valid_r;
 //assign free_to_add_entry = ~entry_valid_r[NUM_SCH_ENTRIES-1] | 
 //	                    shift_entry[NUM_SCH_ENTRIES-1];
 assign free_to_add_entry = ~entry_valid_r[NUM_SCH_ENTRIES-1];
 
-assign new_entry_valid_r[3]   = load_new_entry_i;
-assign new_entry_valid_r[2:0] = 3'b000;
+assign new_entry_valid_r[NUM_SCH_ENTRIES-1]   = load_new_entry_i;
+assign new_entry_valid_r[NUM_SCH_ENTRIES-2:0] = {(NUM_SCH_ENTRIES-1){1'b0}};
 
 assign table_empty = ~|entry_valid_r;
 
@@ -96,19 +100,19 @@ assign load_entry[NUM_SCH_ENTRIES-2:0] = 'b0;
 integer i;
 always @ (*)
 begin
-   shift_entry[0]    <= ~load_entry[0] & ~select_to_go[1]
+   shift_entry[0]    = ~load_entry[0] & ~select_to_go[1]
                         &   entry_valid_r[1]
                         & (~entry_valid_r[0]);
 
-   shift_entry[4]    <= 1'b0;
+   shift_entry[NUM_SCH_ENTRIES] = 1'b0;
 
    for(i=1; i<NUM_SCH_ENTRIES-1; i=i+1)
    begin
-      shift_entry[i] <=    ~load_entry[i] & ~select_to_go[i+1] 
+      shift_entry[i] =    ~load_entry[i] & ~select_to_go[i+1] 
                         &   entry_valid_r[i+1]
                         & (~entry_valid_r[i] | shift_entry[i-1]);
    end
-   shift_entry[NUM_SCH_ENTRIES-1] <=    ~load_entry[NUM_SCH_ENTRIES-1] 
+   shift_entry[NUM_SCH_ENTRIES-1] =    ~load_entry[NUM_SCH_ENTRIES-1] 
                                      &   entry_valid_r[NUM_SCH_ENTRIES]
                                      & (~entry_valid_r[NUM_SCH_ENTRIES-1] 
 				       | shift_entry[NUM_SCH_ENTRIES-2]);
@@ -116,25 +120,25 @@ end
 
 always @ (load_entry, select_to_go, shift_entry, shift_out_valid)
 begin
-   delete_shifted_entry[0] <= 1'b0; //select_to_go[1] & ~load_entry[0];
+   delete_shifted_entry[0] = 1'b0; //select_to_go[1] & ~load_entry[0];
    for(i=1; i<NUM_SCH_ENTRIES; i=i+1)
    begin
-      delete_shifted_entry[i] <=  ~load_entry[i]        &
+      delete_shifted_entry[i] =  ~load_entry[i]        &
                                 (( select_to_go[i+1]    &  shift_entry[i-1])
 			      |	 (~shift_out_valid[i+1] & ~shift_entry[i] & shift_entry[i-1]));
    end
 end
 
-assign entry_data_o = select_to_go[0] ? entry_data_r[0] :
-                      select_to_go[1] ? entry_data_r[1] :
-                      select_to_go[2] ? entry_data_r[2] :
-                                        entry_data_r[3] ;
+reg [SCH_ENTRY_SZ-1:0] entry_data_mux;
+integer k;
+always @(*) begin
+   entry_data_mux = entry_data_r[0];
+   for (k = 0; k < NUM_SCH_ENTRIES; k = k + 1)
+      if (select_to_go[k]) entry_data_mux = entry_data_r[k];
+end
+assign entry_data_o = entry_data_mux;
 
-assign delete_launched_entry = select_to_go[0] ? 4'b0001 :
-                               select_to_go[1] ? 4'b0010 :
-                               select_to_go[2] ? 4'b0100 :
-                               select_to_go[3] ? 4'b1000 :
-                                                 4'b0000 ;
+assign delete_launched_entry = select_to_go[NUM_SCH_ENTRIES-1:0];
 
 assign delete_entry = delete_launched_entry | delete_shifted_entry;
 
@@ -153,7 +157,8 @@ sch_entry   #(
 	     .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATORS),
              .TGT_ACC_SZ(TGT_ACC_SZ),
              .NUM_BUFFERS(NUM_BUFFERS),
-             .COL_BUFF_ID_SZ(COL_BUFF_ID_SZ)
+             .COL_BUFF_ID_SZ(COL_BUFF_ID_SZ),
+             .ACC_ID_BTM(ACC_ID_BTM)
             ) sch_entry0
              (.clk(clk),
               .reset(reset),
@@ -178,7 +183,8 @@ sch_entry  #(
 	     .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATORS),
              .TGT_ACC_SZ(TGT_ACC_SZ),
              .NUM_BUFFERS(NUM_BUFFERS),
-             .COL_BUFF_ID_SZ(COL_BUFF_ID_SZ)
+             .COL_BUFF_ID_SZ(COL_BUFF_ID_SZ),
+             .ACC_ID_BTM(ACC_ID_BTM)
             ) sch_entry1
              (.clk(clk),
               .reset(reset),
@@ -204,7 +210,8 @@ sch_entry   #(
 	     .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATORS),
              .TGT_ACC_SZ(TGT_ACC_SZ),
              .NUM_BUFFERS(NUM_BUFFERS),
-             .COL_BUFF_ID_SZ(COL_BUFF_ID_SZ)
+             .COL_BUFF_ID_SZ(COL_BUFF_ID_SZ),
+             .ACC_ID_BTM(ACC_ID_BTM)
             ) sch_entry2
              (.clk(clk),
               .reset(reset),
@@ -230,7 +237,8 @@ sch_entry   #(
 	     .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATORS),
              .TGT_ACC_SZ(TGT_ACC_SZ),
              .NUM_BUFFERS(NUM_BUFFERS),
-             .COL_BUFF_ID_SZ(COL_BUFF_ID_SZ)
+             .COL_BUFF_ID_SZ(COL_BUFF_ID_SZ),
+             .ACC_ID_BTM(ACC_ID_BTM)
             ) sch_entry3
              (.clk(clk),
               .reset(reset),

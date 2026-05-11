@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 /////////////////////////////////////////////////////////////////////
 //
 // spike_processing
@@ -7,7 +9,7 @@
 // synaptic currents, to pass to the neuron models in the next stage.
 //
 
-`include "constants.v"
+`include "../shared/constants.v"
 
 module spike_processing # (parameter NUM_TIMESTEPS      = 32,
 	                   parameter X_INPUT_SZ         = 8,
@@ -52,6 +54,7 @@ module spike_processing # (parameter NUM_TIMESTEPS      = 32,
     input wire [WEIGHT_SLICE_SZ-1:0] weight_sz_i,
     input wire                 [4:0] bin_point_syn_curr_i,
     input wire                 [1:0] weight_mode_i,
+    input wire                       clear_syn_curr_i,
     input wire    [X_INPUT_SZ-1:0] in_x_len_i,
     input wire    [Y_INPUT_SZ-1:0] in_y_len_i,
     input wire   [X_OUTPUT_SZ-1:0] out_x_len_i,
@@ -553,6 +556,7 @@ syn_curr_update # (
    .finished_pass_o(finished_pass_syn_curr_update),
    .syn_curr_update_running_o(syn_curr_update_running),
    .weight_mode_i(weight_mode_i),
+   .clear_syn_curr_i(clear_syn_curr_i),
    .sparse_index_i(actual_index),
    .syn_curr_base_addr_i(syn_curr_base_addr_i),
    .out_x_len_i(out_x_len_i),

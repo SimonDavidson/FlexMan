@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
-//`include "constants.v"
+//`include "../shared/constants.v"
 
 module packer(input  wire                  clk,
               input  wire                  reset,

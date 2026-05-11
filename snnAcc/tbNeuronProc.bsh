@@ -1,0 +1,6 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+xrun -sv -gui -timescale 1ns/1ps -access wrc -top tb_neuron_processing \
+  slice_and_align.v dataline_cache_with_xy.v update_state_for_neuron.v \
+  packer.v neuron_processing.v tb_neuron_processing.v

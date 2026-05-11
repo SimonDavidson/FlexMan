@@ -1,8 +1,11 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 module sch_entry  #(parameter SCH_ENTRY_SZ        = 32,
 	            parameter NUM_HW_ACCELERATORS = 2,
 	            parameter TGT_ACC_SZ          = 2,
 		    parameter NUM_BUFFERS         = 16,
-                    parameter COL_BUFF_ID_SZ      = 16
+                    parameter COL_BUFF_ID_SZ      = 16,
+                    parameter ACC_ID_BTM          = 0
 	    )
              (input  wire                      clk,
               input  wire                      reset,
@@ -49,14 +52,19 @@ wire [SCH_ENTRY_SZ-1:0] updated_entry_data;
 wire [SCH_ENTRY_SZ-1:0] entry_data_nxt;
 wire [SCH_ENTRY_SZ-1:0] inbuffers_needed;
 wire [SCH_ENTRY_SZ-1:0] waiting_for_inbuffer;
+wire [NUM_BUFFERS-1:0]  outbuffers_needed;
 wire [SCH_ENTRY_SZ-1:0] waiting_for_outbuffer;
 wire                    got_all_inbuffers;
 wire                    got_all_outbuffers;
 wire                    acc_free;
 wire [NUM_HW_ACCELERATORS-1:0] required_acc;
-reg  [NUM_BUFFERS-1:0]  src1_buff_1hot;
-reg  [NUM_BUFFERS-1:0]  src2_buff_1hot;
-reg  [NUM_BUFFERS-1:0]   tgt_buff_1hot;
+wire [NUM_BUFFERS-1:0]  src1_buff_1hot;
+wire [NUM_BUFFERS-1:0]  src2_buff_1hot;
+wire [NUM_BUFFERS-1:0]   tgt_buff_1hot;
+
+assign src1_buff_1hot = 1 << entry_data_o[ENTRY_SBUFF1_END:ENTRY_SBUFF1_START];
+assign src2_buff_1hot = 1 << entry_data_o[ENTRY_SBUFF2_END:ENTRY_SBUFF2_START];
+assign  tgt_buff_1hot = 1 << entry_data_o[ENTRY_TBUFF_END:ENTRY_TBUFF_START];
 
 // The valid bit for this entry on the assumption that it is
 // being shifted forward. This is identical to the entry's valid bit,
@@ -89,56 +97,6 @@ else
 
 //////////////////////////////////////////////
 // Check if input buffers are all available:
-//
-// Convert Src1 buff ID into one hot encoding:
-//
-always @ (entry_data_o)
-   begin
-      src1_buff_1hot <= 'b0;
-      case (entry_data_o[ENTRY_SBUFF1_END:ENTRY_SBUFF1_START])
-         4'b0000: src1_buff_1hot[0]  <= 1'b1;
-         4'b0001: src1_buff_1hot[1]  <= 1'b1;
-         4'b0010: src1_buff_1hot[2]  <= 1'b1;
-         4'b0011: src1_buff_1hot[3]  <= 1'b1;
-         4'b0100: src1_buff_1hot[4]  <= 1'b1;
-         4'b0101: src1_buff_1hot[5]  <= 1'b1;
-         4'b0110: src1_buff_1hot[6]  <= 1'b1;
-         4'b0111: src1_buff_1hot[7]  <= 1'b1;
-         4'b1000: src1_buff_1hot[8]  <= 1'b1;
-         4'b1001: src1_buff_1hot[9]  <= 1'b1;
-         4'b1010: src1_buff_1hot[10] <= 1'b1;
-         4'b1011: src1_buff_1hot[11] <= 1'b1;
-         4'b1100: src1_buff_1hot[12] <= 1'b1;
-         4'b1101: src1_buff_1hot[13] <= 1'b1;
-         4'b1110: src1_buff_1hot[14] <= 1'b1;
-         4'b1111: src1_buff_1hot[15] <= 1'b1;
-         default: src1_buff_1hot[0]  <= 1'b0;
-      endcase
-   end
-
-always @ (entry_data_o)
-   begin
-      src2_buff_1hot <= 'b0;
-      case (entry_data_o[ENTRY_SBUFF2_END:ENTRY_SBUFF2_START])
-         4'b0000: src2_buff_1hot[0]  <= 1'b1;
-         4'b0001: src2_buff_1hot[1]  <= 1'b1;
-         4'b0010: src2_buff_1hot[2]  <= 1'b1;
-         4'b0011: src2_buff_1hot[3]  <= 1'b1;
-         4'b0100: src2_buff_1hot[4]  <= 1'b1;
-         4'b0101: src2_buff_1hot[5]  <= 1'b1;
-         4'b0110: src2_buff_1hot[6]  <= 1'b1;
-         4'b0111: src2_buff_1hot[7]  <= 1'b1;
-         4'b1000: src2_buff_1hot[8]  <= 1'b1;
-         4'b1001: src2_buff_1hot[9]  <= 1'b1;
-         4'b1010: src2_buff_1hot[10] <= 1'b1;
-         4'b1011: src2_buff_1hot[11] <= 1'b1;
-         4'b1100: src2_buff_1hot[12] <= 1'b1;
-         4'b1101: src2_buff_1hot[13] <= 1'b1;
-         4'b1110: src2_buff_1hot[14] <= 1'b1;
-         4'b1111: src2_buff_1hot[15] <= 1'b1;
-         default: src2_buff_1hot[0]  <= 1'b0;
-      endcase
-   end
 
 assign inbuffers_needed      = src1_buff_1hot | src2_buff_1hot;
 assign waiting_for_inbuffer  = inbuffers_needed & ~buffers_full_i;
@@ -146,31 +104,6 @@ assign got_all_inbuffers     = ~|waiting_for_inbuffer;
 
 //////////////////////////////////////////////
 // Check if output buffers are all available:
-//
-// Convert target buff ID into one-hot encoding:
-always @ (entry_data_o)
-   begin
-      tgt_buff_1hot <= 'b0;
-      case (entry_data_o[ENTRY_TBUFF_END:ENTRY_TBUFF_START])
-         4'b0000: tgt_buff_1hot[0]  <= 1'b1;
-         4'b0001: tgt_buff_1hot[1]  <= 1'b1;
-         4'b0010: tgt_buff_1hot[2]  <= 1'b1;
-         4'b0011: tgt_buff_1hot[3]  <= 1'b1;
-         4'b0100: tgt_buff_1hot[4]  <= 1'b1;
-         4'b0101: tgt_buff_1hot[5]  <= 1'b1;
-         4'b0110: tgt_buff_1hot[6]  <= 1'b1;
-         4'b0111: tgt_buff_1hot[7]  <= 1'b1;
-         4'b1000: tgt_buff_1hot[8]  <= 1'b1;
-         4'b1001: tgt_buff_1hot[9]  <= 1'b1;
-         4'b1010: tgt_buff_1hot[10] <= 1'b1;
-         4'b1011: tgt_buff_1hot[11] <= 1'b1;
-         4'b1100: tgt_buff_1hot[12] <= 1'b1;
-         4'b1101: tgt_buff_1hot[13] <= 1'b1;
-         4'b1110: tgt_buff_1hot[14] <= 1'b1;
-         4'b1111: tgt_buff_1hot[15] <= 1'b1;
-         default: tgt_buff_1hot[0]  <= 1'b0;
-      endcase
-   end
 
 assign outbuffers_needed     = tgt_buff_1hot;
 assign waiting_for_outbuffer = outbuffers_needed & ~buffers_free_i;
@@ -179,7 +112,7 @@ assign got_all_outbuffers    = ~|waiting_for_outbuffer;
 //////////////////////////////////////////////
 // Check if target accelerator is available:
 //
-assign required_acc = 1'b1<< entry_data_o[TGT_ACC_TOP:TGT_ACC_BTM];
+assign required_acc = 1'b1<< entry_data_o[ACC_ID_BTM+TGT_ACC_SZ-1:ACC_ID_BTM];
 assign acc_free     = &(~required_acc | ~acc_busy_i);
 
 //////////////////////////////////////////////

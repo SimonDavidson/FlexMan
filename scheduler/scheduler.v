@@ -1,4 +1,6 @@
-`include "constants.v"
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
+`include "../shared/constants.v"
 
 `define OUTPUTS 400
 
@@ -40,13 +42,15 @@ module scheduler  #(parameter SCH_ENTRY_SZ        = 32,
 	      input wire [NUM_HW_ACCELERATORS-1:0] acc_finished_i,
 	      input wire [NUM_HW_ACCELERATORS-1:0] acc_result_i,
 	      output wire                          start_new_block_o,
-	      output wire [TGT_ACC_SZ-1:0]         target_acc_o,
-	      output wire [SCH_ENTRY_SZ-1:0]       buffer_info_o,
+	      output wire [$clog2(NUM_HW_ACCELERATORS)-1:0] target_acc_o,
+	      output wire [SCH_ENTRY_SZ-1:0]              buffer_info_o,
+	      output wire                          nxt_input_pulse_o,
+	      output wire                          nxt_output_pulse_o,
 
 	      // External buffer pre-fill interface (replaces internal test hack):
 	      input wire                            mark_buff_as_full_i,
 	      input wire [BUFF_INDX_SZ-1:0]        full_buff_id_i,
-	      input wire [2:0]                      full_buff_usage_i
+	      input wire [TGT_COUNT_SZ-1:0]        full_buff_usage_i
              );
 
 //parameter SCH_ENTRY_SZ    = 32,
@@ -79,6 +83,7 @@ localparam INST_TASK            = 3'b000;
 localparam INST_JUMP            = 3'b001;
 localparam INST_STOP            = 3'b010;
 localparam INST_CHECK           = 3'b011;
+localparam INST_NXT             = 3'b100;
 localparam INST_FILL            = 3'b101;
 localparam INST_LOOP            = 3'b110;
 localparam INST_LOOPEND         = 3'b111;
@@ -115,6 +120,7 @@ reg                            inst_is_jump;
 reg                            inst_is_stop;
 reg                            inst_is_check;
 reg                            inst_is_fill;
+reg                            inst_is_nxt;
 reg                            inst_is_loop;
 reg                            inst_is_loopend;
 reg                            inst_unknown;
@@ -292,6 +298,7 @@ begin
    inst_is_jump    = 1'b0;
    inst_is_stop    = 1'b0;
    inst_is_check   = 1'b0;
+   inst_is_nxt     = 1'b0;
    inst_is_fill    = 1'b0;
    inst_is_loop    = 1'b0;
    inst_is_loopend = 1'b0;
@@ -301,6 +308,7 @@ begin
       INST_JUMP:    inst_is_jump    = 1'b1;
       INST_STOP:    inst_is_stop    = 1'b1;
       INST_CHECK:   inst_is_check   = 1'b1;
+      INST_NXT:     inst_is_nxt     = 1'b1;
       INST_FILL:    inst_is_fill    = 1'b1;
       INST_LOOP:    inst_is_loop    = 1'b1;
       INST_LOOPEND: inst_is_loopend = 1'b1;
@@ -342,10 +350,14 @@ assign inst_consumed = inst_valid & (
                        | (inst_is_fill  & fill_complete)
                        |  inst_is_loop
                        |  inst_is_loopend
+                       | (inst_is_nxt   & table_empty)
                      ) & ~test_stall_pipe;
 
 assign load_new_entry     = (inst_valid & inst_is_task & inst_consumed) ?
                             1'b1 : 1'b0;
+
+assign nxt_input_pulse_o  = inst_valid & inst_is_nxt & inst_word[4] & table_empty & ~test_stall_pipe;
+assign nxt_output_pulse_o = inst_valid & inst_is_nxt & inst_word[5] & table_empty & ~test_stall_pipe;
 
 /////////////////////////////////////////
 // Fill instruction state machine:
@@ -357,40 +369,7 @@ assign load_new_entry     = (inst_valid & inst_is_task & inst_consumed) ?
 always @ (d[ENTRY_TBUFF_END:ENTRY_TBUFF_START])
 begin
    tgt_selected = 'b0;
-   case(d[ENTRY_TBUFF_END:ENTRY_TBUFF_START])
-      5'b00000: tgt_selected[0] = 1'b1;
-      5'b00001: tgt_selected[1] = 1'b1;
-      5'b00010: tgt_selected[2] = 1'b1;
-      5'b00011: tgt_selected[3] = 1'b1;
-      5'b00100: tgt_selected[4] = 1'b1;
-      5'b00101: tgt_selected[5] = 1'b1;
-      5'b00110: tgt_selected[6] = 1'b1;
-      5'b00111: tgt_selected[7] = 1'b1;
-      5'b01000: tgt_selected[8] = 1'b1;
-      5'b01001: tgt_selected[9] = 1'b1;
-      5'b01010: tgt_selected[10] = 1'b1;
-      5'b01011: tgt_selected[11] = 1'b1;
-      5'b01100: tgt_selected[12] = 1'b1;
-      5'b01101: tgt_selected[13] = 1'b1;
-      5'b01110: tgt_selected[14] = 1'b1;
-      5'b01111: tgt_selected[15] = 1'b1;
-      //5'b10000: tgt_selected[16] = 1'b1;
-      //5'b10001: tgt_selected[17] = 1'b1;
-      //5'b10010: tgt_selected[18] = 1'b1;
-      //5'b10011: tgt_selected[19] = 1'b1;
-      //5'b10100: tgt_selected[20] = 1'b1;
-      //5'b10101: tgt_selected[21] = 1'b1;
-      //5'b10110: tgt_selected[22] = 1'b1;
-      //5'b10111: tgt_selected[23] = 1'b1;
-      //5'b11000: tgt_selected[24] = 1'b1;
-      //5'b11001: tgt_selected[25] = 1'b1;
-      //5'b11010: tgt_selected[26] = 1'b1;
-      //5'b11011: tgt_selected[27] = 1'b1;
-      //5'b11100: tgt_selected[28] = 1'b1;
-      //5'b11101: tgt_selected[29] = 1'b1;
-      //5'b11110: tgt_selected[30] = 1'b1;
-      //5'b11111: tgt_selected[31] = 1'b1;
-   endcase
+   tgt_selected[d[ENTRY_TBUFF_END:ENTRY_TBUFF_START]] = 1'b1;
 end
 
 //assign tgt_free = ((tgt_selected & buff_free) != 'b0)? 1'b1 : 1'b0;
@@ -410,7 +389,8 @@ sch_table  #(
               .TGT_ACC_SZ(HW_ACC_SZ),
               .NUM_BUFFERS(NUM_BUFFERS),
               .COL_BUFF_ID_SZ(COL_BUFF_ID_SZ),
-              .NUM_SCH_ENTRIES(NUM_SCH_ENTRIES)
+              .NUM_SCH_ENTRIES(NUM_SCH_ENTRIES),
+              .ACC_ID_BTM(ENTRY_ACC_ID_START)
             ) sch_table0 (
              .clk(clk),
              .reset(reset),

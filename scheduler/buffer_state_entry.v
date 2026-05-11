@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 ////////////////////////////////////////////////////////////////////////
 //
 // buffer_state_entry
@@ -9,9 +11,8 @@
 // State for one scheduler buffer entry
 //
 
-localparam TGT_COUNT_SZ  = 3;
-
 module buffer_state_entry
+    #(parameter TGT_COUNT_SZ = 3)
     (input wire                     clk,
      input wire                     reset,
 

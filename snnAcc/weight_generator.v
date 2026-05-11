@@ -1,4 +1,6 @@
-`include "constants.v"
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
+`include "../shared/constants.v"
 
 module weight_generator
                         # (

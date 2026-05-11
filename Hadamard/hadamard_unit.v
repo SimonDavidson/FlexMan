@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
-`include "constants.v"
+`include "../shared/constants.v"
 
 module hadamard_unit #(
     parameter TGT_ACC_ID           = 0,

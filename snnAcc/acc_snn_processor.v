@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 /////////////////////////////////////////////////////////////////////
 //
 // acc_snn_processor
@@ -15,7 +17,7 @@
 //
 /////////////////////////////////////////////////////////////////////
 
-`include "constants.v"
+`include "../shared/constants.v"
 
 module acc_snn_processor # (
 
@@ -224,6 +226,8 @@ module acc_snn_processor # (
     reg                    [4:0] bin_point_syn_curr_r;
     reg                   [31:0] np_syn_curr_decay_mult_r;
     reg                   [31:0] np_pot_decay_mult_r;
+    // [0]=sub_on_fire  [1]=clear_syn_curr  [2]=clear_pot
+    reg                    [2:0] np_mode_r;
 
     //================================================================
     // AXI config register decode
@@ -310,6 +314,7 @@ module acc_snn_processor # (
             bin_point_syn_curr_r    <= 5'b0;
             np_syn_curr_decay_mult_r <= 32'b0;
             np_pot_decay_mult_r      <= 32'b0;
+            np_mode_r               <= 3'b0;
         end else if (sys_req_i & addr_match) begin
             case (sys_addr_i[7:0])
                 8'h00: sp_act_base_addr_r      <= sys_data_i[MEM_ADDR_BITS-1:0];
@@ -345,6 +350,7 @@ module acc_snn_processor # (
                 8'h40: bin_point_syn_curr_r      <= sys_data_i[4:0];
                 8'h68: np_syn_curr_decay_mult_r  <= sys_data_i[31:0];
                 8'h6C: np_pot_decay_mult_r        <= sys_data_i[31:0];
+                8'h98: np_mode_r                 <= sys_data_i[2:0];
                 default: ; // ignore unrecognised addresses
             endcase
         end
@@ -464,6 +470,7 @@ module acc_snn_processor # (
         .rows_per_neuron_i      (sp_rows_per_neuron_r),
         .weight_idx_sz_i        (sp_weight_idx_sz_r),
         .weight_mode_i          (sp_weight_mode_r),
+        .clear_syn_curr_i       (np_mode_r[1]),
         .x_kernel_len_i         (sp_x_kernel_len_r),
         .y_kernel_len_i         (sp_y_kernel_len_r),
         .x_kernel_offset_i      (sp_x_kernel_offset_r),
@@ -553,6 +560,8 @@ module acc_snn_processor # (
         .bin_point_syn_curr_i   (bin_point_syn_curr_r),
         .syn_curr_decay_mult_i  (np_syn_curr_decay_mult_r),
         .pot_decay_mult_i       (np_pot_decay_mult_r),
+        .sub_on_fire_i          (np_mode_r[0]),
+        .clear_pot_i            (np_mode_r[2]),
 
         // Scheduler – triggered by spike_processing completion
         .start_new_block_i      (sp_acc_finished),

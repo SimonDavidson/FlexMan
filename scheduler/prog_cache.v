@@ -1,10 +1,12 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 /*
  * prog_cache.v
  *
  * @author: SD, derived from act_cache by Samuel López + JDG
  */
 
-`include "constants.v"
+`include "../shared/constants.v"
 
 module prog_cache #(
     parameter IN_DATA_SZ    = 32,

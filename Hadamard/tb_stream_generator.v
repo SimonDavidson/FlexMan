@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 `timescale 1ns/1ps
-`include "constants.v"
+`include "../shared/constants.v"
 
 module tb_stream_generator;
 

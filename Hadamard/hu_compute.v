@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 /* Hadamard compute: R[i] = Z[i]*(A[i]-B[i]) + B[i] + mode*R_prev[i]
  *
@@ -9,7 +11,7 @@
  * All data arrives left-aligned (value in MSBs), as produced by
  * slice_and_align and expected by packer.
  */
-`include "constants.v"
+`include "../shared/constants.v"
 
 module hu_compute #(
     parameter DATA_BITS   = 32,
@@ -202,6 +204,16 @@ always @(posedge clk) begin
                 b_aligned <= ($signed({{(WIDE-DATA_BITS){b_i[DATA_BITS-1]}}, b_i})
                               >>> right_shift_for_sz(elem_sz_ab_i))
                              << (WIDE/2 - bin_point_b_i);
+                /* Pre-compute amb here so it's settled for ST_MUL cycle 0.
+                 * Reading a_aligned/b_aligned in ST_MUL cycle 0 would read
+                 * the old (potentially X) values because the NBAs above have
+                 * not yet committed when the accumulator multiply runs. */
+                amb <= (($signed({{(WIDE-DATA_BITS){a_i[DATA_BITS-1]}}, a_i})
+                          >>> right_shift_for_sz(elem_sz_ab_i))
+                         << (WIDE/2 - bin_point_a_i))
+                      - (($signed({{(WIDE-DATA_BITS){b_i[DATA_BITS-1]}}, b_i})
+                           >>> right_shift_for_sz(elem_sz_ab_i))
+                          << (WIDE/2 - bin_point_b_i));
 
                 state <= ST_MUL;
             end
@@ -209,9 +221,7 @@ always @(posedge clk) begin
 
         /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
         ST_MUL: begin
-            /* Compute amb = A - B on first cycle of multiply */
-            if (mul_count == 3'd0)
-                amb <= a_aligned - b_aligned;
+            /* amb was pre-computed in ST_IDLE; no update needed on cycle 0 */
 
             /* Partial product: current 8-bit chunk of Z * amb, shifted   */
             /* by (mul_count * 8) to account for chunk position.          */

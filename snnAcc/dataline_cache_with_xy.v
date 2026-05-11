@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 /*
  * dataline_read_only_cache.v
  *
@@ -6,7 +8,7 @@
  */
 
 
-`include "constants.v"
+`include "../shared/constants.v"
 
 module dataline_cache_with_xy #(
     parameter IN_DATA_BITS      = 32,
@@ -111,7 +113,7 @@ always @ (posedge clk)
    end
    else
    begin
-      if (sys_req_i & ~sys_wait_o)
+      if (mem_data_next_cycle)
          begin
             cache_addr_r    <= sys_addr_i;
          end

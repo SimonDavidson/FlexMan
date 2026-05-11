@@ -1,0 +1,7 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+xrun -sv -gui -timescale 1ns/1ps -access wrc -top tb_hadamard_unit \
+  hadamard_unit.v hu_compute.v hu_config_regs.v stream_generator.v \
+  packer.v dataline_cache_with_xy.v slice_and_align.v \
+  tb_hadamard_unit.v

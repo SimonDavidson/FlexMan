@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 /////////////////////////////////////////////////////////////////////
 //
 // neuron_processor
@@ -18,7 +20,7 @@
 // 6) Write output spike value (0 or 1) to output spike buffer
 // 7) Decay potential, then write back
 
-`include "constants.v"
+`include "../shared/constants.v"
 
 module neuron_processing # (parameter TGT_ACC_ID            = 3'b000,
 	                    parameter NUM_TIMESTEPS         = 32,
@@ -59,6 +61,8 @@ module neuron_processing # (parameter TGT_ACC_ID            = 3'b000,
     input wire                    [4:0] bin_point_syn_curr_i,
     input wire                   [31:0] syn_curr_decay_mult_i,
     input wire                   [31:0] pot_decay_mult_i,
+    input wire                          sub_on_fire_i,
+    input wire                          clear_pot_i,
 
     // Interface to Scheduler:
     input  wire                     start_new_block_i,
@@ -408,6 +412,11 @@ assign neuron_valid = syn_curr_data_valid  &
 		      bias_curr_data_valid &
 		      thresh_data_valid;
 
+// Zero potential input when clear_pot_i is set, discarding any stored history.
+// The pot_cache still reads memory so pot_data_valid remains part of neuron_valid.
+wire signed [POT_SLICE_BITS-1:0] pot_input;
+assign pot_input = clear_pot_i ? {POT_SLICE_BITS{1'b0}} : pot_data_out;
+
 // Instantiate state updte module:
 update_state_for_neuron #(
     .SYN_CURR_SLICE_BITS(SYN_CURR_SLICE_BITS),
@@ -420,11 +429,12 @@ update_state_for_neuron #(
      .reset(reset),
      .neuron_valid_i(neuron_valid),
      .syn_curr_i(syn_curr_data_out),
-     .potential_i(pot_data_out),
+     .potential_i(pot_input),
      .bias_curr_i(bias_curr_data_out),
      .threshold_i(thresh_data_out),
      .syn_curr_decay_mult_i(syn_curr_decay_mult_i),
      .potential_decay_mult_i(pot_decay_mult_i),
+     .sub_on_fire_i(sub_on_fire_i),
      .neuron_taken_o(neuron_taken),
      .result_valid_o(result_valid),
      .potential_o(updated_potential),

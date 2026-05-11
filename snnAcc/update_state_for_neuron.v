@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 // =============================================================================
 // Module: update_state_for_neuron
 // Description: 
@@ -24,6 +26,7 @@ module update_state_for_neuron # (
     input  wire signed [THRESH_SLICE_BITS-1:0]    threshold_i,
     input  wire        [SYN_CURR_SLICE_BITS-1:0]  syn_curr_decay_mult_i,   // Q0.32 unsigned fractional
     input  wire        [POT_SLICE_BITS-1:0]       potential_decay_mult_i,  // Q0.32 unsigned fractional
+    input  wire                                   sub_on_fire_i,
     output wire                                   neuron_taken_o,  // Acknowledge to upstream
 
     // Output interface (valid/taken handshake)
@@ -136,7 +139,10 @@ end
 // Seelct output potential - either decayed or zeroed value, depending
 // on whether or not we generated a spike
 
-assign potential_o = (spike)? 'b0 : decayed_potential;
+assign potential_o = spike ? (sub_on_fire_i
+                             ? decayed_potential - {{(POT_SLICE_BITS-THRESH_SLICE_BITS){threshold_i[THRESH_SLICE_BITS-1]}}, threshold_i}
+                             : 'b0)
+                           : decayed_potential;
 
 // Assign output signals:
 assign spike_o = spike;

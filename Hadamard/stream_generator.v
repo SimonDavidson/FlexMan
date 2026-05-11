@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
-`include "constants.v"
+`include "../shared/constants.v"
 
 module stream_generator #(
     parameter MAX_STREAM_LEN    = 1024,
@@ -44,7 +46,7 @@ wire                 last;
 wire                 advance;
 
 assign last    = ({1'b0, index} == stream_len_i - 1'b1);
-assign advance = active & ~cache_wait;
+assign advance = active & data_valid_o & ~cache_wait;
 
 always @(posedge clk)
     if (reset) begin

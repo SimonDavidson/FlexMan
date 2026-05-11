@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 /////////////////////////////////////////////////////////////////////
 //
 // wrapped_acc_snn_processor_plus_memories
@@ -38,7 +40,7 @@
 //
 /////////////////////////////////////////////////////////////////////
 
-`include "constants.v"
+`include "../shared/constants.v"
 
 module wrapped_acc_snn_processor_plus_memories # (
 

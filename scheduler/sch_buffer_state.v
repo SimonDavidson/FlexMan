@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 ////////////////////////////////////////////////////////////////////////
 //
 // sch_buffer_state
@@ -28,7 +30,7 @@ module sch_buffer_state
 	// Interface from scheduler control:
 	input wire                     mark_buff_as_full_i,
 	input wire  [BUFF_INDX_SZ-1:0] full_buff_id_i,
-	input wire               [2:0] full_buff_usage_i,
+	input wire  [TGT_COUNT_SZ-1:0] full_buff_usage_i,
 	input wire                     start_new_task_i,
 	input wire  [TGT_ACC_SZ-1:0]   tgt_acc_id_i,
 	input wire  [BUFF_INDX_SZ-1:0] tgt_buff_idx_i,
@@ -75,8 +77,9 @@ wire [NUM_BUFFERS-1:0]         buff_content_consumed;
 reg  [NUM_BUFFERS-1:0]         src1_buff_consumed;
 reg  [NUM_BUFFERS-1:0]         src2_buff_consumed;
 reg  [NUM_BUFFERS-1:0]         src3_buff_consumed;
-wire [2:0]                     buff_new_usage_count;
-wire [2:0] buff_usage_count [0:NUM_BUFFERS-1];
+wire [TGT_COUNT_SZ-1:0]        buff_new_usage_count;
+wire [TGT_COUNT_SZ-1:0] buff_usage_count [0:NUM_BUFFERS-1];
+wire                           buff_new_colour;
 reg  [NUM_BUFFERS-1:0]         mark_as_full;
 
 ////////////////////////////////////////////////////////////
@@ -96,27 +99,9 @@ reg  [NUM_BUFFERS-1:0]         mark_as_full;
 
 always @ (full_buff_id_i, mark_buff_as_full_i)
    begin
-      mark_as_full <= 'b0;
+      mark_as_full = 'b0;
       if (mark_buff_as_full_i)
-         case (full_buff_id_i)
-            4'b0000: mark_as_full[0]  <= 1'b1;
-            4'b0001: mark_as_full[1]  <= 1'b1;
-            4'b0010: mark_as_full[2]  <= 1'b1;
-            4'b0011: mark_as_full[3]  <= 1'b1;
-            4'b0100: mark_as_full[4]  <= 1'b1;
-            4'b0101: mark_as_full[5]  <= 1'b1;
-            4'b0110: mark_as_full[6]  <= 1'b1;
-            4'b0111: mark_as_full[7]  <= 1'b1;
-            4'b1000: mark_as_full[8]  <= 1'b1;
-            4'b1001: mark_as_full[9]  <= 1'b1;
-            4'b1010: mark_as_full[10] <= 1'b1;
-            4'b1011: mark_as_full[11] <= 1'b1;
-            4'b1100: mark_as_full[12] <= 1'b1;
-            4'b1101: mark_as_full[13] <= 1'b1;
-            4'b1110: mark_as_full[14] <= 1'b1;
-            4'b1111: mark_as_full[15] <= 1'b1;
-	    default: mark_as_full[0]  <= 1'b0;
-         endcase
+         mark_as_full[full_buff_id_i] = 1'b1;
    end
 
 ////////////////////////////////////////////////////////////
@@ -140,36 +125,15 @@ always @ (tgt_buff_idx_i, start_new_task_i)
    begin
       buff_new_tgt = 'b0;
       if (start_new_task_i)
-         case (tgt_buff_idx_i)
-            4'b0000: buff_new_tgt[0]  = 1'b1;
-            4'b0001: buff_new_tgt[1]  = 1'b1;
-            4'b0010: buff_new_tgt[2]  = 1'b1;
-            4'b0011: buff_new_tgt[3]  = 1'b1;
-            4'b0100: buff_new_tgt[4]  = 1'b1;
-            4'b0101: buff_new_tgt[5]  = 1'b1;
-            4'b0110: buff_new_tgt[6]  = 1'b1;
-            4'b0111: buff_new_tgt[7]  = 1'b1;
-            4'b1000: buff_new_tgt[8]  = 1'b1;
-            4'b1001: buff_new_tgt[9]  = 1'b1;
-            4'b1010: buff_new_tgt[10] = 1'b1;
-            4'b1011: buff_new_tgt[11] = 1'b1;
-            4'b1100: buff_new_tgt[12] = 1'b1;
-            4'b1101: buff_new_tgt[13] = 1'b1;
-            4'b1110: buff_new_tgt[14] = 1'b1;
-            4'b1111: buff_new_tgt[15] = 1'b1;
-	    default: buff_new_tgt[0]  = 1'b0;
-         endcase
+         buff_new_tgt[tgt_buff_idx_i] = 1'b1;
    end
 
 // Convert binary ACC ID into one-hot encoding:
 always @ (tgt_acc_id_i, start_new_task_i)
    begin
-      new_task <= 'b0;
-      case (tgt_acc_id_i)
-         1'b0:    new_task[0] <= start_new_task_i;
-         1'b1:    new_task[1] <= start_new_task_i;
-	 default: new_task[0] <= 1'b0;
-      endcase 
+      new_task = 'b0;
+      if (start_new_task_i)
+         new_task[tgt_acc_id_i] = 1'b1;
    end
 
 ////////////////////////////////////////////////////////////
@@ -231,102 +195,30 @@ end
 // Target buffer is now full and can be consumed by other tasks:
 always @ (selected_tgt_buff, post_task_cleanup)
    begin
-      buff_now_full <= 'b0;
+      buff_now_full = 'b0;
       if (post_task_cleanup)
-         case (selected_tgt_buff)
-            4'b0000: buff_now_full[0]  <= 1'b1;
-            4'b0001: buff_now_full[1]  <= 1'b1;
-            4'b0010: buff_now_full[2]  <= 1'b1;
-            4'b0011: buff_now_full[3]  <= 1'b1;
-            4'b0100: buff_now_full[4]  <= 1'b1;
-            4'b0101: buff_now_full[5]  <= 1'b1;
-            4'b0110: buff_now_full[6]  <= 1'b1;
-            4'b0111: buff_now_full[7]  <= 1'b1;
-            4'b1000: buff_now_full[8]  <= 1'b1;
-            4'b1001: buff_now_full[9]  <= 1'b1;
-            4'b1010: buff_now_full[10] <= 1'b1;
-            4'b1011: buff_now_full[11] <= 1'b1;
-            4'b1100: buff_now_full[12] <= 1'b1;
-            4'b1101: buff_now_full[13] <= 1'b1;
-            4'b1110: buff_now_full[14] <= 1'b1;
-            4'b1111: buff_now_full[15] <= 1'b1;
-            default: buff_now_full[0]  <= 1'b0;
-         endcase
+         buff_now_full[selected_tgt_buff] = 1'b1;
    end
 
 always @ (selected_src1_buff, post_task_cleanup)
    begin
-      src1_buff_consumed <= 'b0;
+      src1_buff_consumed = 'b0;
       if (post_task_cleanup)
-         case (selected_src1_buff)
-            4'b0000: src1_buff_consumed[0]  <= 1'b1;
-            4'b0001: src1_buff_consumed[1]  <= 1'b1;
-            4'b0010: src1_buff_consumed[2]  <= 1'b1;
-            4'b0011: src1_buff_consumed[3]  <= 1'b1;
-            4'b0100: src1_buff_consumed[4]  <= 1'b1;
-            4'b0101: src1_buff_consumed[5]  <= 1'b1;
-            4'b0110: src1_buff_consumed[6]  <= 1'b1;
-            4'b0111: src1_buff_consumed[7]  <= 1'b1;
-            4'b1000: src1_buff_consumed[8]  <= 1'b1;
-            4'b1001: src1_buff_consumed[9]  <= 1'b1;
-            4'b1010: src1_buff_consumed[10] <= 1'b1;
-            4'b1011: src1_buff_consumed[11] <= 1'b1;
-            4'b1100: src1_buff_consumed[12] <= 1'b1;
-            4'b1101: src1_buff_consumed[13] <= 1'b1;
-            4'b1110: src1_buff_consumed[14] <= 1'b1;
-            4'b1111: src1_buff_consumed[15] <= 1'b1;
-            default: src1_buff_consumed[0]  <= 1'b0;
-         endcase
+         src1_buff_consumed[selected_src1_buff] = 1'b1;
    end
 
 always @ (selected_src2_buff, post_task_cleanup)
    begin
-      src2_buff_consumed <= 'b0;
+      src2_buff_consumed = 'b0;
       if (post_task_cleanup)
-         case (selected_src2_buff)
-            4'b0000: src2_buff_consumed[0]  <= 1'b1;
-            4'b0001: src2_buff_consumed[1]  <= 1'b1;
-            4'b0010: src2_buff_consumed[2]  <= 1'b1;
-            4'b0011: src2_buff_consumed[3]  <= 1'b1;
-            4'b0100: src2_buff_consumed[4]  <= 1'b1;
-            4'b0101: src2_buff_consumed[5]  <= 1'b1;
-            4'b0110: src2_buff_consumed[6]  <= 1'b1;
-            4'b0111: src2_buff_consumed[7]  <= 1'b1;
-            4'b1000: src2_buff_consumed[8]  <= 1'b1;
-            4'b1001: src2_buff_consumed[9]  <= 1'b1;
-            4'b1010: src2_buff_consumed[10] <= 1'b1;
-            4'b1011: src2_buff_consumed[11] <= 1'b1;
-            4'b1100: src2_buff_consumed[12] <= 1'b1;
-            4'b1101: src2_buff_consumed[13] <= 1'b1;
-            4'b1110: src2_buff_consumed[14] <= 1'b1;
-            4'b1111: src2_buff_consumed[15] <= 1'b1;
-            default: src2_buff_consumed[0]  <= 1'b0;
-         endcase
+         src2_buff_consumed[selected_src2_buff] = 1'b1;
    end
 
 always @ (selected_src3_buff, post_task_cleanup)
    begin
-      src3_buff_consumed <= 'b0;
+      src3_buff_consumed = 'b0;
       if (post_task_cleanup)
-         case (selected_src3_buff)
-            4'b0000: src3_buff_consumed[0]  <= 1'b1;
-            4'b0001: src3_buff_consumed[1]  <= 1'b1;
-            4'b0010: src3_buff_consumed[2]  <= 1'b1;
-            4'b0011: src3_buff_consumed[3]  <= 1'b1;
-            4'b0100: src3_buff_consumed[4]  <= 1'b1;
-            4'b0101: src3_buff_consumed[5]  <= 1'b1;
-            4'b0110: src3_buff_consumed[6]  <= 1'b1;
-            4'b0111: src3_buff_consumed[7]  <= 1'b1;
-            4'b1000: src3_buff_consumed[8]  <= 1'b1;
-            4'b1001: src3_buff_consumed[9]  <= 1'b1;
-            4'b1010: src3_buff_consumed[10] <= 1'b1;
-            4'b1011: src3_buff_consumed[11] <= 1'b1;
-            4'b1100: src3_buff_consumed[12] <= 1'b1;
-            4'b1101: src3_buff_consumed[13] <= 1'b1;
-            4'b1110: src3_buff_consumed[14] <= 1'b1;
-            4'b1111: src3_buff_consumed[15] <= 1'b1;
-            default: src3_buff_consumed[0]  <= 1'b0;
-         endcase
+         src3_buff_consumed[selected_src3_buff] = 1'b1;
    end
 
 assign buff_content_consumed = src1_buff_consumed
@@ -347,37 +239,26 @@ assign buff_content_consumed = src1_buff_consumed
 //    This will mark them as free if the usage counter reaches zero.
 //
 
-acc_hw_buffer_tracker hw0 
-   (clk,
-    reset,
-    new_task[0],
-    tgt_buff_idx_i,
-    src1_buff_idx_i,
-    src2_buff_idx_i,
-    src3_buff_idx_i,
-    selected_finisher[0],
-    acc_free[0],
-    tgt_buff_r[0],
-    src1_buff_r[0],
-    src2_buff_r[0],
-    src3_buff_r[0]
-   );
-
-acc_hw_buffer_tracker hw1 
-   (clk,
-    reset,
-    new_task[1],
-    tgt_buff_idx_i,
-    src1_buff_idx_i,
-    src2_buff_idx_i,
-    src3_buff_idx_i,
-    selected_finisher[1],
-    acc_free[1],
-    tgt_buff_r[1],
-    src1_buff_r[1],
-    src2_buff_r[1],
-    src3_buff_r[1]
-   );
+genvar ai;
+generate
+   for (ai = 0; ai < NUM_HW_ACCELERATORS; ai = ai + 1) begin : gen_acc
+      acc_hw_buffer_tracker #(.BUFF_INDX_SZ(BUFF_INDX_SZ)) hw_n (
+         .clk(clk),
+         .reset(reset),
+         .new_task_i(new_task[ai]),
+         .tgt_buff_i(tgt_buff_idx_i),
+         .src1_buff_i(src1_buff_idx_i),
+         .src2_buff_i(src2_buff_idx_i),
+         .src3_buff_i(src3_buff_idx_i),
+         .task_finished_i(selected_finisher[ai]),
+         .acc_free_o(acc_free[ai]),
+         .tgt_buff_o(tgt_buff_r[ai]),
+         .src1_buff_o(src1_buff_r[ai]),
+         .src2_buff_o(src2_buff_r[ai]),
+         .src3_buff_o(src3_buff_r[ai])
+      );
+   end
+endgenerate
 
 assign acc_available_o = acc_free;
 
@@ -388,262 +269,26 @@ assign acc_available_o = acc_free;
 assign buff_new_usage_count = tgt_usage_count_i;
 assign buff_new_colour      = tgt_colour_i;
 
-//assign 
-buffer_state_entry buffer0
-         (clk,
-          reset,
-	  mark_as_full[0],
-	  full_buff_usage_i,
-          buff_new_tgt[0],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[0],
-          buff_content_consumed[0],
-          buff_usage_count[0],
-          buffers_colour_o[0],
-          buffers_free_o[0],
-          buffers_full_o[0]
-         );
-
-buffer_state_entry buffer1
-         (clk,
-          reset,
-	  mark_as_full[1],
-	  full_buff_usage_i,
-          buff_new_tgt[1],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[1],
-          buff_content_consumed[1],
-          buff_usage_count[1],
-          buffers_colour_o[1],
-          buffers_free_o[1],
-          buffers_full_o[1]
-         );
-
-buffer_state_entry buffer2
-         (clk,
-          reset,
-	  mark_as_full[2],
-	  full_buff_usage_i,
-          buff_new_tgt[2],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[2],
-          buff_content_consumed[2],
-          buff_usage_count[2],
-          buffers_colour_o[2],
-          buffers_free_o[2],
-          buffers_full_o[2]
-         );
-
-buffer_state_entry buffer3
-         (clk,
-          reset,
-	  mark_as_full[3],
-	  full_buff_usage_i,
-          buff_new_tgt[3],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[3],
-          buff_content_consumed[3],
-          buff_usage_count[3],
-          buffers_colour_o[3],
-          buffers_free_o[3],
-          buffers_full_o[3]
-         );
-
-buffer_state_entry buffer4
-         (clk,
-          reset,
-	  mark_as_full[4],
-	  full_buff_usage_i,
-          buff_new_tgt[4],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[4],
-          buff_content_consumed[4],
-          buff_usage_count[4],
-          buffers_colour_o[4],
-          buffers_free_o[4],
-          buffers_full_o[4]
-         );
-
-buffer_state_entry buffer5
-         (clk,
-          reset,
-	  mark_as_full[5],
-	  full_buff_usage_i,
-          buff_new_tgt[5],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[5],
-          buff_content_consumed[5],
-          buff_usage_count[5],
-          buffers_colour_o[5],
-          buffers_free_o[5],
-          buffers_full_o[5]
-         );
-
-buffer_state_entry buffer6
-         (clk,
-          reset,
-	  mark_as_full[6],
-	  full_buff_usage_i,
-          buff_new_tgt[6],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[6],
-          buff_content_consumed[6],
-          buff_usage_count[6],
-          buffers_colour_o[6],
-          buffers_free_o[6],
-          buffers_full_o[6]
-         );
-
-buffer_state_entry buffer7
-         (clk,
-          reset,
-	  mark_as_full[7],
-	  full_buff_usage_i,
-          buff_new_tgt[7],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[7],
-          buff_content_consumed[7],
-          buff_usage_count[7],
-          buffers_colour_o[7],
-          buffers_free_o[7],
-          buffers_full_o[7]
-         );
-
-buffer_state_entry buffer8
-         (clk,
-          reset,
-	  mark_as_full[8],
-	  full_buff_usage_i,
-          buff_new_tgt[8],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[8],
-          buff_content_consumed[8],
-          buff_usage_count[8],
-          buffers_colour_o[8],
-          buffers_free_o[8],
-          buffers_full_o[8]
-         );
-
-buffer_state_entry buffer9
-         (clk,
-          reset,
-	  mark_as_full[9],
-	  full_buff_usage_i,
-          buff_new_tgt[9],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[9],
-          buff_content_consumed[9],
-          buff_usage_count[9],
-          buffers_colour_o[9],
-          buffers_free_o[9],
-          buffers_full_o[9]
-         );
-
-buffer_state_entry buffer10
-         (clk,
-          reset,
-	  mark_as_full[10],
-	  full_buff_usage_i,
-          buff_new_tgt[10],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[10],
-          buff_content_consumed[10],
-          buff_usage_count[10],
-          buffers_colour_o[10],
-          buffers_free_o[10],
-          buffers_full_o[10]
-         );
-
-buffer_state_entry buffer11
-         (clk,
-          reset,
-	  mark_as_full[11],
-	  full_buff_usage_i,
-          buff_new_tgt[11],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[11],
-          buff_content_consumed[11],
-          buff_usage_count[11],
-          buffers_colour_o[11],
-          buffers_free_o[11],
-          buffers_full_o[11]
-         );
-
-buffer_state_entry buffer12
-         (clk,
-          reset,
-	  mark_as_full[12],
-	  full_buff_usage_i,
-          buff_new_tgt[12],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[12],
-          buff_content_consumed[12],
-          buff_usage_count[12],
-          buffers_colour_o[12],
-          buffers_free_o[12],
-          buffers_full_o[12]
-         );
-
-buffer_state_entry buffer13
-         (clk,
-          reset,
-	  mark_as_full[13],
-	  full_buff_usage_i,
-          buff_new_tgt[13],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[13],
-          buff_content_consumed[13],
-          buff_usage_count[13],
-          buffers_colour_o[13],
-          buffers_free_o[13],
-          buffers_full_o[13]
-         );
-
-buffer_state_entry buffer14
-         (clk,
-          reset,
-	  mark_as_full[14],
-	  full_buff_usage_i,
-          buff_new_tgt[14],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[14],
-          buff_content_consumed[14],
-          buff_usage_count[14],
-          buffers_colour_o[14],
-          buffers_free_o[14],
-          buffers_full_o[14]
-         );
-
-buffer_state_entry buffer15
-         (clk,
-          reset,
-	  mark_as_full[15],
-	  full_buff_usage_i,
-          buff_new_tgt[15],
-          buff_new_usage_count,
-          buff_new_colour,
-          buff_now_full[15],
-          buff_content_consumed[15],
-          buff_usage_count[15],
-          buffers_colour_o[15],
-          buffers_free_o[15],
-          buffers_full_o[15]
-         );
+genvar bi;
+generate
+   for (bi = 0; bi < NUM_BUFFERS; bi = bi + 1) begin : gen_buf
+      buffer_state_entry #(.TGT_COUNT_SZ(TGT_COUNT_SZ)) buffer_n (
+         .clk(clk),
+         .reset(reset),
+         .mark_as_full_i(mark_as_full[bi]),
+         .mark_buff_usage_i(full_buff_usage_i),
+         .buff_new_tgt_i(buff_new_tgt[bi]),
+         .buff_new_usage_count_i(buff_new_usage_count),
+         .buff_new_colour_i(buff_new_colour),
+         .buff_now_full_i(buff_now_full[bi]),
+         .buff_content_consumed_i(buff_content_consumed[bi]),
+         .buff_usage_count_o(buff_usage_count[bi]),
+         .buff_colour_o(buffers_colour_o[bi]),
+         .buff_free_o(buffers_free_o[bi]),
+         .buff_full_o(buffers_full_o[bi])
+      );
+   end
+endgenerate
 
 ////////////////////////////////////////////////////////////
 // Per-buffer task result register file.

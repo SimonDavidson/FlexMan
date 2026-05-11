@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 // Scheduler testbench: 30-instruction program with ~24 TASK instructions.
 // Tests table-full stalls, source-buffer-not-ready stalls, and accelerator-busy
 // stalls across three rounds of computation reusing the same buffer pool.
@@ -10,7 +12,7 @@
 //   [24] JUMP → [27]          (skips two dead tasks at [25],[26])
 //   [27] STOP
 
-`include "constants.v"
+`include "../../shared/constants.v"
 
 `timescale 10ps/1ps
 

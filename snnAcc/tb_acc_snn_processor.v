@@ -1,36 +1,44 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 `timescale 1ns/1ps
 
-`include "constants.v"
+`include "../shared/constants.v"
 
 // ====================================================================
-//  tb_acc_snn_processor
+//  tb_acc_snn_processor  — automatic-check version
 //
-//  Testbench for the acc_snn_processor top-level module.
-//
-//  Memory models
+//  Configuration
 //  -------------
-//  One synchronous SRAM model (256 x data-width) is instantiated per
-//  memory interface.  All memories are pre-filled with random data at
-//  the start of the simulation.  Each model has 1-cycle read latency
-//  and no wait states (wait outputs are tied low).
+//  weight_mode    = full connectivity (2'b00)
+//  Input layer    : 2 neurons (in_x_len=2, in_y_len=1)
+//  Output layer   : 2 neurons (out_x_len=2, out_y_len=1, last_neuron_idx=1)
+//  Weights        : 8-bit value=10; weight_sram filled with 0x0A0A_0A0A
+//  Activations    : all spiking; act_sram filled with 0xFFFF_FFFF
+//  syn_curr_sz    : 5 (32-bit elements — one word per neuron)
+//  bias_curr_sz   : 3 (8-bit, matches BIAS_CURR_SLICE_BITS=8; also controls threshold cache)
+//  pot_sz         : 5 (32-bit elements)
+//  bin_point      : 0  (no right-shift of syn_curr)
+//  decay_mult     : 0x8000_0000 (0.5 in Q0.32)
 //
-//  Stimulus
-//  --------
-//  After reset, start_new_block_i is pulsed for exactly one clock
-//  cycle to initiate spike_processing.  neuron_processing is then
-//  triggered automatically when spike_processing completes.
-//  All other inputs are held at zero throughout.
+//  Expected spike_processing output (per output neuron):
+//    2 spiking inputs × weight 10 = syn_curr_sram[20/21] = 32'd20
 //
-//  Termination
-//  -----------
-//  The simulation ends after 1000 clock cycles or when $finish is
-//  called from the timeout block.
+//  Test 1 — no spike (threshold=50 > accumulated syn_curr=20)
+//    new_pot = 0 + 20 + 0 = 20 < 50  → no spike
+//    spike_sram[60]  = 0x00000000
+//    syn_curr_sram[20/21] = 32'd10   (20 × 0.5, decayed)
+//    pot_sram[50/51]      = 32'd10   (20 × 0.5, decayed)
+//
+//  Test 2 — spike (threshold=5 ≤ accumulated syn_curr=20, SRAMs reset)
+//    new_pot = 0 + 20 + 0 = 20 ≥ 5  → both neurons spike
+//    spike_sram[60]  = 0x00000003
+//    syn_curr_sram[20/21] = 32'd10   (20 × 0.5, decayed)
+//    pot_sram[50/51]      = 32'd0    (reset to zero on spike)
 // ====================================================================
 
-// CONFIG PARAMS START
+// CONFIG PARAMS START  (compile-time RTL parameters — keep identical to DUT)
 `define TGT_ACC_ID 'h0
 `define TGT_CONFIG_BASE_ADDR 32'hFFFFFFFF
-// For spike_processing:
 `define NUM_TIMESTEPS 32
 `define IN_DATA_SZ 32
 `define X_INPUT_SZ 5
@@ -58,19 +66,9 @@
 `define BIAS_CURR_DATA_IDX_SZ 5
 `define BIAS_CURR_SLICE_SZ 3
 `define BIAS_CURR_SLICE_BITS 8
-
-// For neuron_processing:
-`define SYN_CURR_IDX_SZ 10
-`define SYN_CURR_DATA_IDX_SZ 5
-`define SYN_CURR_SLICE_SZ 3
-`define SYN_CURR_SLICE_BITS 32
-`define BIAS_CURR_IDX_SZ 10
-`define BIAS_CURR_DATA_IDX_SZ 5
-`define BIAS_CURR_SLICE_SZ 3
-`define BIAS_CURR_SLICE_BITS 8
 `define POT_IDX_SZ 10
 `define POT_DATA_IDX_SZ 5
-`define POT_SLICE_SZ 3   
+`define POT_SLICE_SZ 3
 `define POT_SLICE_BITS 32
 `define SPIKE_IDX_SZ 10
 `define SPIKE_DATA_IDX_SZ 5
@@ -80,13 +78,8 @@
 
 module tb_acc_snn_processor;
 
-    // ----------------------------------------------------------------
-    // Parameters
-    // ----------------------------------------------------------------
-    localparam CLK_PERIOD = 10;          // 10 ns -> 100 MHz
-    localparam TIMEOUT_CYCLES = 1000;
-    localparam MEM_DEPTH  = 8192;
-    localparam MEM_ADDR_W = `ADDR_SIZE;
+    localparam CLK_PERIOD = 10;
+    localparam MEM_DEPTH  = 256;
 
     // ----------------------------------------------------------------
     // Clock & reset
@@ -98,27 +91,22 @@ module tb_acc_snn_processor;
     always #(CLK_PERIOD/2) clk = ~clk;
 
     // ----------------------------------------------------------------
-    // DUT input registers (all tied to 0 unless driven by stimulus)
+    // DUT inputs
     // ----------------------------------------------------------------
+    reg                      sys_req_i   = 1'b0;
+    reg             [31:0]   sys_addr_i  = 32'b0;
+    reg             [31:0]   sys_data_i  = 32'b0;
 
-    // AXI config
-    reg                    sys_req_i   = 1'b0;
-    reg             [31:0] sys_addr_i  = 32'b0;
-    reg             [31:0] sys_data_i  = 32'b0;
-
-    // Scheduler
     reg                      start_new_block_i = 1'b0;
     reg   [`TGT_ACC_SZ-1:0]  target_acc_i      = {`TGT_ACC_SZ{1'b0}};
     reg [`SCH_ENTRY_SZ-1:0]  buffer_info_i     = {`SCH_ENTRY_SZ{1'b0}};
 
-    // Buffer addresses – spike_processing
     reg [`PIN_BITS-1:0] sp_src1_buff_addr_i  = {`PIN_BITS{1'b0}};
     reg [`PIN_BITS-1:0] sp_src2_buff_addr_i  = {`PIN_BITS{1'b0}};
     reg [`PIN_BITS-1:0] sp_src3_buff_addr_i  = {`PIN_BITS{1'b0}};
     reg [`PIN_BITS-1:0] sp_tgt_buff_addr_i   = {`PIN_BITS{1'b0}};
     reg [`PIN_BITS-1:0] sp_weight_row_len_i  = {`PIN_BITS{1'b0}};
 
-    // Buffer addresses – neuron_processing
     reg [`PIN_BITS-1:0] np_src1_buff_addr_i  = {`PIN_BITS{1'b0}};
     reg [`PIN_BITS-1:0] np_src2_buff_addr_i  = {`PIN_BITS{1'b0}};
     reg [`PIN_BITS-1:0] np_src3_buff_addr_i  = {`PIN_BITS{1'b0}};
@@ -126,42 +114,33 @@ module tb_acc_snn_processor;
     reg [`PIN_BITS-1:0] np_weight_row_len_i  = {`PIN_BITS{1'b0}};
 
     // ----------------------------------------------------------------
-    // DUT output wires
+    // DUT outputs
     // ----------------------------------------------------------------
     wire                    sys_ack_o;
-
     wire                    spike_proc_finished_o;
     wire                    acc_busy_o;
     wire                    acc_finished_o;
 
-    // Memory interface wires (DUT -> memory models)
     wire                    weight_mem_rd_o;
     wire [`ADDR_SIZE-1:0]   weight_mem_addr_o;
-
     wire                    act_mem_req_o;
     wire [`ADDR_SIZE-1:0]   act_mem_addr_o;
-
     wire                    syn_curr_mem_wr_o;
     wire                    syn_curr_mem_rd_o;
     wire [`ADDR_SIZE-1:0]   syn_curr_mem_addr_o;
     wire  [`POT_BITS-1:0]   syn_curr_mem_data_o;
-
     wire                    bias_curr_mem_rd_o;
     wire [`ADDR_SIZE-1:0]   bias_curr_mem_addr_o;
-
     wire                    thresh_mem_rd_o;
     wire [`ADDR_SIZE-1:0]   thresh_mem_addr_o;
-
     wire                    pot_mem_wr_o;
     wire                    pot_mem_rd_o;
     wire [`ADDR_SIZE-1:0]   pot_mem_addr_o;
     wire  [`POT_BITS-1:0]   pot_mem_data_o;
-
     wire                    spike_mem_wr_o;
     wire [`ADDR_SIZE-1:0]   spike_mem_addr_o;
     wire  [`ACT_BITS-1:0]   spike_mem_data_o;
 
-    // Memory interface wires (memory models -> DUT)
     wire  [`WTD_BITS-1:0]   weight_mem_data_i;
     wire  [`ACT_BITS-1:0]   act_mem_data_i;
     wire  [`POT_BITS-1:0]   syn_curr_mem_data_i;
@@ -169,7 +148,6 @@ module tb_acc_snn_processor;
     wire  [`WTD_BITS-1:0]   thresh_mem_data_i;
     wire  [`POT_BITS-1:0]   pot_mem_data_i;
 
-    // All wait signals tied low (no wait states)
     wire weight_mem_wait_i    = 1'b0;
     wire act_mem_wait_i       = 1'b0;
     wire syn_curr_mem_wait_i  = 1'b0;
@@ -179,7 +157,7 @@ module tb_acc_snn_processor;
     wire spike_mem_wait_i     = 1'b0;
 
     // ----------------------------------------------------------------
-    // DUT instantiation
+    // DUT instantiation  (IDENTICAL port map to existing testbench)
     // ----------------------------------------------------------------
     acc_snn_processor # (
     .TGT_ACC_ID(`TGT_ACC_ID),
@@ -191,18 +169,18 @@ module tb_acc_snn_processor;
     .SP_Y_OUTPUT_SZ(`Y_OUTPUT_SZ),
     .SP_X_KERNEL_SZ(`X_KERNEL_SZ),
     .SP_Y_KERNEL_SZ(`Y_KERNEL_SZ),
-    .SP_X_KERNEL_OFF_SZ(`X_STEP_SZ), //??
-    .SP_Y_KERNEL_OFF_SZ(`Y_STEP_SZ), //??
+    .SP_X_KERNEL_OFF_SZ(`X_STEP_SZ),
+    .SP_Y_KERNEL_OFF_SZ(`Y_STEP_SZ),
     .SP_X_STEP_SZ(`X_STEP_SZ),
     .SP_Y_STEP_SZ(`Y_STEP_SZ),
     .SP_ELEMS_PER_ROW(`ELEMS_PER_ROW),
     .SP_ROWS_PER_NEURON(`ROWS_PER_NEURON),
-    .SP_TIMESTEP_SZ(10), // ??
-    .SP_IN_DATA_BITS(32), // ??
+    .SP_TIMESTEP_SZ(10),
+    .SP_IN_DATA_BITS(32),
     .SP_ELEM_SZ(`ELEM_SZ),
     .SP_ACT_SLICE_SZ(`ACT_SLICE_SZ),
     .SP_ACT_DATA_IDX_SZ(`ACT_DATA_IDX_SZ),
-    .SP_WEIGHT_ENTRY_BITS(8), // ??
+    .SP_WEIGHT_ENTRY_BITS(8),
     .SP_WEIGHT_IDX_SZ(`WEIGHT_IDX_SZ),
     .SP_WEIGHT_SLICE_SZ(`WEIGHT_SLICE_SZ),
     .SP_WEIGHT_DATA_IDX_SZ(`WEIGHT_DATA_IDX_SZ),
@@ -213,11 +191,11 @@ module tb_acc_snn_processor;
     .SP_BIAS_CURR_IDX_SZ(`BIAS_CURR_IDX_SZ),
     .SP_BIAS_CURR_DATA_IDX_SZ(`BIAS_CURR_DATA_IDX_SZ),
     .SP_BIAS_CURR_SLICE_SZ(`BIAS_CURR_SLICE_SZ),
-
+    .SP_BIAS_CURR_SLICE_BITS(`BIAS_CURR_SLICE_BITS),
     .NP_NUM_TIMESTEPS(`NUM_TIMESTEPS),
-    .NP_TIMESTEP_SZ(10), // ??
-    .NP_IN_DATA_BITS(32), // ??
-    .NP_NEURON_IDX_SZ(10),  // ??
+    .NP_TIMESTEP_SZ(10),
+    .NP_IN_DATA_BITS(32),
+    .NP_NEURON_IDX_SZ(10),
     .NP_SYN_CURR_IDX_SZ(`SYN_CURR_IDX_SZ),
     .NP_SYN_CURR_DATA_IDX_SZ(`SYN_CURR_DATA_IDX_SZ),
     .NP_SYN_CURR_SLICE_SZ(`SYN_CURR_SLICE_SZ),
@@ -305,110 +283,77 @@ module tb_acc_snn_processor;
     );
 
     // ----------------------------------------------------------------
-    // Synchronous SRAM model (1-cycle read latency, no wait states)
-    //
-    // Usage:
-    //   sram_model #(.DATA_W(W), .DEPTH(D)) u_name (
-    //       .clk(clk), .we(we), .re(re),
-    //       .addr(addr), .wdata(wdata), .rdata(rdata));
-    //
-    // On a read  (re=1): rdata is presented on the NEXT rising edge.
-    // On a write (we=1): wdata is written on the current rising edge.
+    // SRAM models  (synchronous, 1-cycle read latency)
     // ----------------------------------------------------------------
-    // Weight memory  (read-only from DUT, `WTD_BITS wide)
     sram_model #(.DATA_W(`WTD_BITS), .DEPTH(MEM_DEPTH)) u_weight_mem (
-        .clk   (clk),
-        .we    (1'b0),
-        .re    (weight_mem_rd_o),
-        .addr  (weight_mem_addr_o[7:0]),
-        .wdata ({`WTD_BITS{1'b0}}),
-        .rdata (weight_mem_data_i)
-    );
+        .clk(clk), .we(1'b0), .re(weight_mem_rd_o),
+        .addr(weight_mem_addr_o[7:0]), .wdata({`WTD_BITS{1'b0}}),
+        .rdata(weight_mem_data_i));
 
-    // Activation memory  (read-only from DUT, `ACT_BITS wide)
     sram_model #(.DATA_W(`ACT_BITS), .DEPTH(MEM_DEPTH)) u_act_mem (
-        .clk   (clk),
-        .we    (1'b0),
-        .re    (act_mem_req_o),
-        .addr  (act_mem_addr_o[7:0]),
-        .wdata ({`ACT_BITS{1'b0}}),
-        .rdata (act_mem_data_i)
-    );
+        .clk(clk), .we(1'b0), .re(act_mem_req_o),
+        .addr(act_mem_addr_o[7:0]), .wdata({`ACT_BITS{1'b0}}),
+        .rdata(act_mem_data_i));
 
-    // Synaptic current memory  (read/write, `POT_BITS wide)
     sram_model #(.DATA_W(`POT_BITS), .DEPTH(MEM_DEPTH)) u_syn_curr_mem (
-        .clk   (clk),
-        .we    (syn_curr_mem_wr_o),
-        .re    (syn_curr_mem_rd_o),
-        .addr  (syn_curr_mem_addr_o[7:0]),
-        .wdata (syn_curr_mem_data_o),
-        .rdata (syn_curr_mem_data_i)
-    );
+        .clk(clk), .we(syn_curr_mem_wr_o), .re(syn_curr_mem_rd_o),
+        .addr(syn_curr_mem_addr_o[7:0]), .wdata(syn_curr_mem_data_o),
+        .rdata(syn_curr_mem_data_i));
 
-    // Bias current memory  (read-only, `WTD_BITS wide)
     sram_model #(.DATA_W(`WTD_BITS), .DEPTH(MEM_DEPTH)) u_bias_curr_mem (
-        .clk   (clk),
-        .we    (1'b0),
-        .re    (bias_curr_mem_rd_o),
-        .addr  (bias_curr_mem_addr_o[7:0]),
-        .wdata ({`WTD_BITS{1'b0}}),
-        .rdata (bias_curr_mem_data_i)
-    );
+        .clk(clk), .we(1'b0), .re(bias_curr_mem_rd_o),
+        .addr(bias_curr_mem_addr_o[7:0]), .wdata({`WTD_BITS{1'b0}}),
+        .rdata(bias_curr_mem_data_i));
 
-    // Threshold memory  (read-only, `WTD_BITS wide)
     sram_model #(.DATA_W(`WTD_BITS), .DEPTH(MEM_DEPTH)) u_thresh_mem (
-        .clk   (clk),
-        .we    (1'b0),
-        .re    (thresh_mem_rd_o),
-        .addr  (thresh_mem_addr_o[7:0]),
-        .wdata ({`WTD_BITS{1'b0}}),
-        .rdata (thresh_mem_data_i)
-    );
+        .clk(clk), .we(1'b0), .re(thresh_mem_rd_o),
+        .addr(thresh_mem_addr_o[7:0]), .wdata({`WTD_BITS{1'b0}}),
+        .rdata(thresh_mem_data_i));
 
-    // Potential memory  (read/write, `POT_BITS wide)
     sram_model #(.DATA_W(`POT_BITS), .DEPTH(MEM_DEPTH)) u_pot_mem (
-        .clk   (clk),
-        .we    (pot_mem_wr_o),
-        .re    (pot_mem_rd_o),
-        .addr  (pot_mem_addr_o[7:0]),
-        .wdata (pot_mem_data_o),
-        .rdata (pot_mem_data_i)
-    );
+        .clk(clk), .we(pot_mem_wr_o), .re(pot_mem_rd_o),
+        .addr(pot_mem_addr_o[7:0]), .wdata(pot_mem_data_o),
+        .rdata(pot_mem_data_i));
 
-    // Output spike memory  (write-only from DUT; rdata unused)
-    // Declared as read/write so the model is reusable; re is tied low.
-    wire [`ACT_BITS-1:0] spike_mem_rdata_unused;
+    wire [`ACT_BITS-1:0] spike_rdata_nc;
     sram_model #(.DATA_W(`ACT_BITS), .DEPTH(MEM_DEPTH)) u_spike_mem (
-        .clk   (clk),
-        .we    (spike_mem_wr_o),
-        .re    (1'b0),
-        .addr  (spike_mem_addr_o[7:0]),
-        .wdata (spike_mem_data_o),
-        .rdata (spike_mem_rdata_unused)
-    );
+        .clk(clk), .we(spike_mem_wr_o), .re(1'b0),
+        .addr(spike_mem_addr_o[7:0]), .wdata(spike_mem_data_o),
+        .rdata(spike_rdata_nc));
 
     // ----------------------------------------------------------------
-    // Cycle counter & timeout
+    // SRAM initialisation  (#1 ensures this runs after model resets)
+    //
+    // Memory layout (all bases fit in 8-bit addr, no truncation issues):
+    //   act_base    =  0   act_sram[0]     = 0xFFFF_FFFF (all spiking)
+    //   weight_base = 10   weight_sram[*]  = 0x0A0A_0A0A (8-bit weight=10)
+    //   syn_curr    = 20   zero initially; SP accumulates here
+    //   bias_base   = 30   all zero
+    //   thresh_base = 40   set per test
+    //   pot_base    = 50   zero initially
+    //   spike_base  = 60   written by NP packer
     // ----------------------------------------------------------------
-    integer cycle_count;
-
-    initial cycle_count = 0;
-
-    always @(posedge clk) begin
-        cycle_count <= cycle_count + 1;
-        if (cycle_count >= TIMEOUT_CYCLES) begin
-            $display("[TB] TIMEOUT: %0d cycles elapsed. Ending simulation.", TIMEOUT_CYCLES);
-            $finish;
+    integer i_init;
+    initial begin
+        #1;
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_act_mem.mem[i_init]      = 32'hFFFF_FFFF;
+            u_weight_mem.mem[i_init]   = 32'h0A0A_0A0A;
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_bias_curr_mem.mem[i_init]= 32'd0;
+            u_thresh_mem.mem[i_init]   = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
         end
     end
 
     // ----------------------------------------------------------------
-    // Config-write task
-    //
-    // Drives one write transaction on the AXI config bus.
-    // sys_ack_o is combinational so no explicit wait is needed;
-    // we deassert sys_req_i one negedge after asserting it.
+    // Helpers
     // ----------------------------------------------------------------
+    integer errors;
+    integer timeout;
+
+    // Write one config register via AXI bus; check ACK fires.
     task cfg_write;
         input [31:0] addr;
         input [31:0] data;
@@ -417,134 +362,204 @@ module tb_acc_snn_processor;
             sys_req_i  = 1'b1;
             sys_addr_i = addr;
             sys_data_i = data;
+            #1;
+            if (!sys_ack_o) begin
+                $display("FAIL cfg_write: no ACK for addr=0x%08h", addr);
+                errors = errors + 1;
+            end
             @(negedge clk);
-            sys_req_i  = 1'b0;
+            sys_req_i = 1'b0;
+        end
+    endtask
+
+    task check_eq;
+        input [31:0] got;
+        input [31:0] exp;
+        input [255:0] label;
+        begin
+            if (got !== exp) begin
+                $display("FAIL %s: got 0x%08h  exp 0x%08h", label, got, exp);
+                errors = errors + 1;
+            end else begin
+                $display("  OK  %s = 0x%08h", label, got);
+            end
+        end
+    endtask
+
+    // Wait for spike_proc_finished_o then acc_finished_o, with independent
+    // 500-cycle timeouts each.  Returns 0 if both fired, 1 if either timed out.
+    task wait_pipeline;
+        output reg timed_out;
+        begin
+            timed_out = 0;
+
+            // --- wait for spike_processing done ---
+            timeout = 500;
+            @(posedge clk);
+            while (!spike_proc_finished_o && timeout > 0) begin
+                timeout = timeout - 1;
+                @(posedge clk);
+            end
+            #1;
+            if (timeout == 0) begin
+                $display("FAIL: spike_proc_finished_o timeout");
+                errors   = errors + 1;
+                timed_out = 1;
+            end else
+                $display("  spike_proc_finished after %0d cycles", 500 - timeout);
+
+            // --- wait for neuron_processing done ---
+            timeout = 500;
+            @(posedge clk);
+            while (!acc_finished_o && timeout > 0) begin
+                timeout = timeout - 1;
+                @(posedge clk);
+            end
+            #1;
+            if (timeout == 0) begin
+                $display("FAIL: acc_finished_o timeout");
+                errors   = errors + 1;
+                timed_out = 1;
+            end else
+                $display("  acc_finished after %0d more cycles", 500 - timeout);
+
+            // acc_busy_o is driven by running_r; the NBA clearing it fires at
+            // the NEXT posedge after acc_finished_o.  Clock one more cycle.
+            @(posedge clk); #1;
+            if (acc_busy_o) begin
+                $display("FAIL: acc_busy_o still high after acc_finished");
+                errors = errors + 1;
+            end
         end
     endtask
 
     // ----------------------------------------------------------------
-    // Pre-load activation memory with all-spike pattern.
-    // Each input element is 1-bit (slice_sz=0), 32 elements per 32-bit word.
-    // 0xFFFFFFFF in every word = every input neuron fires every timestep.
-    // ----------------------------------------------------------------
-    integer i_init;
-    initial begin
-        #1;
-        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1)
-            u_act_mem.mem[i_init] = 32'hFFFFFFFF;
-    end
-
-    // ----------------------------------------------------------------
-    // Pre-load weight memory with sparse (idx, weight) tuples.
-    //
-    // weight_sz=8, index_sz=8, tuple_sz=16, 2 tuples per 32-bit word,
-    // sparse_count=2 tuples per input neuron, rows_per_neuron=1.
-    //
-    // Tuple layout (16-bit, left-justified): [15:8]=idx, [7:0]=weight.
-    // Slice index 0 reads lower 16 bits, slice index 1 reads upper 16 bits.
-    // For input N: tuple0 at [15:0] = (idx=N,        wgt=N+1)
-    //              tuple1 at [31:16]= (idx=(N+1)&15, wgt=N+2)
-    // Each output cell ends up with exactly 2 hits per timestep.
-    // ----------------------------------------------------------------
-    integer w_init;
-    initial begin
-        #1;
-        for (w_init = 0; w_init < MEM_DEPTH; w_init = w_init + 1)
-            u_weight_mem.mem[w_init] = 32'h0;
-        for (w_init = 0; w_init < 16; w_init = w_init + 1) begin
-            u_weight_mem.mem[w_init] =
-                  ((((w_init + 1) & 8'h0F) & 8'hFF) << 24)  // tuple1 idx
-                | (((w_init + 2) & 8'hFF)            << 16) // tuple1 wgt
-                | (( w_init      & 8'hFF)            <<  8) // tuple0 idx
-                | (((w_init + 1) & 8'hFF)            <<  0);// tuple0 wgt
-        end
-    end
-
-    // ----------------------------------------------------------------
     // Stimulus
     // ----------------------------------------------------------------
+    reg timed_out;
+
     initial begin
-        // Initialise reset
-        reset = 1'b1;
+        errors           = 0;
+        reset            = 1'b1;
+        sys_req_i        = 1'b0;
+        start_new_block_i= 1'b0;
+        target_acc_i     = {`TGT_ACC_SZ{1'b0}};
+        buffer_info_i    = {`SCH_ENTRY_SZ{1'b0}};
 
-        // Hold reset for 5 clock cycles
         repeat (5) @(posedge clk);
-        @(negedge clk);   // de-assert on falling edge to avoid setup issues
-        reset = 1'b0;
-
-        // Wait two cycles after reset before writing config registers
+        @(negedge clk); reset = 1'b0;
         repeat (2) @(posedge clk);
 
-        // ---- spike_processing config registers ----
-        // Address tag = TGT_CONFIG_BASE_ADDR[31:16] = 16'hFFFF
-        cfg_write(32'hFFFF_0000, 32'h0000_1000); // sp_act_base_addr_r
-        cfg_write(32'hFFFF_0004, 32'h0000_2000); // sp_weight_base_addr_r
-        cfg_write(32'hFFFF_0008, 32'h0000_1000); // syn_curr_base_addr_r (shared)
-        cfg_write(32'hFFFF_000C, 32'h0000_0003); // sp_weight_sz_r       = 3
-        cfg_write(32'hFFFF_0014, 32'h0000_000A); // sp_total_timesteps_r = 10
-        cfg_write(32'hFFFF_0044, 32'h0000_0004); // sp_in_x_len_r        = 4
-        cfg_write(32'hFFFF_0048, 32'h0000_0004); // sp_in_y_len_r        = 4
-        cfg_write(32'hFFFF_004C, 32'h0000_0004); // sp_out_x_len_r       = 4
-        cfg_write(32'hFFFF_0050, 32'h0000_0004); // sp_out_y_len_r       = 4
-        cfg_write(32'hFFFF_0054, 32'h0000_0002); // sp_weights_per_word_r = 2 (2 x 16-bit tuples per 32-bit word)
-        cfg_write(32'hFFFF_0058, 32'h0000_0001); // sp_rows_per_neuron_r = 1 (one packed word per input)
-        cfg_write(32'hFFFF_005C, 32'h0000_000A); // sp_weight_idx_sz_r   = 10
+        // ============================================================
+        // Write configuration registers
+        // ============================================================
+        // spike_processing
+        cfg_write(32'hFFFF_0000, 32'd0);    // act_base_addr      = 0
+        cfg_write(32'hFFFF_0004, 32'd10);   // weight_base_addr   = 10
+        cfg_write(32'hFFFF_0008, 32'd20);   // syn_curr_base_addr = 20
+        cfg_write(32'hFFFF_000C, 32'd3);    // weight_sz          = 3 (8-bit)
+        cfg_write(32'hFFFF_0014, 32'd1);    // total_timesteps    = 1
+        cfg_write(32'hFFFF_0040, 32'd0);    // bin_point_syn_curr = 0
+        cfg_write(32'hFFFF_0044, 32'd2);    // in_x_len           = 2
+        cfg_write(32'hFFFF_0048, 32'd1);    // in_y_len           = 1
+        cfg_write(32'hFFFF_004C, 32'd2);    // out_x_len          = 2
+        cfg_write(32'hFFFF_0050, 32'd1);    // out_y_len          = 1
+        cfg_write(32'hFFFF_0054, 32'd4);    // weights_per_word   = 4
+        cfg_write(32'hFFFF_0058, 32'd1);    // rows_per_neuron    = 1
+        cfg_write(32'hFFFF_005C, 32'd5);    // weight_idx_sz      = 5
+        cfg_write(32'hFFFF_0070, 32'd0);    // weight_mode        = 0 (full)
+        cfg_write(32'hFFFF_0074, 32'd1);    // x_kernel_len       = 1
+        cfg_write(32'hFFFF_0078, 32'd1);    // y_kernel_len       = 1
+        cfg_write(32'hFFFF_007C, 32'd1);    // x_kernel_step      = 1
+        cfg_write(32'hFFFF_0080, 32'd1);    // y_kernel_step      = 1
+        cfg_write(32'hFFFF_0084, 32'd0);    // x_kernel_offset    = 0
+        cfg_write(32'hFFFF_0088, 32'd0);    // y_kernel_offset    = 0
 
-        // ---- sparse mode config registers ----
-        cfg_write(32'hFFFF_0070, 32'h0000_0001); // sp_weight_mode_r     = 2'b01 (sparse)
-        cfg_write(32'hFFFF_008C, 32'h0000_0003); // sp_index_sz_r        = 3 (8-bit indices)
-        cfg_write(32'hFFFF_0090, 32'h0000_0004); // sp_tuple_sz_r        = 4 (16-bit tuples)
-        cfg_write(32'hFFFF_0094, 32'h0000_0002); // sp_sparse_count_r    = 2 (2 tuples per input)
+        // neuron_processing
+        cfg_write(32'hFFFF_0020, 32'd1);            // last_neuron_idx   = 1  (2 neurons)
+        cfg_write(32'hFFFF_0028, 32'd30);           // bias_base         = 30
+        cfg_write(32'hFFFF_002C, 32'd40);           // thresh_base       = 40
+        cfg_write(32'hFFFF_0030, 32'd50);           // pot_base          = 50
+        cfg_write(32'hFFFF_0064, 32'd60);           // spike_base        = 60
+        cfg_write(32'hFFFF_0034, 32'd5);            // syn_curr_sz       = 5 (32-bit)
+        cfg_write(32'hFFFF_0038, 32'd3);            // bias_curr_sz      = 3 (8-bit, matches BIAS_CURR_SLICE_BITS=8; also controls thresh cache)
+        cfg_write(32'hFFFF_003C, 32'd5);            // pot_sz            = 5 (32-bit)
+        cfg_write(32'hFFFF_0068, 32'h8000_0000);    // syn_curr_decay    = 0.5 (Q0.32)
+        cfg_write(32'hFFFF_006C, 32'h8000_0000);    // pot_decay         = 0.5 (Q0.32)
 
-        // ---- shared config registers ----
-        cfg_write(32'hFFFF_0040, 32'h0000_0008); // bin_point_syn_curr_r = 8
+        $display("=== tb_acc_snn_processor ===");
 
-        // ---- neuron_processing config registers ----
-        cfg_write(32'hFFFF_0020, 32'h0000_000F); // np_last_neuron_idx_r = 15 (16 outputs in 4x4 grid)
-        cfg_write(32'hFFFF_0028, 32'h0000_2000); // np_bias_curr_base_addr_r
-        cfg_write(32'hFFFF_002C, 32'h0000_1000); // np_thresh_base_addr_r
-        cfg_write(32'hFFFF_0030, 32'h0000_2000); // np_pot_base_addr_r
-        cfg_write(32'hFFFF_0064, 32'h0000_3000); // np_spike_base_addr_r
-        cfg_write(32'hFFFF_0034, 32'h0000_0003); // np_syn_curr_sz_r     = 3 (8-bit elements)
-        cfg_write(32'hFFFF_0038, 32'h0000_0003); // np_bias_curr_sz_r    = 3 (8-bit elements)
-        cfg_write(32'hFFFF_003C, 32'h0000_0003); // np_pot_sz_r          = 3 (8-bit elements)
-        cfg_write(32'hFFFF_0068, 32'hC000_0000); // np_syn_curr_decay_mult_r = 0.75 (Q0.32)
-        cfg_write(32'hFFFF_006C, 32'hE000_0000); // np_pot_decay_mult_r      = 0.875 (Q0.32)
+        // ============================================================
+        // Test 1: no spike  (threshold=50 > new_pot=20)
+        // Expected after full pipeline:
+        //   spike_sram[60]      = 0x00000000
+        //   syn_curr_sram[20/21] = 32'd10  (20 × 0.5 decayed)
+        //   pot_sram[50/51]      = 32'd10  (20 × 0.5 decayed)
+        // ============================================================
+        $display("Test 1: full pipeline, no spike (thresh=50 > syn_curr=20)");
+        // bias_curr_sz=3 → 8-bit elements, 4 per word.
+        // Neuron 0 at bits[7:0], neuron 1 at bits[15:8] of thresh_sram[40].
+        u_thresh_mem.mem[40] = 32'h0000_3232;   // thresh=0x32=50 for both
 
-        $display("[TB] Config registers written at cycle %0d", cycle_count);
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
 
-        // Pulse start_new_block_i for exactly one cycle to kick off spike_processing
-        @(negedge clk);
-        start_new_block_i = 1'b1;
-        @(negedge clk);
-        start_new_block_i = 1'b0;
-
-        $display("[TB] start_new_block_i pulsed at cycle %0d", cycle_count);
-    end
-
-    // ----------------------------------------------------------------
-    // Logging: print key status signals every cycle
-    // ----------------------------------------------------------------
-    always @(posedge clk) begin
-        if (!reset) begin
-            $display("[%4d ns | cyc %0d] busy=%b sp_finished=%b acc_finished=%b | syn_curr_rd=%b syn_curr_wr=%b syn_curr_addr=0x%h",
-                $time,
-                cycle_count,
-                acc_busy_o,
-                spike_proc_finished_o,
-                acc_finished_o,
-                syn_curr_mem_rd_o,
-                syn_curr_mem_wr_o,
-                syn_curr_mem_addr_o);
+        wait_pipeline(timed_out);
+        if (!timed_out) begin
+            check_eq(u_spike_mem.mem[60],    32'h0000_0000, "T1 spike_sram[60]");
+            check_eq(u_syn_curr_mem.mem[20], 32'd10,        "T1 syn_curr_sram[20]");
+            check_eq(u_syn_curr_mem.mem[21], 32'd10,        "T1 syn_curr_sram[21]");
+            check_eq(u_pot_mem.mem[50],      32'd10,        "T1 pot_sram[50]");
+            check_eq(u_pot_mem.mem[51],      32'd10,        "T1 pot_sram[51]");
         end
+
+        // ============================================================
+        // Test 2: spike  (threshold=5 ≤ new_pot=20, SRAMs reset)
+        // Both neurons spike; pot resets to 0, syn_curr decays to 10.
+        // Expected after full pipeline:
+        //   spike_sram[60]      = 0x00000003  (neuron 0 bit 0, neuron 1 bit 1)
+        //   syn_curr_sram[20/21] = 32'd10
+        //   pot_sram[50/51]      = 32'd0  (reset on spike)
+        // ============================================================
+        $display("Test 2: full pipeline, both neurons spike (thresh=5 < syn_curr=20)");
+
+        // Reset syn_curr, pot and spike memories so SP starts from zero
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
+        end
+        // The thresh cache is 1-entry and held the Test 1 word (thresh=50) from
+        // address 40.  Writing to SRAM[40] directly would not invalidate it.
+        // Point thresh_base at a fresh SRAM region (44) to force a cache miss
+        // and guarantee a real memory fetch with the new threshold value.
+        u_thresh_mem.mem[44] = 32'h0000_0505;   // thresh=0x05=5 for both neurons
+        cfg_write(32'hFFFF_002C, 32'd44);        // thresh_base = 44
+
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
+
+        wait_pipeline(timed_out);
+        if (!timed_out) begin
+            check_eq(u_spike_mem.mem[60],    32'h0000_0003, "T2 spike_sram[60]");
+            check_eq(u_syn_curr_mem.mem[20], 32'd10,        "T2 syn_curr_sram[20]");
+            check_eq(u_syn_curr_mem.mem[21], 32'd10,        "T2 syn_curr_sram[21]");
+            check_eq(u_pot_mem.mem[50],      32'd0,         "T2 pot_sram[50] (spike reset)");
+            check_eq(u_pot_mem.mem[51],      32'd0,         "T2 pot_sram[51] (spike reset)");
+        end
+
+        $display("=== tb_acc_snn_processor: %0d failure(s) ===", errors);
+        if (errors == 0) $display("PASS"); else $display("FAIL");
+        $finish;
     end
 
     // ----------------------------------------------------------------
-    // Optional: VCD waveform dump
+    // Safety watchdog
     // ----------------------------------------------------------------
     initial begin
-        $dumpfile("tb_acc_snn_processor.vcd");
-        $dumpvars(0, tb_acc_snn_processor);
+        #200000;
+        $display("FAIL: global simulation timeout");
+        $finish;
     end
 
 endmodule
@@ -553,39 +568,29 @@ endmodule
 // ====================================================================
 //  sram_model
 //
-//  Simple synchronous SRAM.
-//    - 1-cycle read latency: data appears on rdata one cycle after
-//      re is asserted.
-//    - Write is registered on the rising edge when we=1.
-//    - Initialised with random data in an initial block.
+//  Synchronous SRAM: 1-cycle read latency, registered write.
+//  All entries initialised to 0; testbench overwrites what it needs.
 // ====================================================================
 module sram_model #(
-    parameter DATA_W = 8,
+    parameter DATA_W = 32,
     parameter DEPTH  = 256
 )(
     input  wire              clk,
     input  wire              we,
     input  wire              re,
-    input  wire        [7:0] addr,   // log2(256) = 8 bits
+    input  wire        [7:0] addr,
     input  wire [DATA_W-1:0] wdata,
     output reg  [DATA_W-1:0] rdata
 );
     reg [DATA_W-1:0] mem [0:DEPTH-1];
-
     integer i;
     initial begin
-        // Fill with random data
         for (i = 0; i < DEPTH; i = i + 1)
-	    mem[i] = 'h01010101;
-            //mem[i] = $random;
+            mem[i] = {DATA_W{1'b0}};
         rdata = {DATA_W{1'b0}};
     end
-
     always @(posedge clk) begin
-        if (we)
-            mem[addr] <= wdata;
-        if (re)
-            rdata <= mem[addr];
+        if (we) mem[addr] <= wdata;
+        if (re) rdata     <= mem[addr];
     end
-
 endmodule

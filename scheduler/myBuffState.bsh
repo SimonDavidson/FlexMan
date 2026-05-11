@@ -1,4 +1,6 @@
 #! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
 
 sams_code="/home/davidsos/Sam_code"
 sam_matrix_mul="${sams_code}/convolve/rtl/matrix_mul/src"
@@ -8,5 +10,6 @@ act_cache="./act_cache"
 weight_gen="./weight_gen"
 pot_ss="./pot_subsystem"
 
-xrun -sv -gui -timescale 1ns/1ps -access wrc -input restore_buff.tcl -top top buffer_state_entry.v acc_hw_buffer_tracker.v sch_buffer_state.v tb_buffer_state.v
+xrun -sv -gui -timescale 1ns/1ps -access wrc -input restore_buff.tcl -top top \
+    buffer_state_entry.v acc_hw_buffer_tracker.v sch_buffer_state.v tb_sch_buffer_state.v
 

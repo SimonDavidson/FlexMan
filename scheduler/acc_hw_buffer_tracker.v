@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
 ////////////////////////////////////////////////////////////////////////
 //
 // acc_hw_buffer_tracker
@@ -9,34 +11,30 @@
 // State for one hardware compute unit, to track what buffers it is using
 //
 
-localparam BUFF_IDX_SZ = 4;
-
 module acc_hw_buffer_tracker
-//   #(parameter TGT_COUNT_SZ  = 3,
-//     parameter BUFF_INDX_SZ  = 5 
-//    )
-    (input wire                     clk,
-     input wire                     reset,
+    #(parameter BUFF_INDX_SZ = 4)
+    (input wire                      clk,
+     input wire                      reset,
 
-     input wire                    new_task_i,
-     input wire [BUFF_IDX_SZ-1:0]  tgt_buff_i,
-     input wire [BUFF_IDX_SZ-1:0]  src1_buff_i,
-     input wire [BUFF_IDX_SZ-1:0]  src2_buff_i,
-     input wire [BUFF_IDX_SZ-1:0]  src3_buff_i,
+     input wire                     new_task_i,
+     input wire [BUFF_INDX_SZ-1:0]  tgt_buff_i,
+     input wire [BUFF_INDX_SZ-1:0]  src1_buff_i,
+     input wire [BUFF_INDX_SZ-1:0]  src2_buff_i,
+     input wire [BUFF_INDX_SZ-1:0]  src3_buff_i,
 
-     input wire                    task_finished_i,
+     input wire                     task_finished_i,
 
-     output wire                   acc_free_o,
-     output wire [BUFF_IDX_SZ-1:0] tgt_buff_o,
-     output wire [BUFF_IDX_SZ-1:0] src1_buff_o,
-     output wire [BUFF_IDX_SZ-1:0] src2_buff_o,
-     output wire [BUFF_IDX_SZ-1:0] src3_buff_o
+     output wire                    acc_free_o,
+     output wire [BUFF_INDX_SZ-1:0] tgt_buff_o,
+     output wire [BUFF_INDX_SZ-1:0] src1_buff_o,
+     output wire [BUFF_INDX_SZ-1:0] src2_buff_o,
+     output wire [BUFF_INDX_SZ-1:0] src3_buff_o
     );
 
-reg [BUFF_IDX_SZ-1:0]  tgt_buff_r;
-reg [BUFF_IDX_SZ-1:0] src1_buff_r;
-reg [BUFF_IDX_SZ-1:0] src2_buff_r;
-reg [BUFF_IDX_SZ-1:0] src3_buff_r;
+reg [BUFF_INDX_SZ-1:0]  tgt_buff_r;
+reg [BUFF_INDX_SZ-1:0] src1_buff_r;
+reg [BUFF_INDX_SZ-1:0] src2_buff_r;
+reg [BUFF_INDX_SZ-1:0] src3_buff_r;
 reg                   acc_free_r;
 wire                  acc_free_nxt;
 
