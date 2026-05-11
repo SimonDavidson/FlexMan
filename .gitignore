@@ -1,20 +1,15 @@
-# Xcelium build artifacts
-xcelium.d/
-xrun.log
-xrun.history
-xrun.key
-xrun.key.*
+# Ignore everything by default
+*
 
-# Waveform files
-waves.shm/
-*.vcd
-*.shm
+# Always allow directory traversal
+!*/
 
-# Files explicitly excluded from git
-*.not_git
+# Hardware design files
+!*.v
+!*.bsh
 
-# SimVision GUI state
-.simvision/
-
-# Claude Code local settings
-**/.claude/settings.local.json
+# Documentation
+!*.md
+!README
+!LICENSE
+!LICENSE.*
