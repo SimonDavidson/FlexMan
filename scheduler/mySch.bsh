@@ -1,0 +1,12 @@
+#! /usr/bin/env bash
+
+sams_code="/home/davidsos/Sam_code"
+sam_matrix_mul="${sams_code}/convolve/rtl/matrix_mul/src"
+si_code="/home/davidsos/ann_pipeline"
+mult_ctrl="./mult_ctrl"
+act_cache="./act_cache"
+weight_gen="./weight_gen"
+pot_ss="./pot_subsystem"
+
+xrun -sv -gui -timescale 1ns/1ps -access wrc -input restore.tcl -top top sch_entry.v sch_table.v buffer_state_entry.v acc_hw_buffer_tracker.v sch_buffer_state.v prog_cache.v scheduler.v tb_scheduler.v
+

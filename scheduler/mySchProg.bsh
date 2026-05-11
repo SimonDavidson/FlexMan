@@ -1,0 +1,3 @@
+xrun -sv -gui -timescale 1ns/1ps -access wrc -input restore.tcl -top top \
+    sch_entry.v sch_table.v buffer_state_entry.v acc_hw_buffer_tracker.v \
+    sch_buffer_state.v prog_cache.v scheduler.v tb_scheduler_prog.v

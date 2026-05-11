@@ -1,0 +1,20 @@
+# Xcelium build artifacts
+xcelium.d/
+xrun.log
+xrun.history
+xrun.key
+xrun.key.*
+
+# Waveform files
+waves.shm/
+*.vcd
+*.shm
+
+# Files explicitly excluded from git
+*.not_git
+
+# SimVision GUI state
+.simvision/
+
+# Claude Code local settings
+**/.claude/settings.local.json

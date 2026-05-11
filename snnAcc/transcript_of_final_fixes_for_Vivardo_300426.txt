@@ -1,0 +1,1314 @@
+davidsos@lloigor:~/Desktop$ cd ../convolve
+davidsos@lloigor:~/convolve$ . ./bin/activate
+(convolve) davidsos@lloigor:~/convolve$ cd ..
+(convolve) davidsos@lloigor:~$ pwd
+/home/davidsos
+(convolve) davidsos@lloigor:~$ cd simulation/
+(convolve) davidsos@lloigor:~/simulation$ ls
+ 110425_to_synth               mem_if.v                     sd_slice_and_align.v
+ 3_config_if_added             memory_arbiter.v             shortStart.bsh
+ acc_single_ANN_layer.v        memory.v                     simon
+ acc_snn_layer                 mult_ctrl                    simvision183818.diag
+ accStart.bsh                  mySNN.bsh                    simvision25443.diag
+ act_cache                     myStart.bsh                  slice_and_align.v
+ activations.hex               myThr.bsh                   'snnAcc - 4 acr_sz removed'
+ allegro_bashrc                neuron_state_update         'snnAcc - 5 test write config registers before starting'
+ bkup_130426                   new_act_cache                snn_top.v
+ bkup_130426.tar               newjim_address_generator.v   snn_to_synth_311025.tar
+ buffer_addr.v                 no_syswait_read_cache.v      tbNP.bsh
+ clear_controller.v            options.txt                  tbSNN.bsh
+ clz.v                         orig_activations.hex         the_packer.tar
+ config_block.v                packer.v                     thresh_unit
+ constants.tar                 packer.v~                    to_dave_schedule_stuff.tar
+ constants.v                   pak_restore.tcl              top1.vcd
+ copilot_neuron_state_update   pakStart.bsh                 top_acc.v
+ early_exit_unit               pak_test.v                   top.v
+ ext                           pot_mem_test.v               top.vcd
+ fifo.v                        pot_subsystem                to_synth_31Oct25_acc_snn_layer
+ fsm_sd.tcl                    pot_test.v                   updated_snn
+ fsm_sd.tcl.svcf               read_cache.v                 verilog.dump
+ fsm.tcl                       restore_pak.tcl              waves.shm
+ fsm.tcl.svcf                  restore_pak.tcl.svcf         weight_gen
+ helpOptions.txt               restore.tcl                  weights.hex
+ irun.history                  restore.tcl.svcf             xrun_bashrc
+ irun.key                      restore_unittest.tcl         xrun.history
+ irun.log                      restore_unittest.tcl.svcf    xrun.key
+ lmstat                        scheduler                    xrun.log
+ local_config.v                scheduler_transfer
+ matrix_mul.v                  schStart.bsh
+(convolve) davidsos@lloigor:~/simulation$ cd ../dev
+(convolve) davidsos@lloigor:~/dev$ ld
+ld: no input files
+(convolve) davidsos@lloigor:~/dev$ ls
+ 10_post_packer_instance_snnAcc                                   CLAUDE.md
+ 11_post_adding_packers_to_syn_curr_and_pot_4_flexible_op_sz     'convolve transfers'
+ 12_added_support_for_convolutional_290426_snnAcc                 copy_snnAcc
+ 5_test_write_config_regs_before_starting_snnAcc                  Hadamard
+ 6_about_to_add_xy_size_config_params_snnAcc                      resume_my_stuff.txt
+ 7_added_xy_size_config_params_snnAcc                             scheduler
+ 8_fixes_to_weight_pass_signals_plus_merge_scheduler_ifs_snnAcc   snnAcc
+ 9_pre_endpipe_mods_snnAcc                                        xrun_bashrc
+(convolve) davidsos@lloigor:~/dev$ cd snnAcc/
+(convolve) davidsos@lloigor:~/dev/snnAcc$ ld
+ld: no input files
+(convolve) davidsos@lloigor:~/dev/snnAcc$ ls
+acc_snn_processor.v            tb_acc_snn_processor.v
+act_index_generator.v          tb_acc_snn_processor.vcd
+CLAUDE.md                      transcript_280426.txt
+constants.v                    transcript_of_adding_convolution_connectivity_290426.txt
+dataline_cache_with_xy.v       transcript_of_adding_sparse_connectivity_290426.txt
+multiplier_usage_analysis.txt  update_state_for_neuron.v
+neuron_processing.v            waves.shm
+packer.v                       weight_generator.v
+slice_and_align.v              xcelium.d
+spike_processing.v             xrun.history
+syn_curr_update.v              xrun.key
+tbAccSNN.bsh                   xrun.log
+(convolve) davidsos@lloigor:~/dev/snnAcc$ diff dataline_cache_with_xy.v /home/davidsos/myConvolveGitArea/SNN_accelerator/dataline_cache_with_xy.v 
+20,21c20,21
+<     input wire                         clk,
+<     input wire                         reset,
+---
+>     input wire                          clk,
+>     input wire                          reset,
+24,26c24,26
+<     output wire                        colour_select_o,
+<     input  wire    [SLICE_SIZE_SZ-1:0] slice_sz_i,
+<     input  wire       [`ADDR_SIZE-1:0] base_addr_i, 
+---
+>     output wire                         colour_select_o,
+>     input  wire     [SLICE_SIZE_SZ-1:0] slice_sz_i,
+>     input  wire        [`ADDR_SIZE-1:0] base_addr_i, 
+29,36c29,36
+<     input wire     [IDX_ADDR_BITS-1:0] sys_addr_i,
+<     input wire                         sys_req_i,
+<     input wire        [X_INPUT_SZ-1:0] sys_index_x_i,
+<     input wire        [Y_INPUT_SZ-1:0] sys_index_y_i,
+< 
+<     input  wire                        sys_colour_i,
+<     output reg                         sys_wait_o,
+<     input  wire                        sys_last_i,
+---
+>     input wire      [IDX_ADDR_BITS-1:0] sys_addr_i,
+>     input wire                          sys_req_i,
+>     input wire         [X_INPUT_SZ-1:0] sys_index_x_i,
+>     input wire         [Y_INPUT_SZ-1:0] sys_index_y_i,
+> 
+>     input  wire                         sys_colour_i,
+>     output wire                         sys_wait_o,
+>     input  wire                         sys_last_i,
+39,45c39,45
+<     output reg                         slice_data_valid_o,
+<     output reg [SLICE_DATA_IDX_SZ-1:0] slice_data_idx_o,
+<     output wire       [X_INPUT_SZ-1:0] slice_data_index_x_o,
+<     output wire       [Y_INPUT_SZ-1:0] slice_data_index_y_o,
+<     output reg     [OUT_DATA_BITS-1:0] slice_data_o,
+<     output reg                         slice_data_last_o,
+<     input  reg                         slice_data_taken_i,
+---
+>     output wire                         slice_data_valid_o,
+>     output wire [SLICE_DATA_IDX_SZ-1:0] slice_data_idx_o,
+>     output wire        [X_INPUT_SZ-1:0] slice_data_index_x_o,
+>     output wire        [Y_INPUT_SZ-1:0] slice_data_index_y_o,
+>     output wire     [OUT_DATA_BITS-1:0] slice_data_o,
+>     output wire                         slice_data_last_o,
+>     input  wire                         slice_data_taken_i,
+48,51c48,51
+<     output reg      [`ADDR_SIZE-1:0]   mem_addr_o,
+<     input  wire     [IN_DATA_BITS-1:0] mem_data_i,
+<     output reg                         mem_req_o,
+<     input  wire                        mem_wait_i
+---
+>     output wire      [`ADDR_SIZE-1:0]   mem_addr_o,
+>     input  wire      [IN_DATA_BITS-1:0] mem_data_i,
+>     output wire                         mem_req_o,
+>     input  wire                         mem_wait_i
+70,73c70,75
+< reg [`COL_BITS-(LACTB-LACTW)-1:0] sys_addr;
+< reg [`COL_BITS-(LACTB-LACTW)-1:0] reg_addr;
+< reg                               cache_hit;
+< reg           [IDX_ADDR_BITS-1:0] shifted_index;
+---
+> //wire  [`COL_BITS-(LACTB-LACTW)-1:0] sys_addr;
+> //reg   [`COL_BITS-(LACTB-LACTW)-1:0] reg_addr;
+> //wire           [IDX_ADDR_BITS-1:0] sys_addr;
+> reg            [IDX_ADDR_BITS-1:0] reg_addr;
+> wire                               cache_hit;
+> reg            [IDX_ADDR_BITS-1:0] shifted_index;
+78c80
+< reg   [IN_DATA_BITS-1:0] slice_in;
+---
+> wire  [IN_DATA_BITS-1:0] slice_in;
+171,172c173,176
+<           shifted_index = {1'b0,    sys_addr_i[IDX_ADDR_BITS-1:5]};
+<           reg_addr      = {1'b0, cache_addr_r[IDX_ADDR_BITS-1:5]};
+---
+>           shifted_index[IDX_ADDR_BITS-1:IDX_ADDR_BITS-5] = 5'b0;
+>           shifted_index[IDX_ADDR_BITS-6:0] = sys_addr_i[IDX_ADDR_BITS-1:5];
+>           reg_addr[IDX_ADDR_BITS-1:IDX_ADDR_BITS-5] = 5'b0;
+>           reg_addr[IDX_ADDR_BITS-6:0] = cache_addr_r[IDX_ADDR_BITS-1:5];
+176,177c180,183
+<           shifted_index = {1'b0,    sys_addr_i[IDX_ADDR_BITS-1:4]};
+<           reg_addr      = {1'b0, cache_addr_r[IDX_ADDR_BITS-1:4]};
+---
+>           shifted_index[IDX_ADDR_BITS-1:IDX_ADDR_BITS-4] = 4'b0;
+>           shifted_index[IDX_ADDR_BITS-5:0] = sys_addr_i[IDX_ADDR_BITS-1:4];
+>           reg_addr[IDX_ADDR_BITS-1:IDX_ADDR_BITS-4] = 4'b0;
+>           reg_addr[IDX_ADDR_BITS-5:0] = cache_addr_r[IDX_ADDR_BITS-1:4];
+181,182c187,190
+<           shifted_index = {1'b0,    sys_addr_i[IDX_ADDR_BITS-1:3]};
+<           reg_addr      = {1'b0, cache_addr_r[IDX_ADDR_BITS-1:3]};
+---
+>           shifted_index[IDX_ADDR_BITS-1:IDX_ADDR_BITS-3] = 3'b0;
+>           shifted_index[IDX_ADDR_BITS-4:0] = sys_addr_i[IDX_ADDR_BITS-1:3];
+>           reg_addr[IDX_ADDR_BITS-1:IDX_ADDR_BITS-3] = 3'b0;
+>           reg_addr[IDX_ADDR_BITS-4:0] = cache_addr_r[IDX_ADDR_BITS-1:3];
+186,187c194,197
+<           shifted_index = {1'b0,    sys_addr_i[IDX_ADDR_BITS-1:2]};
+<           reg_addr      = {1'b0, cache_addr_r[IDX_ADDR_BITS-1:2]};
+---
+>           shifted_index[IDX_ADDR_BITS-1:IDX_ADDR_BITS-2] = 2'b0;
+>           shifted_index[IDX_ADDR_BITS-3:0] = sys_addr_i[IDX_ADDR_BITS-1:2];
+>           reg_addr[IDX_ADDR_BITS-1:IDX_ADDR_BITS-2] = 2'b0;
+>           reg_addr[IDX_ADDR_BITS-3:0] = cache_addr_r[IDX_ADDR_BITS-1:2];
+191,192c201,204
+<           shifted_index = {1'b0,    sys_addr_i[IDX_ADDR_BITS-1:1]};
+<           reg_addr      = {1'b0, cache_addr_r[IDX_ADDR_BITS-1:1]};
+---
+>           shifted_index[IDX_ADDR_BITS-1] = 1'b0;
+>           shifted_index[IDX_ADDR_BITS-2:0] = sys_addr_i[IDX_ADDR_BITS-1:1];
+>           reg_addr[IDX_ADDR_BITS-1] = 1'b0;
+>           reg_addr[IDX_ADDR_BITS-2:0] = cache_addr_r[IDX_ADDR_BITS-1:1];
+196,197c208,209
+<           shifted_index = {1'b0,    sys_addr_i[IDX_ADDR_BITS-1:0]};
+<           reg_addr      = {1'b0, cache_addr_r[IDX_ADDR_BITS-1:0]};
+---
+>           shifted_index = sys_addr_i[IDX_ADDR_BITS-1:0];
+>           reg_addr      = cache_addr_r[IDX_ADDR_BITS-1:0];
+209c221
+< assign sys_addr = sys_addr_i[IDX_ADDR_BITS-1:LACTB-LACTW];
+---
+> //assign sys_addr = sys_addr_i[IDX_ADDR_BITS-1:LACTB-LACTW];
+(convolve) davidsos@lloigor:~/dev/snnAcc$ . tb
+tbAccSNN.bsh              tb_acc_snn_processor.v    tb_acc_snn_processor.vcd  
+(convolve) davidsos@lloigor:~/dev/snnAcc$ . tbAccSNN.bsh 
+Command 'xrun' not found, did you mean:
+  command 'srun' from deb slurm-client (23.02.6-1ubuntu2)
+  command 'grun' from deb grun (0.9.3+git20200303-3)
+  command 'crun' from deb crun (1.12-1)
+  command 'zrun' from deb moreutils (0.67-1)
+Try: sudo apt install <deb name>
+(convolve) davidsos@lloigor:~/dev/snnAcc$ pushd ~/simulation/
+~/simulation ~/dev/snnAcc
+(convolve) davidsos@lloigor:~/simulation$ . xrun_bashrc 
+(convolve) davidsos@lloigor:~/simulation$ popd
+~/dev/snnAcc
+(convolve) davidsos@lloigor:~/dev/snnAcc$ . tbAccSNN.bsh 
+TOOL:	xrun(64)	21.03-s009: Started on Apr 30, 2026 at 13:18:32 BST
+xrun(64): 21.03-s009: (c) Copyright 1995-2021 Cadence Design Systems, Inc.
+xmsim: *W,DSEM2009: This SystemVerilog design is simulated as per IEEE 1800-2009 SystemVerilog simulation semantics. Use -disable_sem2009 option for turning off SV 2009 simulation semantics.
+
+-------------------------------------
+Relinquished control to SimVision...
+xcelium> 
+xcelium> source /cadtools5/cds_root/XCELIUM2103/tools/xcelium/files/xmsimrc
+xcelium> ...Regained control from SimVision
+-------------------------------------
+TOOL:	xrun(64)	21.03-s009: Exiting on Apr 30, 2026 at 13:21:12 BST  (total: 00:02:40)
+(convolve) davidsos@lloigor:~/dev/snnAcc$ ll dataline_cache_with_xy.v 
+-rw-r--r-- 1 davidsos 221530 8481 Apr 29 14:26 dataline_cache_with_xy.v
+(convolve) davidsos@lloigor:~/dev/snnAcc$ vi !$
+vi dataline_cache_with_xy.v
+(convolve) davidsos@lloigor:~/dev/snnAcc$ vi spike_processing.v 
+(convolve) davidsos@lloigor:~/dev/snnAcc$ vi dataline_cache_with_xy.v
+(convolve) davidsos@lloigor:~/dev/snnAcc$ ls -lat
+total 6008
+drwxr-xr-x  6 davidsos 221530    4096 Apr 30 13:22 .
+-rw-r--r--  1 davidsos 221530  117545 Apr 30 13:21 xrun.log
+-rw-r--r--  1 davidsos 221530    5897 Apr 30 13:21 xrun.key
+-rw-r--r--  1 davidsos 221530 5166625 Apr 30 13:20 tb_acc_snn_processor.vcd
+drwxr-xr-x  2 davidsos 221530    4096 Apr 30 13:19 waves.shm
+-rw-r--r--  1 davidsos 221530   12165 Apr 30 13:18 xrun.history
+drwxr-xr-x  4 davidsos 221530    4096 Apr 30 13:18 xcelium.d
+-rw-r--r--  1 davidsos 221530    4954 Apr 29 15:22 multiplier_usage_analysis.txt
+-rw-r--r--  1 davidsos 221530  276849 Apr 29 15:09 transcript_of_adding_sparse_connectivity_290426.txt
+-rw-r--r--  1 davidsos 221530    9189 Apr 29 15:00 CLAUDE.md
+-rw-r--r--  1 davidsos 221530    6381 Apr 29 14:59 syn_curr_update.v
+-rw-r--r--  1 davidsos 221530   22428 Apr 29 14:51 spike_processing.v
+-rw-r--r--  1 davidsos 221530    8481 Apr 29 14:26 dataline_cache_with_xy.v
+-rw-r--r--  1 davidsos 221530   22998 Apr 29 14:12 tb_acc_snn_processor.v
+-rw-r--r--  1 davidsos 221530   29607 Apr 29 13:53 acc_snn_processor.v
+-rw-r--r--  1 davidsos 221530   20094 Apr 29 13:51 weight_generator.v
+drwxr-xr-x 15 davidsos 221530    4096 Apr 29 13:08 ..
+drwxr-xr-x  2 davidsos 221530    4096 Apr 29 13:07 .simvision
+-rw-r--r--  1 davidsos 221530  129279 Apr 29 12:33 transcript_of_adding_convolution_connectivity_290426.txt
+drwxr-xr-x  2 davidsos 221530    4096 Apr 29 11:59 .claude
+-rw-r--r--  1 davidsos 221530  194387 Apr 28 16:38 transcript_280426.txt
+-rw-r--r--  1 davidsos 221530   20245 Apr 28 16:29 neuron_processing.v
+-rw-r--r--  1 davidsos 221530    5455 Apr 28 15:40 update_state_for_neuron.v
+-rw-r--r--  1 davidsos 221530    6477 Apr 28 10:58 packer.v
+-rwxr-xr-x  1 davidsos 221530     583 Apr 28 10:36 tbAccSNN.bsh
+-rw-r--r--  1 davidsos 221530     765 Apr 21 13:56 constants.v
+-rw-r--r--  1 davidsos 221530    5432 Apr 21 13:54 act_index_generator.v
+-rw-r--r--  1 davidsos 221530   16361 Apr 21 13:54 slice_and_align.v
+(convolve) davidsos@lloigor:~/dev/snnAcc$ ls -lt
+total 5992
+-rw-r--r-- 1 davidsos 221530    5432 Apr 30 13:47 act_index_generator.v
+-rw-r--r-- 1 davidsos 221530    9095 Apr 30 13:25 dataline_cache_with_xy.v
+-rw-r--r-- 1 davidsos 221530  117545 Apr 30 13:21 xrun.log
+-rw-r--r-- 1 davidsos 221530    5897 Apr 30 13:21 xrun.key
+-rw-r--r-- 1 davidsos 221530 5166625 Apr 30 13:20 tb_acc_snn_processor.vcd
+drwxr-xr-x 2 davidsos 221530    4096 Apr 30 13:19 waves.shm
+-rw-r--r-- 1 davidsos 221530   12165 Apr 30 13:18 xrun.history
+drwxr-xr-x 4 davidsos 221530    4096 Apr 30 13:18 xcelium.d
+-rw-r--r-- 1 davidsos 221530    4954 Apr 29 15:22 multiplier_usage_analysis.txt
+-rw-r--r-- 1 davidsos 221530  276849 Apr 29 15:09 transcript_of_adding_sparse_connectivity_290426.txt
+-rw-r--r-- 1 davidsos 221530    9189 Apr 29 15:00 CLAUDE.md
+-rw-r--r-- 1 davidsos 221530    6381 Apr 29 14:59 syn_curr_update.v
+-rw-r--r-- 1 davidsos 221530   22428 Apr 29 14:51 spike_processing.v
+-rw-r--r-- 1 davidsos 221530   22998 Apr 29 14:12 tb_acc_snn_processor.v
+-rw-r--r-- 1 davidsos 221530   29607 Apr 29 13:53 acc_snn_processor.v
+-rw-r--r-- 1 davidsos 221530   20094 Apr 29 13:51 weight_generator.v
+-rw-r--r-- 1 davidsos 221530  129279 Apr 29 12:33 transcript_of_adding_convolution_connectivity_290426.txt
+-rw-r--r-- 1 davidsos 221530  194387 Apr 28 16:38 transcript_280426.txt
+-rw-r--r-- 1 davidsos 221530   20245 Apr 28 16:29 neuron_processing.v
+-rw-r--r-- 1 davidsos 221530    5455 Apr 28 15:40 update_state_for_neuron.v
+-rw-r--r-- 1 davidsos 221530    6477 Apr 28 10:58 packer.v
+-rwxr-xr-x 1 davidsos 221530     583 Apr 28 10:36 tbAccSNN.bsh
+-rw-r--r-- 1 davidsos 221530     765 Apr 21 13:56 constants.v
+-rw-r--r-- 1 davidsos 221530   16361 Apr 21 13:54 slice_and_align.v
+(convolve) davidsos@lloigor:~/dev/snnAcc$ ls -lt
+total 5992
+-rw-r--r-- 1 davidsos 221530    5584 Apr 30 13:47 update_state_for_neuron.v
+-rw-r--r-- 1 davidsos 221530   20151 Apr 30 13:47 weight_generator.v
+-rw-r--r-- 1 davidsos 221530   22428 Apr 30 13:47 spike_processing.v
+-rw-r--r-- 1 davidsos 221530    5432 Apr 30 13:47 act_index_generator.v
+-rw-r--r-- 1 davidsos 221530    9095 Apr 30 13:25 dataline_cache_with_xy.v
+-rw-r--r-- 1 davidsos 221530  117545 Apr 30 13:21 xrun.log
+-rw-r--r-- 1 davidsos 221530    5897 Apr 30 13:21 xrun.key
+-rw-r--r-- 1 davidsos 221530 5166625 Apr 30 13:20 tb_acc_snn_processor.vcd
+drwxr-xr-x 2 davidsos 221530    4096 Apr 30 13:19 waves.shm
+-rw-r--r-- 1 davidsos 221530   12165 Apr 30 13:18 xrun.history
+drwxr-xr-x 4 davidsos 221530    4096 Apr 30 13:18 xcelium.d
+-rw-r--r-- 1 davidsos 221530    4954 Apr 29 15:22 multiplier_usage_analysis.txt
+-rw-r--r-- 1 davidsos 221530  276849 Apr 29 15:09 transcript_of_adding_sparse_connectivity_290426.txt
+-rw-r--r-- 1 davidsos 221530    9189 Apr 29 15:00 CLAUDE.md
+-rw-r--r-- 1 davidsos 221530    6381 Apr 29 14:59 syn_curr_update.v
+-rw-r--r-- 1 davidsos 221530   22998 Apr 29 14:12 tb_acc_snn_processor.v
+-rw-r--r-- 1 davidsos 221530   29607 Apr 29 13:53 acc_snn_processor.v
+-rw-r--r-- 1 davidsos 221530  129279 Apr 29 12:33 transcript_of_adding_convolution_connectivity_290426.txt
+-rw-r--r-- 1 davidsos 221530  194387 Apr 28 16:38 transcript_280426.txt
+-rw-r--r-- 1 davidsos 221530   20245 Apr 28 16:29 neuron_processing.v
+-rw-r--r-- 1 davidsos 221530    6477 Apr 28 10:58 packer.v
+-rwxr-xr-x 1 davidsos 221530     583 Apr 28 10:36 tbAccSNN.bsh
+-rw-r--r-- 1 davidsos 221530     765 Apr 21 13:56 constants.v
+-rw-r--r-- 1 davidsos 221530   16361 Apr 21 13:54 slice_and_align.v
+(convolve) davidsos@lloigor:~/dev/snnAcc$ claude
+ ▐▛███▜▌   Claude Code v2.1.123
+▝▜█████▛▘  Opus 4.7 · Claude Pro
+  ▘▘ ▝▝    ~/dev/snnAcc
+
+❯ I'm synthesising this module with Vivardo v2024.1 but I get an elaboration error in file dataline_cache_with_xy.v. It       
+  claims that at line 174, when assigning to shifted_index, I get an error "synth 8-523 part-select [4:5] does not match      
+  declaration". This makes no sense as all vectors are indexed with MSB before LSB. Could you suggest why this might be       
+  happening?                                                                                                                  
+                                                                                                                              
+  Searched for 2 patterns, read 2 files (ctrl+o to expand)                                                                    
+                             
+● The error is real and the indexing convention is fine — Vivado is right and Xcelium is being lenient. The issue is the      
+  part‑select on the right‑hand side, not the LHS.       
+                                                                                                                              
+● The error is real and the indexing convention is fine — Vivado is right and Xcelium is being lenient. The issue is the part‑select on
+  the right‑hand side, not the LHS.
+
+  What's happening
+
+  The weight_cache instance in weight_generator.v:386 passes IDX_ADDR_BITS = WEIGHT_IDX_SZ = 5. Substituting that into line 174:
+
+  reg_addr[IDX_ADDR_BITS-6:0] = cache_addr_r[IDX_ADDR_BITS-1:5];
+  //        └─ [-1:0]                          └─ [4:5]
+
+  cache_addr_r is declared [IDX_ADDR_BITS-1:0] = [4:0] — descending. The part‑select [4:5] is ascending, so its direction does not match
+  the declaration. That's exactly what synth 8-523 reports. The same problem exists on line 172 (shifted_index[-1:0]) and gets even worse
+   for the bias/pot caches that pass IDX_ADDR_BITS=2, where every sub‑6‑bit branch is ill‑formed.
+
+  Why Xcelium is silent
+
+  The branch in question is slice_sz_i == 3'b000 (1‑bit elements). For the weight cache slice_sz_i is 3'b011 (8‑bit), so that case arm is
+   dead code. Xcelium is happy to elaborate the unreachable case arm and only flags out‑of‑range part‑selects at run time. Vivado's
+  elaborator statically checks every part‑select bound regardless of reachability.
+
+  The bias/pot caches (IDX_ADDR_BITS=2) are even more broken — they only ever hit the 3'b011 arm but the elaborator still has to validate
+   the smaller arms.
+
+  Fixes (pick one)
+
+  1. Guard with generate — wrap each case arm in if (IDX_ADDR_BITS >= N) ... else ... so the small‑element arms only exist whenthe
+  address width can hold them.
+  2. Replace the case with a shift — semantically all six arms are addr >> (5 - slice_sz_i) (or similar). A barrel shifter has no
+  part‑select arithmetic and works for every IDX_ADDR_BITS.
+  3. Clamp the indices — e.g. cache_addr_r[IDX_ADDR_BITS-1 : (IDX_ADDR_BITS>5 ? 5 : IDX_ADDR_BITS-1)] and pad with zeros. Ugly but local.
+
+  Option 2 is the cleanest — it removes the entire repeated case structure on lines 166–210 (and 219–236) and leaves nothing for Vivado
+  to choke on.
+
+✻ Worked for 1m 15s
+
+❯ could you do a fix based on your option (2)?                                                                                           
+                                               
+  Read 1 file (ctrl+o to expand)                                                                                                         
+                                                                                                                                         
+● I'll replace both case statements with shift/mask expressions.                                                                         
+                                                              
+● Update(dataline_cache_with_xy.v)                                                                                                       
+                                                                                                                                         
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Edit file                                                                                                                               
+ dataline_cache_with_xy.v                                                                                                                
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ 163  // Generate address slices, for cache address and slice_and_align block                                                            
+ 164  //                                                                                                                                 
+ 165                                                       
+ 166 -always @ (slice_sz_i, sys_addr_i, cache_addr_r)                                                                                    
+ 167 -begin                                                                                                                              
+ 168 -    case(slice_sz_i)                                                                                                               
+ 169 -       3'b000: //  1-bit elements                                                                                                  
+ 170 -       begin                                                                                                                       
+ 171 -          shifted_index[IDX_ADDR_BITS-1:IDX_ADDR_BITS-5] = 5'b0;                                                                   
+ 172 -          shifted_index[IDX_ADDR_BITS-6:0] = sys_addr_i[IDX_ADDR_BITS-1:5];                                                        
+ 173 -          reg_addr[IDX_ADDR_BITS-1:IDX_ADDR_BITS-5] = 5'b0;                                                                        
+ 174 -          reg_addr[IDX_ADDR_BITS-6:0] = cache_addr_r[IDX_ADDR_BITS-1:5];                                                           
+ 175 -       end                                                                                                                         
+ 176 -       3'b001: //  2-bit elements                                                                                                  
+ 177 -       begin                                                                                                                       
+ 178 -          shifted_index[IDX_ADDR_BITS-1:IDX_ADDR_BITS-4] = 4'b0;                                                                   
+ 179 -          shifted_index[IDX_ADDR_BITS-5:0] = sys_addr_i[IDX_ADDR_BITS-1:4];                                                        
+ 180 -          reg_addr[IDX_ADDR_BITS-1:IDX_ADDR_BITS-4] = 4'b0;                                                                        
+ 181 -          reg_addr[IDX_ADDR_BITS-5:0] = cache_addr_r[IDX_ADDR_BITS-1:4];                                                           
+ 182 -       end                                                                                                                         
+ 183 -       3'b010: //  4-bit elements                                                                                                  
+ 184 -       begin                                                                                                                       
+ 185 -          shifted_index[IDX_ADDR_BITS-1:IDX_ADDR_BITS-3] = 3'b0;                                                                   
+ 186 -          shifted_index[IDX_ADDR_BITS-4:0] = sys_addr_i[IDX_ADDR_BITS-1:3];                                                        
+ 187 -          reg_addr[IDX_ADDR_BITS-1:IDX_ADDR_BITS-3] = 3'b0;                                                                        
+  cache_addr_r is declared [IDX_ADDR_BITS-1:0] = [4:0] — descending. The part‑select [4:5] is ascending, so its direction does not match
+  the declaration. That's exactly what synth 8-523 reports. The same problem exists on line 172 (shifted_index[-1:0]) and gets even worse
+   for the bias/pot caches that pass IDX_ADDR_BITS=2, where every sub‑6‑bit branch is ill‑formed.
+
+  Why Xcelium is silent
+
+  The branch in question is slice_sz_i == 3'b000 (1‑bit elements). For the weight cache slice_sz_i is 3'b011 (8‑bit), so that case arm is
+   dead code. Xcelium is happy to elaborate the unreachable case arm and only flags out‑of‑range part‑selects at run time. Vivado's
+  elaborator statically checks every part‑select bound regardless of reachability.
+
+  The bias/pot caches (IDX_ADDR_BITS=2) are even more broken — they only ever hit the 3'b011 arm but the elaborator still has to validate
+   the smaller arms.
+
+  Fixes (pick one)
+
+  1. Guard with generate — wrap each case arm in if (IDX_ADDR_BITS >= N) ... else ... so the small‑element arms only exist whenthe
+  address width can hold them.
+  2. Replace the case with a shift — semantically all six arms are addr >> (5 - slice_sz_i) (or similar). A barrel shifter has no
+  part‑select arithmetic and works for every IDX_ADDR_BITS.
+  3. Clamp the indices — e.g. cache_addr_r[IDX_ADDR_BITS-1 : (IDX_ADDR_BITS>5 ? 5 : IDX_ADDR_BITS-1)] and pad with zeros. Ugly but local.
+
+  Option 2 is the cleanest — it removes the entire repeated case structure on lines 166–210 (and 219–236) and leaves nothing for Vivado
+  to choke on.
+
+✻ Worked for 1m 15s
+
+❯ could you do a fix based on your option (2)?                                                                                           
+
+  Read 1 file (ctrl+o to expand)
+
+● I'll replace both case statements with shift/mask expressions.
+
+● Update(dataline_cache_with_xy.v)
+  ⎿  Added 8 lines, removed 44 lines
+      163  // Generate address slices, for cache address and slice_and_align block
+      164  //
+      165                                                                                                                                
+      166 -always @ (slice_sz_i, sys_addr_i, cache_addr_r)                                                                        
+      167 -begin                                                                                                                         
+      168 -    case(slice_sz_i)                                                                                                        
+      169 -       3'b000: //  1-bit elements                                                                                      
+      170 -       begin                                                                                                           
+      171 -          shifted_index[IDX_ADDR_BITS-1:IDX_ADDR_BITS-5] = 5'b0;                                                       
+      172 -          shifted_index[IDX_ADDR_BITS-6:0] = sys_addr_i[IDX_ADDR_BITS-1:5];                                            
+      173 -          reg_addr[IDX_ADDR_BITS-1:IDX_ADDR_BITS-5] = 5'b0;                                                            
+      174 -          reg_addr[IDX_ADDR_BITS-6:0] = cache_addr_r[IDX_ADDR_BITS-1:5];                                               
+      175 -       end                                                                                                             
+      176 -       3'b001: //  2-bit elements                                                                                      
+      177 -       begin                                                                                                           
+      178 -          shifted_index[IDX_ADDR_BITS-1:IDX_ADDR_BITS-4] = 4'b0;                                                       
+      179 -          shifted_index[IDX_ADDR_BITS-5:0] = sys_addr_i[IDX_ADDR_BITS-1:4];                                            
+      180 -          reg_addr[IDX_ADDR_BITS-1:IDX_ADDR_BITS-4] = 4'b0;                                                            
+      181 -          reg_addr[IDX_ADDR_BITS-5:0] = cache_addr_r[IDX_ADDR_BITS-1:4];                                               
+      182 -       end                                                                                                             
+      183 -       3'b010: //  4-bit elements                                                                                      
+      184 -       begin                                                                                                           
+      185 -          shifted_index[IDX_ADDR_BITS-1:IDX_ADDR_BITS-3] = 3'b0;                                                       
+      186 -          shifted_index[IDX_ADDR_BITS-4:0] = sys_addr_i[IDX_ADDR_BITS-1:3];                                            
+      187 -          reg_addr[IDX_ADDR_BITS-1:IDX_ADDR_BITS-3] = 3'b0;                                                            
+      188 -          reg_addr[IDX_ADDR_BITS-4:0] = cache_addr_r[IDX_ADDR_BITS-1:3];                                               
+      189 -       end                                                                                                             
+      190 -       3'b011: //  8-bit elements                                                                                      
+      191 -       begin                                                                                                           
+      192 -          shifted_index[IDX_ADDR_BITS-1:IDX_ADDR_BITS-2] = 2'b0;                                                       
+      193 -          shifted_index[IDX_ADDR_BITS-3:0] = sys_addr_i[IDX_ADDR_BITS-1:2];                                            
+      194 -          reg_addr[IDX_ADDR_BITS-1:IDX_ADDR_BITS-2] = 2'b0;                                                            
+      195 -          reg_addr[IDX_ADDR_BITS-3:0] = cache_addr_r[IDX_ADDR_BITS-1:2];                                               
+      196 -       end                                                                                                             
+      197 -       3'b100: // 16-bit elements                                                                                      
+      198 -       begin                                                                                                           
+      199 -          shifted_index[IDX_ADDR_BITS-1] = 1'b0;                                                                       
+      200 -          shifted_index[IDX_ADDR_BITS-2:0] = sys_addr_i[IDX_ADDR_BITS-1:1];                                            
+      201 -          reg_addr[IDX_ADDR_BITS-1] = 1'b0;                                                                            
+      202 -          reg_addr[IDX_ADDR_BITS-2:0] = cache_addr_r[IDX_ADDR_BITS-1:1];                                               
+      203 -       end                                                                                                             
+      204 -       3'b101: // 32-bit elements                                                                                      
+      205 -       begin                                                                                                           
+      206 -          shifted_index = sys_addr_i[IDX_ADDR_BITS-1:0];                                                               
+      207 -          reg_addr      = cache_addr_r[IDX_ADDR_BITS-1:0];                                                             
+      208 -       end                                                                                                             
+      209 -    endcase                                                                                                            
+      166 +// Drop the bottom (LACTB - slice_sz_i) bits — those are the in-word slice                                             
+      167 +// offset; what remains is the word-level memory index. Done as a barrel                                               
+      168 +// shift so the bounds stay legal for any IDX_ADDR_BITS (the per-arm                                                   
+      169 +// part-selects in the previous case statement went negative when                                                      
+      170 +// IDX_ADDR_BITS < 6, which Vivado rejects even on unreachable arms).                                                  
+      171 +always @* begin                                                                                                        
+      172 +    shifted_index = sys_addr_i  >> (LACTB - slice_sz_i);                                                               
+      173 +    reg_addr      = cache_addr_r >> (LACTB - slice_sz_i);                                                              
+      174  end
+      175  
+      176  // Cache hit - matching slice address, matching base address, and valid data.
+
+● Update(dataline_cache_with_xy.v)      
+      175  
+      176  // Cache hit - matching slice address, matching base address, and valid data.
+
+● Update(dataline_cache_with_xy.v)
+  ⎿  Added 5 lines, removed 17 lines
+      180                   && (base_addr_i  == cache_base_addr_r)
+      181                   && cache_valid_r;
+      182  
+      183 -always @ (sys_addr_i, slice_sz_i)                                                                                      
+      184 -begin                                                                                                                  
+      185 -   slice_idx = 'b0;                                                                                                    
+      186 -   case (slice_sz_i)                                                                                                   
+      187 -      'b000:                                                                                                           
+      188 -         slice_idx = sys_addr_i[4:0];                                                                                  
+      189 -      'b001:                                                                                                           
+      190 -         slice_idx = {1'b0, sys_addr_i[3:0]};                                                                          
+      191 -      'b010:                                                                                                           
+      192 -         slice_idx = {2'b0, sys_addr_i[2:0]};                                                                          
+      193 -      'b011:                                                                                                           
+      194 -         slice_idx = {3'b0, sys_addr_i[1:0]};                                                                          
+      195 -      'b100:                                                                                                           
+      196 -         slice_idx = {4'b0, sys_addr_i[0]};                                                                            
+      197 -      default:                                                                                                         
+      198 -         slice_idx = 'hx;                                                                                              
+      199 -   endcase                                                                                                             
+      183 +// In-word slice offset = the low (LACTB - slice_sz_i) bits of sys_addr_i.                                             
+      184 +// Mask form avoids fixed-width part-selects that would over-read sys_addr_i                                           
+      185 +// when IDX_ADDR_BITS < LACTB (e.g. the bias / pot caches with IDX_ADDR_BITS=2).                                       
+      186 +always @* begin                                                                                                        
+      187 +   slice_idx = sys_addr_i & ({LACTB{1'b1}} >> slice_sz_i);                                                             
+      188  end
+      189  
+      190  // Take the data dirctly from the memory bus if a request was accepted last
+
+● Now let me verify both edits and run a syntax check with iverilog.
+
+  Read 1 file (ctrl+o to expand)                                                                                                         
+                             
+● Bash(iverilog -g2012 -o /tmp/snnacc_check.vvp \                                                                                        
+        acc_snn_processor.v spike_processing.v act_index_generator.v \…)                                                               
+  ⎿  neuron_processing.v:475: error: Unknown module type: packer                                                                         
+     neuron_processing.v:497: error: Unknown module type: packer                                                                         
+     neuron_processing.v:519: error: Unknown module type: packer                                                                         
+     … +4 lines (ctrl+o to expand)                                                                                                       
+                                                                                                                                         
+● Bash(ls /home/davidsos/dev/snnAcc/packer.v 2>&1; iverilog -g2012 -o /tmp/dc_check.vvp -t null dataline_cache_with_xy.v
+      slice_and_align.v 2>&1)                                                                                                            
+  ⎿  /home/davidsos/dev/snnAcc/packer.v                                                                                                  
+                                                                                                                                         
+● Bash(iverilog -g2012 -o /tmp/snnacc_check.vvp \                                                                                        
+        acc_snn_processor.v spike_processing.v act_index_generator.v \…)                                                                 
+  ⎿  (No output)                                                                                                                         
+                                                                                                                                         
+● Clean elaboration. The changes:                                                                                                        
+                                                                                                                                         
+  - dataline_cache_with_xy.v:166–174 — replaced the 6‑arm case on slice_sz_i with shifted_index = sys_addr_i >> (LACTB - slice_sz_i) (and
+   likewise for reg_addr). No more part‑selects, so no width can go negative on small IDX_ADDR_BITS instances.                           
+  - dataline_cache_with_xy.v:183–188 — replaced the slice_idx case with a mask: slice_idx = sys_addr_i & ({LACTB{1'b1}} >> slice_sz_i).  
+  Bitwise AND auto‑extends the narrower operand, so it works for the bias/pot caches with IDX_ADDR_BITS = 2 < LACTB = 5 too.             
+                                                                                                                                         
+  The encoding maps cleanly: shift amount = LACTB - slice_sz_i (i.e. 5,4,3,2,1,0 for the six legal values), which is exactly what each   
+  old case arm was doing by hand. Sim semantics for legal slice_sz_i are unchanged.                                                      
+                                                                                                                                         
+  iverilog elaborates the full file list cleanly (the only complaint was an unrelated missing packer.v, which is in the directory but    
+  wasn't in the tbAccSNN.bsh invocation — separate issue, want me to add it?).                                                           
+                                                                                                                                         
+✻ Crunched for 2m 18s                                                                                                                    
+                                                                                                                                         
+※ recap: You're fixing a Vivado synth 8-523 elaboration error in dataline_cache_with_xy.v; I replaced both case statements with          
+  shift/mask expressions and iverilog elaborates cleanly. Next: re-run Vivado synthesis to confirm the error is gone. (disable recaps in 
+  /config)                                                                                                                               
+                                                                                                                                       
+❯ Thanks Claude.                                                                                                                         
+                 
+● You're welcome.                                                                                                                        
+                                                                                                                                         
+✻ Sautéed for 2s                                                                                                                         
+   
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ quit            
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+                                                                                                                                         
+Resume this session with:
+claude --resume cc1ad754-5cce-47b1-b118-fdeef8d2dfb4
+(convolve) davidsos@lloigor:~/dev/snnAcc$ vi spike_processing.v 
+(convolve) davidsos@lloigor:~/dev/snnAcc$ vi spike_processing.v 
+(convolve) davidsos@lloigor:~/dev/snnAcc$ claude
+ ▐▛███▜▌   Claude Code v2.1.123
+ ▐▛███▜▌   Claude Code v2.1.123
+▝▜█████▛▘  Opus 4.7 · Claude Pro
+  ▘▘ ▝▝    ~/dev/snnAcc
+
+❯ I have an issue with part select being out of range on lines 435-443 of spike_processing.v. Could you check and see why this might be  
+  happening?                                                                                                                             
+
+  Searched for 4 patterns, read 1 file (ctrl+o to expand)
+
+● I found it. Let me confirm by checking how weight_value is sized.
+
+ ▐▛███▜▌   Claude Code v2.1.123
+▝▜█████▛▘  Opus 4.7 · Claude Pro
+  ▘▘ ▝▝    ~/dev/snnAcc
+
+❯ I have an issue with part select being out of range on lines 435-443 of spike_processing.v. Could you check and see why this might be  
+  happening?                                                                                                                             
+
+  Searched for 4 patterns, read 1 file (ctrl+o to expand)
+
+● I found it. Let me confirm by checking how weight_value is sized.
+
+  Searched for 4 patterns, read 1 file, listed 1 directory (ctrl+o to expand)
+
+● Let me run iverilog with the default parameters to confirm the OOR triggers, and also try the testbench.
+
+● Bash(iverilog -g2012 -t null -o /tmp/sp_check.out spike_processing.v 2>&1 | head -40)
+  ⎿  spike_processing.v:247: error: Unknown module type: act_index_generator
+     spike_processing.v:290: error: Unknown module type: dataline_cache_with_xy
+     spike_processing.v:361: error: Unknown module type: weight_generator
+     … +8 lines (ctrl+o to expand)
+
+● Bash(iverilog -g2012 -t null -o /tmp/sp_check.out -s tb_acc_snn_processor acc_snn_processor.v spike_processing.v act_index_generator.v
+      weight_generator.v syn_curr_up…)
+  ⎿  neuron_processing.v:475: error: Unknown module type: packer
+     neuron_processing.v:497: error: Unknown module type: packer
+     neuron_processing.v:519: error: Unknown module type: packer
+     … +4 lines (ctrl+o to expand)
+
+  Listed 1 directory (ctrl+o to expand)
+
+● Bash(iverilog -g2012 -t null -o /tmp/sp_check.out -s tb_acc_snn_processor acc_snn_processor.v spike_processing.v act_index_generator.v
+      weight_generator.v syn_curr_up…)
+  ⎿  (No output)
+
+● I've found it. The issue is on lines 437-441: the bit indices into weight_value are hard-coded to 31, but weight_value is only that
+  wide when WEIGHT_SLICE_SZ == 5.
+                                                                                                                                         
+  Declaration chain:
+  - spike_processing.v:113: localparam WEIGHT_BITS = 2**WEIGHT_SLICE_SZ;                                                                 
+  - spike_processing.v:150: wire [WEIGHT_BITS-1:0] weight_value;                                                                         
+  - spike_processing.v:33: parameter default WEIGHT_SLICE_SZ = 3 → weight_value is [7:0]
+                                                                                                                                         
+  So with the default parameters, weight_value[31], [31:30], [31:28], [31:24], [31:16] are all out of range. The testbench happens to    
+  override WEIGHT_SLICE_SZ to 5 (tb_acc_snn_processor.v:47) which makes weight_value 32 bits wide, so under that elaboration path the    
+  part-selects are valid — but if you've changed any of:                                                                                 
+                                                                                                                                         
+  - the SP_WEIGHT_SLICE_SZ parameter on acc_snn_processor (default 3),                                                                   
+  - the  `WEIGHT_SLICE_SZ define in the testbench, or
+  - the WEIGHT_SLICE_SZ parameter on spike_processing directly,                                                                          
+                                                                                                                                         
+  to anything less than 5, the simulator will (correctly) flag an out-of-range part-select on those literal [31:N] slices.               
+  WEIGHT_SLICE_SZ=6 (64-bit) wouldn't error but would be functionally wrong since the MSB is no longer at bit 31.                        
+                                                                                                                                         
+  Suggested fix — parameterize the upper index by WEIGHT_BITS so the slice always anchors to the MSB:                                    
+   
+  3'b000: actual_index = {{(SPARSE_IDX_SZ-1){1'b0}}, weight_value[WEIGHT_BITS-1]};                                                       
+  3'b001: actual_index = {{(SPARSE_IDX_SZ-2){1'b0}}, weight_value[WEIGHT_BITS-1 -: 2]};                                                  
+  3'b010: actual_index = {{(SPARSE_IDX_SZ-4){1'b0}}, weight_value[WEIGHT_BITS-1 -: 4]};                                                  
+  3'b011: actual_index = {{(SPARSE_IDX_SZ-8){1'b0}}, weight_value[WEIGHT_BITS-1 -: 8]};                                                  
+  3'b100: actual_index = weight_value[WEIGHT_BITS-1 -: 16];                                                                              
+                                                                                                                                         
+  The same hard-coded 31/30/29/27/23/15 constants appear all the way through the actual_weight case (lines 454-end of that block), so    
+  they have the same latent issue and should get the same treatment. Want me to apply the fix across the whole unpacker?
+                                                                                                                                         
+✻ Crunched for 2m 45s               
+
+❯ Yes, please fix all of those.                                                                                                          
+                                 
+  Read 1 file (ctrl+o to expand)                                                                                                         
+                                                                                                                                         
+● Update(spike_processing.v)  
+  ⎿  Added 5 lines, removed 5 lines                                                                                                      
+      434  // Index always occupies the top index_sz bits of the 32-bit slice port                                                       
+      435  always @* begin                                                                                                               
+      436     case (index_sz_i)                                                                                                          
+      437 -      3'b000: actual_index = {{(SPARSE_IDX_SZ-1){1'b0}}, weight_value[31]};                                                   
+      438 -      3'b001: actual_index = {{(SPARSE_IDX_SZ-2){1'b0}}, weight_value[31:30]};                                                
+      439 -      3'b010: actual_index = {{(SPARSE_IDX_SZ-4){1'b0}}, weight_value[31:28]};                                                
+      440 -      3'b011: actual_index = {{(SPARSE_IDX_SZ-8){1'b0}}, weight_value[31:24]};                                                
+      441 -      3'b100: actual_index = weight_value[31:16];                                                                             
+      437 +      3'b000: actual_index = {{(SPARSE_IDX_SZ-1){1'b0}}, weight_value[WEIGHT_BITS-1]};                                        
+      438 +      3'b001: actual_index = {{(SPARSE_IDX_SZ-2){1'b0}}, weight_value[WEIGHT_BITS-1 -: 2]};                                   
+      439 +      3'b010: actual_index = {{(SPARSE_IDX_SZ-4){1'b0}}, weight_value[WEIGHT_BITS-1 -: 4]};                                   
+      440 +      3'b011: actual_index = {{(SPARSE_IDX_SZ-8){1'b0}}, weight_value[WEIGHT_BITS-1 -: 8]};                                   
+      441 +      3'b100: actual_index = weight_value[WEIGHT_BITS-1 -: 16];                                                               
+      442        default: actual_index = {SPARSE_IDX_SZ{1'b0}};                                                                          
+      443     endcase                                                                                                                    
+      444  end                                                                                                                           
+                                                                                                                                         
+● Update(spike_processing.v)                                                                                                             
+                                                                                                                                         
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Edit file                                                                                                                               
+ spike_processing.v                                                                                                                      
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ 455     actual_weight = {WEIGHT_BITS{1'b0}};                                                                                            
+ 456     case (tuple_sz_i)                                                                                                               
+ 457        3'b001: case (weight_sz_i)                                                                                                   
+ 458 -         3'b000: actual_weight = {{(WEIGHT_BITS-1){weight_value[30]}}, weight_value[30]};                                          
+ 458 +         3'b000: actual_weight = {{(WEIGHT_BITS-1){weight_value[WEIGHT_BITS-2]}}, weight_value[WEIGHT_BITS-2]};                    
+ 459           default: actual_weight = {WEIGHT_BITS{1'b0}};
+ 460        endcase
+ 461        3'b010: case (weight_sz_i)
+ 462 -         3'b000: actual_weight = {{(WEIGHT_BITS-1){weight_value[29]}}, weight_value[29]};                                          
+ 463 -         3'b001: actual_weight = {{(WEIGHT_BITS-2){weight_value[29]}}, weight_value[29:28]};                                       
+ 462 +         3'b000: actual_weight = {{(WEIGHT_BITS-1){weight_value[WEIGHT_BITS-3]}}, weight_value[WEIGHT_BITS-3]};                    
+ 463 +         3'b001: actual_weight = {{(WEIGHT_BITS-2){weight_value[WEIGHT_BITS-3]}}, weight_value[WEIGHT_BITS-3 -: 2]};               
+ 464           default: actual_weight = {WEIGHT_BITS{1'b0}};
+ 465        endcase
+ 466        3'b011: case (weight_sz_i)
+      469 -         3'b010: actual_weight = {{(WEIGHT_BITS-4){weight_value[27]}}, weight_value[27:24]};                           
+      467 +         3'b000: actual_weight = {{(WEIGHT_BITS-1){weight_value[WEIGHT_BITS-5]}}, weight_value[WEIGHT_BITS-5]};        
+      468 +         3'b001: actual_weight = {{(WEIGHT_BITS-2){weight_value[WEIGHT_BITS-5]}}, weight_value[WEIGHT_BITS-5 -: 2]};   
+      469 +         3'b010: actual_weight = {{(WEIGHT_BITS-4){weight_value[WEIGHT_BITS-5]}}, weight_value[WEIGHT_BITS-5 -: 4]};   
+      470           default: actual_weight = {WEIGHT_BITS{1'b0}};
+      471        endcase
+      472        3'b100: case (weight_sz_i)
+      473 -         3'b000: actual_weight = {{(WEIGHT_BITS-1){weight_value[23]}}, weight_value[23]};                              
+      474 -         3'b001: actual_weight = {{(WEIGHT_BITS-2){weight_value[23]}}, weight_value[23:22]};                           
+      475 -         3'b010: actual_weight = {{(WEIGHT_BITS-4){weight_value[23]}}, weight_value[23:20]};                           
+      476 -         3'b011: actual_weight = {{(WEIGHT_BITS-8){weight_value[23]}}, weight_value[23:16]};                           
+      473 +         3'b000: actual_weight = {{(WEIGHT_BITS-1){weight_value[WEIGHT_BITS-9]}}, weight_value[WEIGHT_BITS-9]};        
+      474 +         3'b001: actual_weight = {{(WEIGHT_BITS-2){weight_value[WEIGHT_BITS-9]}}, weight_value[WEIGHT_BITS-9 -: 2]};   
+      475 +         3'b010: actual_weight = {{(WEIGHT_BITS-4){weight_value[WEIGHT_BITS-9]}}, weight_value[WEIGHT_BITS-9 -: 4]};   
+      476 +         3'b011: actual_weight = {{(WEIGHT_BITS-8){weight_value[WEIGHT_BITS-9]}}, weight_value[WEIGHT_BITS-9 -: 8]};   
+      477           default: actual_weight = {WEIGHT_BITS{1'b0}};
+      478        endcase
+      479        3'b101: case (weight_sz_i)
+      480 -         3'b000: actual_weight = {{(WEIGHT_BITS-1){weight_value[15]}}, weight_value[15]};                              
+      481 -         3'b001: actual_weight = {{(WEIGHT_BITS-2){weight_value[15]}}, weight_value[15:14]};                           
+      482 -         3'b010: actual_weight = {{(WEIGHT_BITS-4){weight_value[15]}}, weight_value[15:12]};                           
+      483 -         3'b011: actual_weight = {{(WEIGHT_BITS-8){weight_value[15]}}, weight_value[15:8]};                            
+      484 -         3'b100: actual_weight = {{(WEIGHT_BITS-16){weight_value[15]}}, weight_value[15:0]};                           
+      480 +         3'b000: actual_weight = {{(WEIGHT_BITS-1){weight_value[WEIGHT_BITS-17]}}, weight_value[WEIGHT_BITS-17]};      
+      481 +         3'b001: actual_weight = {{(WEIGHT_BITS-2){weight_value[WEIGHT_BITS-17]}}, weight_value[WEIGHT_BITS-17 -: 2]}; 
+      482 +         3'b010: actual_weight = {{(WEIGHT_BITS-4){weight_value[WEIGHT_BITS-17]}}, weight_value[WEIGHT_BITS-17 -: 4]}; 
+      483 +         3'b011: actual_weight = {{(WEIGHT_BITS-8){weight_value[WEIGHT_BITS-17]}}, weight_value[WEIGHT_BITS-17 -: 8]}; 
+      484 +         3'b100: actual_weight = {{(WEIGHT_BITS-16){weight_value[WEIGHT_BITS-17]}}, weight_value[WEIGHT_BITS-17 -: 16]}
+          +;                                                                                                                      
+      485           default: actual_weight = {WEIGHT_BITS{1'b0}};
+      486        endcase
+      487        default: actual_weight = {WEIGHT_BITS{1'b0}};
+
+● Now let me verify the testbench still elaborates cleanly.
+                                                                                
+● Bash(iverilog -g2012 -t null -o /tmp/sp_check.out -s tb_acc_snn_processor acc_snn_processor.v spike_processing.v act_index_generator.v
+      weight_generator.v syn_curr_up…)                                                                                                   
+  ⎿  (No output)
+                                                                                                                                         
+● Elaboration is clean. The unpacker now anchors every slice to WEIGHT_BITS-1 (the actual MSB of weight_value), using the indexed -: form
+   so all bit positions track the parameterized port width. The mapping [31]→[WEIGHT_BITS-1], [30]→[WEIGHT_BITS-2], [29]→[WEIGHT_BITS-3],
+   [27]→[WEIGHT_BITS-5], [23]→[WEIGHT_BITS-9], [15]→[WEIGHT_BITS-17] reproduces the original (WEIGHT_BITS=32) addresses exactly while  
+  remaining valid for any WEIGHT_BITS ≥ 32. (For WEIGHT_BITS < 32 the design still can't hold a full 32-bit tuple — that's the documented
+   constraint — but you'll now get a meaningful elab-time error only on the cases that actually overflow, instead of every literal [31:N]
+   lighting up.)                                                                                                                         
+                                                                                                                                       
+✻ Cogitated for 40s                                                                                                                      
+                                                                                                                                         
+※ recap: Goal was fixing out-of-range part-selects in spike_processing.v sparse unpacker. The lines 437-441 index code and the           
+  actual_weight case block (lines 458-484) are now parameterized by WEIGHT_BITS, and the testbench elaborates cleanly. Next: run         
+  tbAccSNN.bsh to confirm runtime behavior. (disable recaps in /config)                                                                  
+                                                                                                                                         
+❯ I'm getting an elaborate error in spike_processing, lines 437 to 442. At line 441, the error was part select [7 :- 8] out of range of  
+  prefix 'weight_value'. Could you explain it?                                                                                           
+                                                                                                                                         
+● The error tells you exactly what happened:                                                                                             
+                                                                                   
+  - weight_value is declared [WEIGHT_BITS-1:0]. With the elaboration that produced this error, WEIGHT_BITS = 8 — so the legal range is   
+  [7:0].                                                                                                                                 
+  - Line 441 is actual_index = weight_value[WEIGHT_BITS-1 -: 16];. With WEIGHT_BITS=8 that becomes weight_value[7 -: 16], i.e. it asks   
+  for a 16-bit field whose top bit is bit 7 — which would walk down to bit -8. That's the "[7 :- 8] out of range" message: the lower edge
+   of the slice is below bit 0.                                                                                                          
+  - The same problem latently exists on lines 437-440 too: [7 -: 8] on line 440 just barely fits (bits 7..0), but [7 -: 4], [7 -: 2], [7]
+   are only fine because WEIGHT_BITS=8 happens to be ≥ the slice width. If WEIGHT_BITS drops below the slice width on any branch, that   
+  branch errors out the same way.
+                                                                                                                                         
+  Why this is happening even though only the 3'b011 branch is exercised at runtime: elaboration is static. The simulator must construct  
+  every branch of the case as hardware, so an out-of-range slice in any branch fails elab — it doesn't matter that index_sz_i will only
+  ever be 3'b011 in your test.                                                                                                           
+                  
+  Why the testbench now fails when it used to work: under the testbench  `WEIGHT_SLICE_SZ = 5 → WEIGHT_BITS = 32, all five branches      
+  elaborate cleanly. The fact that you're seeing WEIGHT_BITS=8 here means this elaboration is not coming through the testbench's override
+   — most likely spike_processing is being elaborated standalone (e.g. iverilog on spike_processing.v by itself, or a lint flow), where  
+  the parameter default WEIGHT_SLICE_SZ = 3 takes effect.
+
+  Underlying design constraint: the unpacker is intrinsically bounded by the largest tuple it must decode. The widest case (line 441 /   
+  index_sz_i==3'b100) needs 16 bits of index in the top half-slot, plus 16 bits of weight in the bottom half-slot — so a tuple-carrying
+  weight_value must be ≥ 32 bits wide, i.e. WEIGHT_SLICE_SZ ≥ 5. That's what the CLAUDE.md note ("Sparse mode requires WEIGHT_SLICE_SZ ≥ 
+  tuple_sz_enc") is enforcing. With WEIGHT_BITS=8 the hardware physically cannot represent that branch — the elab error is the tool
+  telling you the truth, not a code bug per se.
+
+  What to do: either (a) elaborate through the testbench (which sets WEIGHT_SLICE_SZ=5), (b) raise the default in the spike_processing   
+  parameter list to 5 so standalone elab is also legal, or (c) guard the wider branches with generate/if so they're only synthesised when
+   WEIGHT_BITS is large enough. Option (b) is the lowest-risk change and matches the documented constraint — want me to apply it?        
+                  
+✻ Baked for 20s                  
+                                                                                   
+❯ Yes, please assume that WEIGHT_SLICE_SZ is always set to 5.                                                                            
+                                                                                                                                         
+  Read 1 file (ctrl+o to expand)                                                                                                         
+                                                                                                                                         
+● Update(spike_processing.v)                       
+  ⎿  Added 1 line, removed 1 line                                                                                                        
+      30                 parameter ACT_DATA_IDX_SZ    = 5,                                                                               
+      31                             parameter WEIGHT_ENTRY_BITS  = 8,                                                                   
+      32                             parameter WEIGHT_IDX_SZ      = 5, // 2^5 = 32-bit                                                   
+      33 -                           parameter WEIGHT_SLICE_SZ    = 3, // 2^3 =  8-bit                                                   
+      33 +                           parameter WEIGHT_SLICE_SZ    = 5, // 2^5 = 32-bit                                                   
+      34                             parameter WEIGHT_DATA_IDX_SZ = 5, // 2^5 = 32-bit                                                   
+      35                             parameter SYN_CURR_IDX_SZ    = 10,                                                                  
+      36                             parameter SYN_CURR_DATA_IDX_SZ = 5,                                                                 
+                                                                                                                                         
+  Read 1 file (ctrl+o to expand)                                                 
+                                                                                                                                       
+● Update(acc_snn_processor.v)                                      
+  ⎿  Added 1 line, removed 1 line                                                                                                        
+      44      parameter SP_ACT_DATA_IDX_SZ      = 5,                                                                                     
+      45      parameter SP_WEIGHT_ENTRY_BITS    = 8,                                                                                     
+      46      parameter SP_WEIGHT_IDX_SZ        = 5,                                                                                     
+      47 -    parameter SP_WEIGHT_SLICE_SZ      = 3, // 8-bit data                                                                       
+      47 +    parameter SP_WEIGHT_SLICE_SZ      = 5, // 32-bit slice port (must hold a full sparse tuple)                                
+      48      parameter SP_WEIGHT_DATA_IDX_SZ   = 2, // 2-bit slice index (32-bit words)                                                 
+      49      parameter SP_SYN_CURR_IDX_SZ      = 10,                                                                                    
+      50      parameter SP_SYN_CURR_DATA_IDX_SZ = 5,                                                                                     
+                                                                                                                                         
+● Bash(iverilog -g2012 -t null -o /tmp/sp_check.out -s tb_acc_snn_processor acc_snn_processor.v spike_processing.v act_index_generator.v 
+      weight_generator.v syn_curr_up…)                                                                                                   
+  ⎿  ---standalone---                                                                                                                    
+     5 error(s) during elaboration.                                                                                                      
+     *** These modules were missing:                                                                                                     
+     … +5 lines (ctrl+o to expand)                                                                                                       
+                                                                                                                                         
+● Testbench elaborates clean (no output above the ---standalone--- marker), and standalone spike_processing.v now only complains about   
+  its missing child modules — no more out-of-range part-selects on the unpacker.                                                         
+                                                                                                                                         
+  Changes:                                                                                                                               
+  - spike_processing.v:33 — WEIGHT_SLICE_SZ default 3 → 5                                                                                
+  - acc_snn_processor.v:47 — SP_WEIGHT_SLICE_SZ default 3 → 5 (with a comment noting the sparse-tuple constraint)                        
+                                                                                                                                         
+  The testbench's  `WEIGHT_SLICE_SZ = 5 define still wins by override; the bumped defaults just keep standalone/lint elaboration legal.  
+                                                                                                                                         
+✻ Cooked for 33s                                                                                                                         
+                                                                                                                                         
+※ recap: Goal was to fix out-of-range part-selects in the sparse-tuple unpacker in spike_processing.v. The unpacker is now parameterized 
+  on WEIGHT_BITS and the WEIGHT_SLICE_SZ defaults bumped to 5. Next: rerun the Xcelium testbench to confirm it elaborates and simulates  
+  cleanly. (disable recaps in /config)                                                                                                   
+                                                                                                                                         
+❯ /plan                                                                                                                                  
+  ⎿  Enabled plan mode                                                                                                                  
+                                                                                                                                         
+❯ I want to instantiate the top level design, acc_snn_processor inside a wrapper that includes some memories so that we don't have to    
+    go off-chip to access memory. Could you create a new module, wrapped_acc_snn_processor_plus_memories.v, which instantiates the       
+  design                                                                                                                                 
+    acc_snn_processor, but each memory interface has its own 16KB memory? The interface for the synaptic current, read and written by    
+                                                                                                                                         
+    both spike_processing and by neuron_processing should drive the same memory. For arbitration during access, always given             
+                                                                                                                                         
+    spike_processing priority. Take default top level parameters from the testbench, tb_ac_snn_processor.v. Please ask any questions you 
+   need to clarify.                                                                                                                      
+                                                                                                                                       
+● I'll start by exploring the top-level interface and the testbench's memory/parameter setup.                                            
+                                                                                                                                         
+● 2 Explore agents finished (ctrl+o to expand)                                                                                           
+   ├ Inventory acc_snn_processor ports · 1 tool use · 17.0k tokens
+   │ ⎿  Done                                                                                                                             
+   └ Testbench SRAM model and param overrides · 3 tool uses · 29.0k tokens
+     ⎿  Done                                                                                                                             
+                                                                                                                                         
+● I have enough exploration to draft a plan, but two things need to be clarified before I write it.                                      
+                                                                                                                                         
+● User answered Claude's questions:                                                                                                      
+  ⎿  · The synaptic-current arbiter lives inside acc_snn_processor.v (lines 374-397) and currently grants neuron_processing fixed        
+     priority. Your request says give spike_processing priority. How should I handle this? → Keep existing NP-priority arbiter           
+     · What SRAM model should the wrapper instantiate for each of the seven memories? → Write a new synthesizable inferred-BRAM SRAM     
+     · 16KB per memory at 32-bit words = 4096 words / 12-bit address. The DUT drives 30-bit (`ADDR_SIZE`) addresses. How should the      
+     wrapper map them? → Truncate: pass low 12 bits, ignore upper bits                                                                 
+     · Do the new on-chip memories need any initialization mechanism (the current testbench preloads several SRAMs with random data via 
+     hierarchical access)? → Add $readmemh init hooks per memory                                                                         
+                                                                                 
+● Updated plan                                                                                                                
+  ⎿  /plan to preview                                                                                                                    
+                                                                                                                                         
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Ready to code?                                                                                                                          
+                                                                                                                                         
+ Here is Claude's plan:                                                                                                                  
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Wrap acc_snn_processor with on-chip memories                                                                                            
+                                                                                                                                         
+ Context                                                                                                                                 
+                                                                                                                                         
+ Today acc_snn_processor exposes seven raw SRAM-style memory buses (act, weight, syn_curr, bias, thresh, pot, spike). Only the testbench
+  tb_acc_snn_processor.v ever attaches storage to those buses — anything outside the simulator has to drive memories off-chip. This
+ change adds a self-contained synthesis-friendly wrapper that brings each memory on-chip as a 16 KB BRAM, so the design can be
+ instantiated in a larger system (or on an FPGA) without external memory plumbing.
+
+ Decisions captured from the question round:
+ - Keep the existing internal syn_curr_mem arbiter (neuron_processing has fixed priority). The wrapper just attaches one sharedSRAM to
+ the single syn_curr_mem_* port group exposed by acc_snn_processor.
+ - New SRAM is a synthesizable inferred-BRAM module (not the testbench's sram_model).
+ - Address mapping into each on-chip BRAM is a plain low-bit truncation: bram_addr = dut_addr[ADDR_W-1:0].
+ - Each BRAM accepts an INIT_FILE parameter; if non-empty, it $readmemhs its contents at time 0.
+
+ New files
+
+ 1. /home/davidsos/dev/snnAcc/sram_bram.v — a single new synthesizable single-port BRAM module used seven times by the wrapper.
+ Parameters: DATA_W (default 32), ADDR_W (default 12 → 4096 entries → 16 KB at 32-bit), INIT_FILE (default ""). Inferred-BRAM pattern:
+ single always @(posedge clk) block with if (we) mem[addr] <= wdata; if (re) rdata <= mem[addr]; plus an initial block that calls
+ $readmemh(INIT_FILE, mem) when the string is non-empty. Registered read; one-cycle latency; matches the protocol acc_snn_processor
+ already expects.
+ 2. /home/davidsos/dev/snnAcc/wrapped_acc_snn_processor_plus_memories.v — the wrapper.
+
+ Wrapper structure
+
+ Parameters
+
+ Mirror the full parameter list of acc_snn_processor (39 entries — TGT_ACC_ID, TGT_CONFIG_BASE_ADDR, the SP_* block, the NP_* block,
+ MEM_ADDR_BITS). Defaults are taken from tb_acc_snn_processor.v lines 30-79 / 184-238 — i.e. the macro values the testbench currently
+ overrides into the DUT (SP_WEIGHT_SLICE_SZ=5, SP_NUM_TIMESTEPS=32, 8×8 input/output grid, 3×3 kernel, etc.). Add one wrapper-local
+ parameter per memory: ACT_INIT_FILE, WEIGHT_INIT_FILE, SYN_CURR_INIT_FILE, BIAS_INIT_FILE, THRESH_INIT_FILE, POT_INIT_FILE,
+ SPIKE_INIT_FILE (all default ""). Add BRAM_ADDR_W (default 12) for the SRAM depth.
+
+ Ports (passed straight through to acc_snn_processor)
+
+ - clk, reset
+ - AXI config: sys_req_i, sys_ack_o, sys_addr_i[31:0], sys_data_i[31:0]
+ - Scheduler/control: start_new_block_i, target_acc_i[TGT_ACC_SZ-1:0], buffer_info_i[SCH_ENTRY_SZ-1:0], spike_proc_finished_o,
+ acc_busy_o, acc_finished_o
+ - SP buffer addresses: sp_src1_buff_addr_i, sp_src2_buff_addr_i, sp_src3_buff_addr_i, sp_tgt_buff_addr_i, sp_weight_row_len_i (each
+ PIN_BITS wide)
+ - NP buffer addresses: np_src1_buff_addr_i, np_src2_buff_addr_i, np_src3_buff_addr_i, np_tgt_buff_addr_i, np_weight_row_len_i (each
+ PIN_BITS wide)
+
+ No memory-bus ports are exposed at the wrapper boundary — the seven SRAMs live entirely inside.
+
+ Internal wiring (per memory bus)
+
+ For each memory bus the wrapper instantiates one sram_bram and connects it to the matching acc_snn_processor port group. The seven
+ instances and their bus mappings (port names from acc_snn_processor.v lines 122-181):
+
+ ┌─────────────────┬───────────────────┬───────────┬────────────────────────────────────────────────────────────────────────────────┐
+ │    Instance     │  DUT port group   │  DATA_W   │                           DUT signals → SRAM signals    │
+ ├─────────────────┼───────────────────┼───────────┼────────────────────────────────────────────────────────────────────────────────┤
+ │ u_act_mem       │ act_mem (RO)      │           │ re=act_mem_req_o, we=1'b0, addr=act_mem_addr_o[BRAM_ADDR_W-1:0],    │
+ │                 │                   │ `ACT_BITS │ wdata={DATA_W{1'b0}}, rdata→act_mem_data_i    │
+ ├─────────────────┼───────────────────┼───────────┼────────────────────────────────────────────────────────────────────────────────┤
+ │ u_weight_mem    │ weight_mem (RO)   │           │ re=weight_mem_rd_o, we=1'b0, addr=weight_mem_addr_o[BRAM_ADDR_W-1:0], wdata=0, │
+ │                 │                   │ `WTD_BITS │  rdata→weight_mem_data_i    │
+ ├─────────────────┼───────────────────┼───────────┼────────────────────────────────────────────────────────────────────────────────┤
+ │                 │ syn_curr_mem (RW, │           │ re=syn_curr_mem_rd_o, we=syn_curr_mem_wr_o,    │
+ │ u_syn_curr_mem  │  shared)          │ `POT_BITS │ addr=syn_curr_mem_addr_o[BRAM_ADDR_W-1:0], wdata=syn_curr_mem_data_o,    │
+ │                 │                   │           │ rdata→syn_curr_mem_data_i    │
+ ├─────────────────┼───────────────────┼───────────┼────────────────────────────────────────────────────────────────────────────────┤
+ │ u_bias_curr_mem │ bias_curr_mem     │           │ analogous to weight_mem    │
+ │                 │ (RO)              │ `WTD_BITS │    │
+ ├─────────────────┼───────────────────┼───────────┼────────────────────────────────────────────────────────────────────────────────┤
+ │ u_thresh_mem    │ thresh_mem (RO)   │           │ analogous to weight_mem    │
+ │                 │                   │ `WTD_BITS │    │
+ ├─────────────────┼───────────────────┼───────────┼────────────────────────────────────────────────────────────────────────────────┤
+ │ u_pot_mem       │ pot_mem (RW)      │           │ analogous to syn_curr_mem    │
+ │                 │                   │ `POT_BITS │    │
+     ├─────────────────┼───────────────────┼───────────┼────────────────────────────────────────────────────────────────────────────────┤
+     │ u_pot_mem       │ pot_mem (RW)      │           │ analogous to syn_curr_mem        │
+     │                 │                   │ `POT_BITS │        │
+     ├─────────────────┼───────────────────┼───────────┼────────────────────────────────────────────────────────────────────────────────┤
+     │ u_spike_mem     │ spike_mem (WO)    │           │ re=1'b0, we=spike_mem_wr_o, addr=spike_mem_addr_o[BRAM_ADDR_W-1:0],        │
+     │                 │                   │ `ACT_BITS │ wdata=spike_mem_data_o, rdata left unconnected        │
+     └─────────────────┴───────────────────┴───────────┴────────────────────────────────────────────────────────────────────────────────┘
+
+     All *_mem_wait_i inputs to acc_snn_processor are tied to 1'b0 — the inferred BRAM always responds in one cycle, no back-pressure is
+     generated. The internal arbiter inside acc_snn_processor (acc_snn_processor.v:374-402) handles the cycle-by-cycle multiplexing of
+     the shared syn_curr_mem between spike_processing and neuron_processing without any wrapper involvement.
+
+     Each sram_bram instance is parameterized with .DATA_W(corresponding *_BITS macro).INIT_FILE(corresponding wrapper parameter)`.
+
+     Reused code
+
+     - acc_snn_processor (acc_snn_processor.v) — instantiated as-is, no edits.
+     -  `include "constants.v" for ACT_BITS / WTD_BITS / POT_BITS / ADDR_SIZE. Same include the rest of the design uses.
+
+     Verification
+
+     1. Lint/elab: iverilog -g2012 -t null -o /tmp/wrap.out wrapped_acc_snn_processor_plus_memories.v sram_bram.v acc_snn_processor.v
+     spike_processing.v act_index_generator.v weight_generator.v syn_curr_update.v update_state_for_neuron.v neuron_processing.v
+     dataline_cache_with_xy.v slice_and_align.v packer.v — should elaborate clean (no missing modules, no out-of-range part-selects).
+     2. Functional check via existing testbench: write a thin sibling testbench (tb_wrapped_acc_snn_processor.v) that instantiates the
+     wrapper instead of acc_snn_processor, drives the same cfg_write AXI sequence used by tb_acc_snn_processor.v (lines 478-512), points
+     the wrapper's INIT_FILE parameters at hex dumps of the random data the existing testbench currently pokes hierarchically, and
+     asserts that acc_finished_o rises within the same 1000-cycle budget. This is the end-to-end check that the wrapper has wired every
+     bus correctly.
+     3. Quick smoke test without writing a new testbench: temporarily replace u_dut acc_snn_processor in tb_acc_snn_processor.vwith
+     u_dut wrapped_acc_snn_processor_plus_memories, comment out the seven sram_model instantiations and the random-poke initialblocks,
+     and pre-seed the BRAMs via $readmemh files generated from the same random data. Run bash tbAccSNN.bsh and confirm waveformbehaviour
+      matches the original.
+
+● I'll create a task list, then read the exact port list of acc_snn_processor and the testbench macros so the wrapper compiles cleanly.
+
+  Read 1 file (ctrl+o to expand)                                                                                                         
+                                                     
+  Read 2 files (ctrl+o to expand)                                                                                                        
+                                                                                                                                         
+● Write(sram_bram.v)                                                                                                                     
+  ⎿  Wrote 49 lines to sram_bram.v                                                                                                       
+       1 /////////////////////////////////////////////////////////////////////                                                           
+       2 //                                                                                                                              
+       3 // sram_bram                                                                                                                    
+       4 //                                                                                                                              
+       5 // Single-port synchronous SRAM written so that FPGA tools infer it                                                             
+       6 // as block RAM. One-cycle registered read; same-cycle write.                                                                   
+       7 //                                                                                                                              
+       8 //   we=1, re=0 : write wdata into mem[addr] on posedge clk                                                                     
+       9 //   we=0, re=1 : present mem[addr] on rdata one cycle after addr                                                               
+      10 //   we=1, re=1 : write-then-read (rdata receives the OLD contents,                                                             
+     … +39 lines (ctrl+o to expand)                                                
+
+● Write(wrapped_acc_snn_processor_plus_memories.v) 
+  ⎿  Wrote 406 lines to wrapped_acc_snn_processor_plus_memories.v
+       1 /////////////////////////////////////////////////////////////////////
+       2 //                                          
+       3 // wrapped_acc_snn_processor_plus_memories   
+       4 //                            
+       5 // Wraps acc_snn_processor and attaches one on-chip 16 KB inferred
+       6 // BRAM to each of its seven memory interfaces:                                                                                 
+       7 //
+       8 //   act_mem       (RO from DUT)                                                                                                
+       9 //   weight_mem    (RO from DUT)                                          
+      10 //   syn_curr_mem  (RW, internally arbitrated by acc_snn_processor —                                                            
+     … +396 lines (ctrl+o to expand)                                               
+
+● Bash(iverilog -g2012 -t null -o /tmp/wrap.out -s wrapped_acc_snn_processor_plus_memories wrapped_acc_snn_processor_plus_memories.v
+      sram_bram.v acc_snn_processor.v sp…)           
+  ⎿  (No output)                      
+                        
+● Clean elaboration. Let me also run the original testbench to make sure nothing in spike_processing.v / acc_snn_processor.v regressed.  
+                                                     
+● Bash(iverilog -g2012 -t null -o /tmp/tb_check.out -s tb_acc_snn_processor acc_snn_processor.v spike_processing.v act_index_generator.v
+      weight_generator.v syn_curr_up…)                                                                                                   
+  ⎿  (No output)                                                                                                
+                                                                                                                                         
+  ⎿  Wrote 406 lines to wrapped_acc_snn_processor_plus_memories.v
+       1 /////////////////////////////////////////////////////////////////////
+       2 //
+       3 // wrapped_acc_snn_processor_plus_memories
+       4 //
+       5 // Wraps acc_snn_processor and attaches one on-chip 16 KB inferred
+       6 // BRAM to each of its seven memory interfaces:
+       7 //
+       8 //   act_mem       (RO from DUT)
+       9 //   weight_mem    (RO from DUT)
+      10 //   syn_curr_mem  (RW, internally arbitrated by acc_snn_processor —
+     … +396 lines (ctrl+o to expand)
+
+● Bash(iverilog -g2012 -t null -o /tmp/wrap.out -s wrapped_acc_snn_processor_plus_memories wrapped_acc_snn_processor_plus_memories       5 // Single-port synchronous SRAM written so that FPGA tools infer it
+       6 // as block RAM. One-cycle registered read; same-cycle write.
+       7 //
+       8 //   we=1, re=0 : write wdata into mem[addr] on posedge clk
+       9 //   we=0, re=1 : present mem[addr] on rdata one cycle after addr
+      10 //   we=1, re=1 : write-then-read (rdata receives the OLD contents,
+     … +39 lines (ctrl+o to expand)
+
+● Write(wrapped_acc_snn_processor_plus_memories.v)
+  ⎿  Wrote 406 lines to wrapped_acc_snn_processor_plus_memories.v
+       1 /////////////////////////////////////////////////////////////////////
+       2 //
+       3 // wrapped_acc_snn_processor_plus_memories
+       4 //
+       5 // Wraps acc_snn_processor and attaches one on-chip 16 KB inferred
+       6 // BRAM to each of its seven memory interfaces:
+       7 //
+       8 //   act_mem       (RO from DUT)
+       9 //   weight_mem    (RO from DUT)
+      10 //   syn_curr_mem  (RW, internally arbitrated by acc_snn_processor —
+     … +396 lines (ctrl+o to expand)
+
+● Bash(iverilog -g2012 -t null -o /tmp/wrap.out -s wrapped_acc_snn_processor_plus_memories
+      wrapped_acc_snn_processor_plus_memories.v sram_bram.v acc_snn_processor.v sp…)
+  ⎿  (No output)
+
+● Clean elaboration. Let me also run the original testbench to make sure nothing in spike_processing.v / acc_snn_processor.v
+  regressed.
+
+● Bash(iverilog -g2012 -t null -o /tmp/tb_check.out -s tb_acc_snn_processor acc_snn_processor.v spike_processing.v
+       5 // Wraps acc_snn_processor and attaches one on-chip 16 KB inferred
+       6 // BRAM to each of its seven memory interfaces:
+       7 //
+       8 //   act_mem       (RO from DUT)
+       9 //   weight_mem    (RO from DUT)
+  ⎿  Wrote 406 lines to wrapped_acc_snn_processor_plus_memories.v
+       1 /////////////////////////////////////////////////////////////////////
+       2 //
+       3 // wrapped_acc_snn_processor_plus_memories
+       4 //
+       5 // Wraps acc_snn_processor and attaches one on-chip 16 KB inferred
+       6 // BRAM to each of its seven memory interfaces:
+       7 //
+       8 //   act_mem       (RO from DUT)
+       9 //   weight_mem    (RO from DUT)
+      10 //   syn_curr_mem  (RW, internally arbitrated by acc_snn_processor —
+     … +396 lines (ctrl+o to expand)
+
+● Bash(iverilog -g2012 -t null -o /tmp/wrap.out -s wrapped_acc_snn_processor_plus_memories
+      wrapped_acc_snn_processor_plus_memories.v sram_bram.v acc_snn_processor.v sp…)
+  ⎿  (No output)
+
+● Clean elaboration. Let me also run the original testbench to make sure nothing in spike_processing.v / acc_snn_processor.v
+  regressed.
+
+● Bash(iverilog -g2012 -t null -o /tmp/tb_check.out -s tb_acc_snn_processor acc_snn_processor.v spike_processing.v
+      act_index_generator.v weight_generator.v syn_curr_up…)
+  ⎿  (No output)
+
+● Both elaborate cleanly. Two new files created:
+
+  - /home/davidsos/dev/snnAcc/sram_bram.v — synthesizable inferred-BRAM (single-port, 1-cycle registered read, optional
+  $readmemh init).
+  - /home/davidsos/dev/snnAcc/wrapped_acc_snn_processor_plus_memories.v — wrapper that instantiates acc_snn_processor plus seven
+   sram_bram instances (one per memory bus). All *_mem_wait_i inputs tied low; the existing internal arbiter (neuron-priority)
+  handles syn_curr sharing.
+
+  Default parameters mirror the testbench's macro overrides (SP_WEIGHT_SLICE_SZ=5, 32-timestep, 5-bit grid axes, 3×3 kernel,
+  32-bit slice_bits, etc.), so instantiating with no overrides reproduces the testbench configuration. Each BRAM defaults to
+  BRAM_ADDR_W=12 (4096 × 32-bit = 16 KB) and exposes *_INIT_FILE parameters if you want to seed any memory at time 0.
+
+✻ Cooked for 6m 15s
+
+※ recap: Goal was to wrap acc_snn_processor with seven on-chip 16KB BRAMs so the design no longer needs off-chip memory. Both
+  new files (sram_bram.v and wrapped_acc_snn_processor_plus_memories.v) are written and elaborate cleanly with iverilog. Next:
+  run an end-to-end functional check by retargeting the testbench at the wrapper. (disable recaps in /config)
+
+❯ Could you generate a datafile to be loaded by the sram_bram.v modules to initialise them, containing random datawords, which  
+  are 32-bit words by 4096 entries?                                                                                             
+                                                                                                                                
+  Read 1 file (ctrl+o to expand)                                                                                                
+                                                                                                                                
+● Created /home/davidsos/dev/snnAcc/sram_init_random.hex — 4096 lines, one 8-hex-digit (32-bit) word per line, generated with a 
+  fixed seed (srand(1)) so the file is reproducible.        
+                                                                                                                                
+  Use it from any wrapper instance with e.g.:                                                                                   
+             
+  wrapped_acc_snn_processor_plus_memories # (                                                                                   
+      .ACT_INIT_FILE      ("sram_init_random.hex"),                                                                           
+      .WEIGHT_INIT_FILE   ("sram_init_random.hex"),                                                                             
+      .BIAS_CURR_INIT_FILE("sram_init_random.hex"),                                                                             
+      .THRESH_INIT_FILE   ("sram_init_random.hex"),                                                                             
+      // SYN_CURR / POT / SPIKE typically left at "" so they start clean                                                        
+  ) u_dut ( ... );                                                                                                              
+                                                                                                                                
+  $readmemh will read 4096 words and fill the entire 12-bit address space of each BRAM. If you want each memory pre-loaded with 
+  a different random pattern, run the awk one-liner with a different seed (srand(2), etc.) into a different filename.           
+                                                                                                                                
+✻ Churned for 12s                                                                                                               
+                                                                                                                                
+※ recap: You're wrapping `acc_snn_processor` with on-chip BRAMs; `sram_bram.v`, the wrapper, and a 4096-word random init file   
+  are all written and elaborate cleanly. Next: instantiate the wrapper in a testbench (or retarget the existing one) and run a 
+  simulation to confirm end-to-end behaviour.                                                                                   
+                                                                                                                              
+❯ The synthess tool in Vivardo seesm to be pruning the ram instances out. there are zero rams in the final design. Could you    
+  work out why this might be happening?                                                                                         
+                                                                                                                                
+● Diagnosis: the BRAMs have no path to a primary output, so Vivado's optimiser correctly classifies them as dead logic.         
+                                                                            
+  Cone-of-influence analysis on the wrapper:                                                                                    
+                                                                                                                                
+  The wrapper's only outputs are sys_ack_o, spike_proc_finished_o, acc_busy_o, acc_finished_o. Now trace backwards from each:   
+                                                                                                                                
+  - sys_ack_o — combinational decode of sys_addr_i[31:16] against TGT_CONFIG_BASE_ADDR. Doesn't touch any memory.               
+  - acc_busy_o, acc_finished_o, spike_proc_finished_o — driven by control-FSM counters in spike_processing and neuron_processing
+   (timestep counters, iteration counters, the running_r flag). Those counters are clocked off start_new_block_i and the        
+  AXI-programmed config values; they advance based on internal handshake taken/valid lines, not on memory data.
+                                                                                                                                
+  So the data path act_mem → weight_mem → syn_curr → pot → spike is purely internal. Every output of every BRAM eventually goes 
+  into a register that either (a) writes back into another BRAM that is also un-observable, or (b) is consumed by control logic
+  that only cares whether a transaction completed, not what the data was. Vivado does a full reverse-reachability sweep:        
+  anything whose output cannot affect a primary output is removed. The seven BRAMs fall out, and behind them a great deal of
+  spike_processing / neuron_processing datapath collapses too. (You can confirm this by looking at the synthesis log — you'll
+  see hundreds of "removed because unused" / "trim" messages, not just BRAM removals.)
+
+  This is not a coding bug in sram_bram.v. The same code synthesises into BRAMs in any context where the output is observable.  
+  The wrapper is just missing observability.
+                                                                                                                                
+  Three fixes, in order of cleanliness:                                                                                         
+   
+  1. Expose the spike output — bring spike_mem content out of the wrapper via a small read-side port (e.g. an external          
+  dbg_spike_addr_i / dbg_spike_data_o pair, or a streaming readout that walks the spike memory after acc_finished_o rises). This
+   is the right answer because the spikes are the design's output — without them the accelerator has no observable function.    
+  Once spike_mem is observable, every datapath feeding it (pot → syn_curr → weight & act → ...) becomes live, and all seven
+  BRAMs survive.
+  2. Cheap "keep-alive" port — add a single dbg_data_or_o output equal to |act_mem_data | |weight_mem_data | |syn_curr_mem_rdata
+   | |bias_curr_mem_data | |thresh_mem_data | |pot_mem_rdata. Vivado then can't prove any BRAM is dead. Tiny area cost;         
+  preserves the BRAMs but is a hack.
+  3. Synthesis attribute — annotate either each sram_bram instance or its internal mem array with (* dont_touch = "true" *) (or 
+  (* keep = "true" *) on mem). This forces Vivado to keep them even with no observable path. It's the laziest fix and it leaves 
+  a lot of other dead datapath logic in place that the BRAMs feed, which Vivado will still happily prune — so you'll have the
+  BRAMs but starved of any consumer.                                                                                            
+                                                            
+  If you want, I can implement option 1 (spike read-back port) — that's the only fix that makes the wrapper usable as a real    
+  accelerator endpoint, not just a synthesis target. Which would you like?
+                                                                                                                                
+✻ Crunched for 45s                                          
+                                                                            
+❯ 1                                                                                                                             
+                                                                                                                                
+● Update(wrapped_acc_snn_processor_plus_memories.v)                                                                             
+  ⎿  Added 14 lines, removed 5 lines                                                                                            
+      12  //   bias_curr_mem (RO from DUT)                                                                                      
+      13  //   thresh_mem    (RO from DUT)                                                                                      
+      14  //   pot_mem       (RW from DUT)
+      15 -//   spike_mem     (WO from DUT)                                                                                      
+      15 +//   spike_mem     (WO from DUT — the network's output)                                                        
+      16  //                                                                                                                    
+      17 -// All memory-bus signals stay inside the wrapper; only clk/reset,                                             
+      18 -// AXI config, and scheduler/buffer-address ports are exposed at the                                           
+      19 -// top boundary. The DUT's *_mem_wait_i inputs are tied low because                                            
+      20 -// the BRAM always responds in one cycle.                                                                      
+      17 +// All memory-bus signals stay inside the wrapper. To keep the                                                 
+      18 +// design observable to synthesis (so Vivado does not prune the BRAMs                                          
+      19 +// as dead logic), the wrapper exposes a small read-side port on the                                           
+      20 +// spike memory: assert dbg_spike_rd_i with dbg_spike_addr_i and the                                           
+      21 +// stored 32-bit spike word arrives on dbg_spike_data_o one cycle                                              
+      22 +// later (registered read, just like every other BRAM port). DUT                                               
+      23 +// writes have priority — if spike_mem_wr_o and dbg_spike_rd_i                                                 
+      24 +// happen on the same cycle, the address bus goes to the writer and                                            
+      25 +// the read returns the just-written word. Typical use: poll                                                   
+      26 +// acc_finished_o, then walk the spike memory.                                                                 
+      27  //
+      28 +// The DUT's *_mem_wait_i inputs are tied low because the BRAM                                                 
+      29 +// always responds in one cycle.                                                                               
+      30 +//                                                                                                             
+      31  // Each BRAM is 4096 x 32-bit (16 KB) by default; see BRAM_ADDR_W.
+      32  // Each BRAM accepts an INIT_FILE parameter (default "") so the
+      33  // wrapper can be pre-loaded via $readmemh at time 0.
+
+● Update(wrapped_acc_snn_processor_plus_memories.v)
+  ⎿  Added 8 lines, removed 1 line                                                         
+      153      input  wire [`PIN_BITS-1:0] np_src2_buff_addr_i,
+      154      input  wire [`PIN_BITS-1:0] np_src3_buff_addr_i,                                                                 
+      155      input  wire [`PIN_BITS-1:0] np_tgt_buff_addr_i,
+      156 -    input  wire [`PIN_BITS-1:0] np_weight_row_len_i                                                                  
+      156 +    input  wire [`PIN_BITS-1:0] np_weight_row_len_i,                                                          
+      157 +                                                                                                                     
+      158 +    //================================================================                                        
+      159 +    // Spike-memory readback (host visibility into the network output)                                        
+      160 +    //================================================================                                        
+      161 +    input  wire                    dbg_spike_rd_i,                                                            
+      162 +    input  wire [BRAM_ADDR_W-1:0]  dbg_spike_addr_i,                                                          
+      163 +    output wire    [`ACT_BITS-1:0] dbg_spike_data_o                                                           
+      164  );
+      165  
+      166      //----------------------------------------------------------------
+
+● Update(wrapped_acc_snn_processor_plus_memories.v)
+  ⎿  Added 10 lines, removed 4 lines                                                       
+      405          .rdata (pot_mem_rdata)
+      406      );                                                                                                               
+      407  
+      408 -    wire [`ACT_BITS-1:0] spike_mem_rdata_unused;                                                                     
+      408 +    // DUT writes have priority on the spike_mem address bus; debug                                           
+      409 +    // reads share the single port and only get a usable address when                                                
+      410 +    // the DUT is not writing this cycle.                                                                     
+      411 +    wire [BRAM_ADDR_W-1:0] spike_mem_addr_mux =                                                               
+      412 +        spike_mem_wr ? spike_mem_addr[BRAM_ADDR_W-1:0]                                                        
+      413 +                     : dbg_spike_addr_i;                                                                      
+      414 +                                                                                                              
+      415      sram_bram # (
+      416          .DATA_W   (`ACT_BITS),
+      417          .ADDR_W   (BRAM_ADDR_W),
+     ...
+      419      ) u_spike_mem (
+      420          .clk   (clk),
+      421          .we    (spike_mem_wr),
+      416 -        .re    (1'b0),                                                                                        
+      417 -        .addr  (spike_mem_addr[BRAM_ADDR_W-1:0]),                                                             
+      422 +        .re    (dbg_spike_rd_i),                                                                              
+      423 +        .addr  (spike_mem_addr_mux),                                                                          
+      424          .wdata (spike_mem_wdata),
+      419 -        .rdata (spike_mem_rdata_unused)                                                                       
+      425 +        .rdata (dbg_spike_data_o)                                                                             
+      426      );
+      427  
+      428  endmodule
+
+● Bash(iverilog -g2012 -t null -o /tmp/wrap.out -s wrapped_acc_snn_processor_plus_memories
+      wrapped_acc_snn_processor_plus_memories.v sram_bram.v acc_snn_processor.v sp…)       
+  ⎿  (No output)
+                                                                                                                                
+● Clean elaboration. Summary of the change:                                                                                     
+                                                                                                                                
+  New ports on wrapped_acc_snn_processor_plus_memories:                                                                         
+  - input  dbg_spike_rd_i — assert to read.                                                                                     
+  - input  [BRAM_ADDR_W-1:0] dbg_spike_addr_i — 12-bit word address (default sizing).                                           
+  - output [ACT_BITS-1:0]   dbg_spike_data_o` — registered, 1-cycle latency.                                                    
+                                                                                                                                
+  Internal change to u_spike_mem only: address bus is muxed spike_mem_wr ? dut_addr : dbg_addr, we = spike_mem_wr, re =         
+  dbg_spike_rd_i, rdata exposed as the new output port. The other six BRAMs are unchanged because once the spike memory's read  
+  port is observable, every datapath feeding into it (act → weight → syn_curr / bias → pot → spike) becomes part of the         
+  cone-of-influence and survives Vivado's pruning.                                                                              
+                                                                                                                                
+  Why this works for synthesis: Vivado now traces backwards from dbg_spike_data_o → u_spike_mem.mem → writes from               
+  spike_mem_data_o → packer → update_state_for_neuron → pot_mem.rdata + syn_curr_mem.rdata + bias_curr_mem.rdata +              
+  thresh_mem.rdata → … → weight_mem.rdata + act_mem.rdata. Every BRAM is now reachable.                                         
+                                                                                                                                
+  Usage pattern:                                                                                                                
+  // Wait for completion, then read back                                                                                        
+  @(posedge clk); while (!acc_finished_o) @(posedge clk);
+  for (i = 0; i < num_spike_words; i = i + 1) begin                                                                             
+      dbg_spike_addr_i <= i;                                                                                                    
+      dbg_spike_rd_i   <= 1'b1;                                                                                                 
+      @(posedge clk);                  // BRAM registers the read                                                               
+      @(posedge clk);                  // dbg_spike_data_o now valid                                                            
+      $display("spike[%0d] = %h", i, dbg_spike_data_o);                                                                         
+  end                                                                                                                           
+  dbg_spike_rd_i <= 1'b0;                                                                                                       
+                                                                                                                                
+  If during operation you need to also read while the DUT is writing the same memory, say so and I'll convert sram_bram into a
+  true dual-port BRAM (Vivado infers TDP cleanly with two always @(posedge clk) blocks, one per port).                          
+                                                            
+✻ Crunched for 1m 19s                                                                                                           
+                                                                                           
+※ recap: Goal: wrap acc_snn_processor with on-chip BRAMs for FPGA synthesis. Current state: wrapper and sram_bram are written   
+  and elaborate cleanly; a spike-memory readback port was just added so Vivado stops pruning the BRAMs. Next: re-run Vivado     
+  synthesis and confirm the seven BRAMs are retained.                                                                           
+                                                                                                                                
+───────────────────────────────────────────────────────────────────────────────────────────────────── wrap-snn-processor-bram ──
+❯  
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)
+
+

@@ -1,0 +1,2600 @@
+davidsos@lloigor:~/Desktop$ cd ../dev/
+davidsos@lloigor:~/dev$ ls
+ 5_test_write_config_regs_before_starting_snnAcc
+ 6_about_to_add_xy_size_config_params_snnAcc
+ 7_added_xy_size_config_params_snnAcc
+ 8_fixes_to_weight_pass_signals_plus_merge_scheduler_ifs_snnAcc
+ CLAUDE.md
+'convolve transfers'
+ copy_snnAcc
+ Hadamard
+ resume_my_stuff.txt
+ scheduler
+ snnAcc
+ xrun_bashrc
+davidsos@lloigor:~/dev$ ls -l snnAcc/
+total 4912
+-rw-r--r-- 1 davidsos 221530   25989 Apr 24 14:44 acc_snn_processor.v
+-rw-r--r-- 1 davidsos 221530    5432 Apr 21 13:54 act_index_generator.v
+-rw-r--r-- 1 davidsos 221530     765 Apr 21 13:56 constants.v
+-rw-r--r-- 1 davidsos 221530    8003 Apr 23 16:25 dataline_cache_with_xy.v
+-rw-r--r-- 1 davidsos 221530   17192 Apr 24 16:02 neuron_processing.v
+-rw-r--r-- 1 davidsos 221530   16361 Apr 21 13:54 slice_and_align.v
+-rw-r--r-- 1 davidsos 221530   15873 Apr 24 15:45 spike_processing.v
+-rw-r--r-- 1 davidsos 221530    4971 Apr 24 11:26 syn_curr_update.v
+-rwxr-xr-x 1 davidsos 221530     574 Apr 22 16:14 tbAccSNN.bsh
+-rw-r--r-- 1 davidsos 221530   20006 Apr 24 13:10 tb_acc_snn_processor.v
+-rw-r--r-- 1 davidsos 221530 4725007 Apr 24 16:00 tb_acc_snn_processor.vcd
+-rw-r--r-- 1 davidsos 221530    4889 Apr 21 13:54 update_state_for_neuron.v
+drwxr-xr-x 2 davidsos 221530    4096 Apr 24 16:00 waves.shm
+-rw-r--r-- 1 davidsos 221530   10582 Apr 24 12:40 weight_generator.v
+drwxr-xr-x 4 davidsos 221530    4096 Apr 24 15:58 xcelium.d
+-rw-r--r-- 1 davidsos 221530    6459 Apr 24 15:58 xrun.history
+-rw-r--r-- 1 davidsos 221530    7289 Apr 24 16:16 xrun.key
+-rw-r--r-- 1 davidsos 221530  120210 Apr 24 16:16 xrun.log
+davidsos@lloigor:~/dev$ cp -pr snnAcc/ 9_pre_endpipe_mods_snnAcc
+davidsos@lloigor:~/dev$ cd 9_pre_endpipe_mods_snnAcc/
+davidsos@lloigor:~/dev/9_pre_endpipe_mods_snnAcc$ ls
+acc_snn_processor.v       neuron_processing.v  tbAccSNN.bsh               waves.shm           xrun.key
+act_index_generator.v     slice_and_align.v    tb_acc_snn_processor.v     weight_generator.v  xrun.log
+constants.v               spike_processing.v   tb_acc_snn_processor.vcd   xcelium.d
+dataline_cache_with_xy.v  syn_curr_update.v    update_state_for_neuron.v  xrun.history
+davidsos@lloigor:~/dev/9_pre_endpipe_mods_snnAcc$ rm -rf waves.shm/ xcelium.d/
+davidsos@lloigor:~/dev/9_pre_endpipe_mods_snnAcc$ ls -l
+total 4904
+-rw-r--r-- 1 davidsos 221530   25989 Apr 24 14:44 acc_snn_processor.v
+-rw-r--r-- 1 davidsos 221530    5432 Apr 21 13:54 act_index_generator.v
+-rw-r--r-- 1 davidsos 221530     765 Apr 21 13:56 constants.v
+-rw-r--r-- 1 davidsos 221530    8003 Apr 23 16:25 dataline_cache_with_xy.v
+-rw-r--r-- 1 davidsos 221530   17192 Apr 24 16:02 neuron_processing.v
+-rw-r--r-- 1 davidsos 221530   16361 Apr 21 13:54 slice_and_align.v
+-rw-r--r-- 1 davidsos 221530   15873 Apr 24 15:45 spike_processing.v
+-rw-r--r-- 1 davidsos 221530    4971 Apr 24 11:26 syn_curr_update.v
+-rwxr-xr-x 1 davidsos 221530     574 Apr 22 16:14 tbAccSNN.bsh
+-rw-r--r-- 1 davidsos 221530   20006 Apr 24 13:10 tb_acc_snn_processor.v
+-rw-r--r-- 1 davidsos 221530 4725007 Apr 24 16:00 tb_acc_snn_processor.vcd
+-rw-r--r-- 1 davidsos 221530    4889 Apr 21 13:54 update_state_for_neuron.v
+-rw-r--r-- 1 davidsos 221530   10582 Apr 24 12:40 weight_generator.v
+-rw-r--r-- 1 davidsos 221530    6459 Apr 24 15:58 xrun.history
+-rw-r--r-- 1 davidsos 221530    7289 Apr 24 16:16 xrun.key
+-rw-r--r-- 1 davidsos 221530  120210 Apr 24 16:16 xrun.log
+davidsos@lloigor:~/dev/9_pre_endpipe_mods_snnAcc$ rm *.vcd
+davidsos@lloigor:~/dev/9_pre_endpipe_mods_snnAcc$ cd ../
+davidsos@lloigor:~/dev$ ls
+ 5_test_write_config_regs_before_starting_snnAcc                  CLAUDE.md             scheduler
+ 6_about_to_add_xy_size_config_params_snnAcc                     'convolve transfers'   snnAcc
+ 7_added_xy_size_config_params_snnAcc                             copy_snnAcc           xrun_bashrc
+ 8_fixes_to_weight_pass_signals_plus_merge_scheduler_ifs_snnAcc   Hadamard
+ 9_pre_endpipe_mods_snnAcc                                        resume_my_stuff.txt
+davidsos@lloigor:~/dev$ cd snnAcc/
+davidsos@lloigor:~/dev/snnAcc$ ls
+acc_snn_processor.v       neuron_processing.v  tbAccSNN.bsh               waves.shm           xrun.key
+act_index_generator.v     slice_and_align.v    tb_acc_snn_processor.v     weight_generator.v  xrun.log
+constants.v               spike_processing.v   tb_acc_snn_processor.vcd   xcelium.d
+dataline_cache_with_xy.v  syn_curr_update.v    update_state_for_neuron.v  xrun.history
+davidsos@lloigor:~/dev/snnAcc$ claude
+╭─── Claude Code v2.1.119 ──────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting started                                 │
+│                 Welcome back Simon!                │ Run /init to create a CLAUDE.md file with instructions … │
+│                                                    │ ──────────────────────────────────────────────────────── │
+│                       ▐▛███▜▌                      │ Recent activity                                          │
+│                      ▝▜█████▛▘                     │ No recent activity                                       │
+│                        ▘▘ ▝▝                       │                                                          │
+│   Sonnet 4.6 · Claude Pro ·                        │                                                          │
+│   simon.davidson@manchester.ac.uk's Organization   │                                                          │
+│                    ~/dev/snnAcc                    │                                                          │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+❯ /init                                                                                                          
+        
+● I'll explore the codebase to understand its structure before updating the CLAUDE.md.                           
+                                                                                                               
+  Searched for 1 pattern, read 9 files, listed 2 directories (ctrl+o to expand)                                  
+                                                                                                        
+● I have enough context now. There's no CLAUDE.md in snnAcc/ yet (only in the parent /home/davidsos/dev/). I'll  
+  create one here with improved content based on what I learned reading the source.                              
+                                                                                                                 
+● Write(CLAUDE.md)                                                                                               
+                                                                                                                 
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Create file                                                                                                   
+ CLAUDE.md                                                                                                       
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+    1 # CLAUDE.md                                                                                                
+    2                                                                                                            
+    3 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.     
+    4                                                                                                            
+    5 ## Project Overview
+    6
+    7 Verilog RTL design for an **SNN (Spiking Neural Network) Hardware Accelerator**. Implements a two-stage
+      pipeline: `spike_processing` accumulates synaptic currents from input spikes × weights, then `neuron_pro
+      cessing` integrates those currents to update neuron state and emit output spikes.
+    8
+    9 The sibling directories (`5_test_write_config_regs_...`, `6_about_to_add_xy_...`, etc.) are snapshot var
+      iants at earlier development stages — the canonical design lives here in `snnAcc/`.
+   10
+   11 ## Simulation
+   12
+   13 Simulator is **Xcelium** (Cadence). Run from this directory:
+   14
+   15 ```bash
+   16 bash tbAccSNN.bsh
+   17 ```
+   18
+   19 This invokes:
+   20 ```
+   21 xrun -sv -gui -timescale 1ns/1ps -access wrc -top tb_acc_snn_processor \
+   22   acc_snn_processor.v spike_processing.v act_index_generator.v \
+   23   weight_generator.v syn_curr_update.v update_state_for_neuron.v \
+   24   neuron_processing.v dataline_cache_with_xy.v slice_and_align.v \
+   25   tb_acc_snn_processor.v
+   26 ```
+   27
+   28 Waveforms: `waves.shm/` and `tb_acc_snn_processor.vcd`. Open with SimVision. Build artefacts: `xcelium.d
+      /`, `xrun.log`, `xrun.history`, `xrun.key`.
+   29
+   30 ## Architecture
+   31
+   32 ### Pipeline
+   33
+   34 ```
+   35 [Input spikes / weights]
+   36         │
+   37         ▼
+   38  spike_processing      ─── reads: act_mem, weight_mem
+   39         │              ─── writes: syn_curr_mem
+   40         ▼  (sp_acc_finished triggers neuron_processing)
+   41  neuron_processing     ─── reads: syn_curr_mem, bias_mem, thresh_mem, pot_mem
+   42         │              ─── writes: pot_mem, spike_mem (output)
+   43         ▼
+   44   [Output spikes / potentials]
+   45 ```
+   46
+   47 The synaptic current memory (`syn_curr_mem`) is **shared** between both stages. Arbitration is in `acc_s
+      nn_processor` with **fixed priority to `neuron_processing`**. Grants are cycle-by-cycle (no burst lock).
+       The losing module sees `mem_wait_i` asserted until the bus is free.
+   48
+   49 ### Modules
+   50
+   51 | File | Module | Role |
+   52 |---|---|---|
+   53 | `acc_snn_processor.v` | `acc_snn_processor` | Top-level: instantiates both stages, arbitrates syn_curr
+      _mem, hosts AXI config registers |
+   54 | `spike_processing.v` | `spike_processing` | Stage 1: drives act_index_gen, act_cache, weight_gen, syn_
+      curr_update |
+   55 | `neuron_processing.v` | `neuron_processing` | Stage 2: cycles over neurons, reads currents/bias/thresh
+      /pot, writes updated state |
+   56 | `act_index_generator.v` | `act_index_generator` | Generates activation memory addresses; supports full
+      /sparse/conv via `weight_mode_i` |
+   57 | `weight_generator.v` | `weight_generator` | Computes weight memory addresses from input spike position
+       and kernel parameters |
+   58 | `dataline_cache_with_xy.v` | `dataline_cache_with_xy` | Single-entry cache for any memory interface; e
+      xtracts sub-word slices via `slice_and_align` |
+   59 | `syn_curr_update.v` | `syn_curr_update` | Read-modify-write: fetches 32-bit syn_curr word, adds sign-e
+      xtended weight, writes back |
+   60 | `update_state_for_neuron.v` | `update_state_for_neuron` | 2-cycle pipeline: cycle 1 = integrate + deca
+      y syn_curr; cycle 2 = threshold + decay potential |
+   61 | `slice_and_align.v` | `slice_and_align` | Extracts a variable-width sub-field from a 32-bit word; gene
+      rates `last_slice_o` |
+   62 | `constants.v` | — | Global `` `define `` constants for bus widths (included by all modules) |
+   63 | `tb_acc_snn_processor.v` | `tb_acc_snn_processor` | Testbench: 256×32-bit SRAM models, random data, 1-
+      cycle read latency, 1000-cycle timeout |
+   64
+   65 ### AXI Config Register Map (`acc_snn_processor`)
+   66
+   67 Address match: `sys_addr_i[31:16] == TGT_CONFIG_BASE_ADDR[31:16]`. Register select on `sys_addr_i[7:0]`:
+   68
+   69 | Offset | Register |
+   70 |--------|----------|
+   71 | `0x00` | `sp_act_base_addr_r` |
+   72 | `0x04` | `sp_weight_base_addr_r` |
+   73 | `0x08` | `syn_curr_base_addr_r` (shared) |
+   74 | `0x0C` | `sp_weight_sz_r` |
+   75 | `0x14` | `sp_total_timesteps_r` |
+   76 | `0x20` | `np_num_neurons_r` |
+   77 | `0x28` | `np_bias_curr_base_addr_r` |
+   78 | `0x2C` | `np_thresh_base_addr_r` |
+   79 | `0x30` | `np_pot_base_addr_r` |
+   80 | `0x34` | `np_syn_curr_sz_r` |
+   81 | `0x38` | `np_bias_curr_sz_r` |
+   82 | `0x3C` | `np_pot_sz_r` |
+   83 | `0x40` | `bin_point_syn_curr_r` |
+   84 | `0x44–0x5C` | Grid/kernel size registers (in/out X/Y, stride, packing) |
+   85
+   86 `sys_ack_o` is asserted combinationally on the same cycle as `sys_req_i` when the address matches.
+   87
+   88 ### Key Design Patterns
+   89
+   90 **Valid/taken handshake** — the universal flow-control protocol. Producer asserts `*_valid_o`; consumer
+      asserts `*_taken_i` to consume. Data is held stable until taken. Used across all inter-module interfaces
+       (act_index, weight_index, weight_value, slice_data, neuron result).
+   91
+   92 **`dataline_cache_with_xy` slice encoding** — `slice_sz_i` selects element width packed in a 32-bit word
+      :
+   93
+   94 | `slice_sz_i` | Element width |
+   95 |---|---|
+   96 | `3'b000` | 1-bit |
+   97 | `3'b001` | 2-bit |
+   98 | `3'b010` | 4-bit |
+   99 | `3'b011` | 8-bit |
+  100 | `3'b100` | 16-bit |
+  101 | `3'b101` | 32-bit |
+  102
+  103 The cache is one entry deep. A memory fetch is issued when `sys_req_i` is asserted and the address misse
+      s. Data arrives the next cycle (1-cycle SRAM latency); `sys_wait_o` back-pressures the upstream index ge
+      nerator during a miss.
+  104
+  105 **`update_state_for_neuron` 2-cycle pipeline** — Cycle 1: `mul_a = syn_curr_i`, decayed syn_curr is regi
+      stered. Cycle 2: `mul_a = potential_r`, decayed potential is the final output. `result_valid_o` is only
+      high on cycle 2. If a spike fires, `potential_o` is zeroed (reset-to-zero model).
+  106
+  107 **Memory interface convention** — synchronous SRAM: address/write-data/read-data/write-enable/chip-selec
+      t. Reads return data one cycle after the address (matches the testbench SRAM model).
+  108
+  109 ### Connectivity Modes (`weight_mode` in `act_index_generator`)
+  110
+  111 | `weight_mode_i` | Mode |
+  112 |---|---|
+  113 | `2'b00` | Full (dense) connectivity |
+  114 | `2'b01` | Sparse |
+  115 | `2'b10` | Convolutional |
+  116
+  117 Currently `weight_mode` is hardcoded to `2'b0` in `spike_processing.v` — sparse and conv paths are stubb
+      ed.
+  118
+  119 ### Known Incomplete Areas
+  120
+  121 Several modules contain `// TODO` / `// XXXXX` stubs that are under active development:
+  122
+  123 - **`neuron_processing.v`**: `neuron_update_complete` is tied to `1'b0` (loop never exits); `get_next_sy
+      n_curr_value`, `get_next_bias_curr_value`, `get_next_pot_value` are all `1'b0`; `syn_curr_mem_wr_o` and
+      `pot_mem_wr_o` write-backs are `1'b0`; output spike assembly is missing.
+  124 - **`spike_processing.v`**: `finished_timestep` is `1'b0`; `weight_mode` is hardcoded `0`.
+  125 - **`update_state_for_neuron.v`**: `mul_result` uses `*` (inferred multiplier); signed/unsigned mixing o
+      n `mul_b` is intentional (Q0.32 decay factor).
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create CLAUDE.md?
+ ❯ 1. Yes
+   2. Yes, allow all edits during this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend
+
+╭─── Claude Code v2.1.119 ──────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting started                                 │
+│                 Welcome back Simon!                │ Run /init to create a CLAUDE.md file with instructions … │
+│                                                    │ ──────────────────────────────────────────────────────── │
+│                       ▐▛███▜▌                      │ Recent activity                                          │
+│                      ▝▜█████▛▘                     │ No recent activity                                       │
+│                        ▘▘ ▝▝                       │                                                          │
+│   Sonnet 4.6 · Claude Pro ·                        │                                                          │
+│   simon.davidson@manchester.ac.uk's Organization   │                                                          │
+│                    ~/dev/snnAcc                    │                                                          │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+❯ /init                                                                                                          
+
+● I'll explore the codebase to understand its structure before updating the CLAUDE.md.
+
+  Searched for 1 pattern, read 9 files, listed 2 directories (ctrl+o to expand)
+
+● I have enough context now. There's no CLAUDE.md in snnAcc/ yet (only in the parent /home/davidsos/dev/). I'll
+  create one here with improved content based on what I learned reading the source.
+
+● Write(CLAUDE.md)
+  ⎿  Wrote 125 lines to CLAUDE.md
+      2 # CLAUDE.md                      
+      3 This file provides guidance to Claude Code (claude.ai/code) when working with code in this reposit
+        ory.                                                                                                     
+      5 ## Project Overview
+      6                                                                                                          
+      7 Verilog RTL design for an **SNN (Spiking Neural Network) Hardware Accelerator**. Implements a two-     
+         `neuron_processing` integrates those currents to update neuron state and emit output spikes. then
+      8
+      9 The sibling directories (`5_test_write_config_regs_...`, `6_about_to_add_xy_...`, etc.) are snapsh
+        ot variants at earlier development stages — the canonical design lives here in `snnAcc/`.
+     … +145 lines (ctrl+o to expand)
+
+● Created /home/davidsos/dev/snnAcc/CLAUDE.md. Key additions over the existing parent-directory CLAUDE.md:
+
+  - AXI config register map with all offsets in one place                                                        
+  - Valid/taken handshake documented as the universal flow-control protocol
+  - dataline_cache_with_xy slice_sz_i encoding table (how element widths map to the 3-bit field)                 
+  - update_state_for_neuron 2-cycle pipeline explained (which operands go to the shared multiplier on each cycle)
+  - Connectivity modes table for weight_mode_i and note that sparse/conv are currently stubbed                   
+  - Known incomplete areas — neuron_processing has several signals tied to 0 (writeback, loop termination, spike 
+  output assembly) that are under active development; spike_processing has weight_mode hardcoded                 
+                                                                                                                 
+✻ Cogitated for 1m 38s                                                                                           
+                                                                                                               
+※ recap: Created CLAUDE.md in snnAcc/ documenting the codebase architecture, config registers, handshake         
+  protocol, and known incomplete stubs. No active task is in progress — the next action would be to start working
+   on one of the incomplete neuron_processing areas. (disable recaps in /config)                                 
+                                                                                                               
+❯ I've updated file neuron_processing.v                                                                          
+                                        
+  Read 1 file (ctrl+o to expand)                                                                                 
+                                           
+● I can see the key change: neuron_update_complete was 1'b0 (never completing) and is now wired to detect the
+  last neuron. However, there's a syntax error on line 200 — the ternary operator is missing its false branch:   
+                                           
+  // Line 200 - missing `: 1'b0` false branch                                                                    
+  assign neuron_update_complete = (neuron_counter_r == num_neurons_i) ? neuron_taken;                            
+                                                                                                                 
+  Should be:                                                                                                     
+                                                                                                                 
+  assign neuron_update_complete = (neuron_counter_r == num_neurons_i) ? neuron_taken : 1'b0;
+                                                                                                                 
+  Also worth noting: neuron_counter_r is never reset to 0 when a block completes — it stays at num_neurons_i     
+  until the next reset. If neuron_processing can be triggered for a second block (e.g. across timesteps), the    
+  counter would immediately fire neuron_update_complete on the first neuron_taken. You may want to reset it in   
+  the neuron_update_complete case.                          
+
+  The rest of the stubs (get_next_bias_curr_value, get_next_pot_value, write-backs, spike output) are unchanged  
+  from before. Want me to fix the syntax error, or are there more changes coming first?
+                                                                                                                 
+❯ /plan                                                                                                          
+  ⎿  Enabled plan mode                                                                                          
+                                                                                                                 
+※ recap: Implementing neuron_processing completion logic. The neuron_update_complete assignment on line 200 has a
+   syntax error — the ternary operator is missing its false branch `: 1'b0`. (disable recaps in /config)         
+                                                                                                                 
+❯ i've fixed the bug on line 200 and the reset condition on neuron_counter_r. I've added a new file, packer.v    
+    to the project directory. I want to instantate an instance of packer inside neuron_processing, after the     
+                                                                                                                 
+    instance of update_state_for_neuron. It takes the data value of signal spike, which is valid when signal     
+                                                                                                                 
+    result_valid is asserted. when it takes the data it asserts result_taken for one cycle. It will pack         
+  multiple                                                                                                       
+    such spike values until it has filled the data word (32 spikes). This triggers a flush to the memory through 
+    the spike_mem_* interface.                                                                                   
+
+● Let me explore packer.v and the updated neuron_processing.v in parallel.
+                                                                                                               
+● 2 Explore agents finished (ctrl+o to expand)
+   ├ Read packer.v interface · 1 tool use · 16.7k tokens                                                         
+   │ ⎿  Done          
+   └ Read updated neuron_processing.v · 1 tool use · 16.8k tokens                                                
+     ⎿  Done                                                                                                   
+                                                                                                                 
+● Let me read packer.v directly to verify the interface details before designing the plan.                       
+                                                                                                               
+  Read 2 files (ctrl+o to expand)                                                                                
+                                                                                                                 
+● Now I have everything I need. Let me write the plan.                                                           
+                                                                                                                 
+● Updated plan                                                                                                   
+  ⎿  /plan to preview                                                                                            
+                                                                                                                 
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Ready to code?                                                                                                  
+                                                                                                                 
+ Here is Claude's plan:                                                                                          
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Plan: Instantiate packer inside neuron_processing                                                               
+                                                        
+ Context
+
+ neuron_processing computes a spike (0 or 1) for each neuron via update_state_for_neuron. These spikes currently
+  have no writeback path — spike_mem_* ports are undriven stubs. The packer module (newly added packer.v)
+ accumulates 32 individual 1-bit spike values into a 32-bit word and flushes to memory. This plan wires packer
+ between update_state_for_neuron and the spike_mem_* memory interface.
+
+ ---
+ Files to Modify
+
+ ┌─────────────────────┬─────────────────────────────────────────────────────────────────┐
+ │        File         │                             Change                              │
+ ├─────────────────────┼─────────────────────────────────────────────────────────────────┤
+ │ packer.v            │ Uncomment \include "constants.v"`                               │
+ ├─────────────────────┼─────────────────────────────────────────────────────────────────┤
+ │ neuron_processing.v │ Add declarations, port, packer instance, fix result_taken       │
+ ├─────────────────────┼─────────────────────────────────────────────────────────────────┤
+ │ acc_snn_processor.v │ Add np_spike_base_addr_r config reg + wire to neuron_processing │
+ ├─────────────────────┼─────────────────────────────────────────────────────────────────┤
+ │ tbAccSNN.bsh        │ Add packer.v to xrun file list                                  │
+ └─────────────────────┴─────────────────────────────────────────────────────────────────┘
+
+ ---
+ Step 1 — Fix packer.v include
+
+ Line 2 currently: //\include "constants.v"— uncomment it. Without this,PIN_BITS, POT_BITS, ADDR_SIZE,
+ POT_OUT_SZ_SZ` are undefined in packer's compilation unit.
+
+ ---
+ Step 2 — neuron_processing.v changes
+
+ 2a. Add missing wire declarations (in the signal declaration block, ~line 115)
+
+ These signals are used but not explicitly declared:
+
+ wire                             neuron_valid;
+ wire                             result_valid;
+ wire                             result_taken;
+ wire                             spike;
+
+ 2b. Add new input port for spike base address
+
+ In the port list (after existing pot_base_addr_i or with the other base address ports):
+
+ input wire      [MEM_ADDR_BITS-1:0] spike_base_addr_i,
+
+ Drive the already-declared spike_base_addr_r wire:
+ assign spike_base_addr_r = spike_base_addr_i;
+
+ 2c. Add packer interface wire declarations
+
+ wire packer_busy;
+ wire packer_finish;
+ wire packer_full;
+
+ 2d. Fix result_taken — back-pressure from packer
+
+ Currently (line 474): assign result_taken = result_valid;
+
+ Replace with:
+ assign result_taken = result_valid & ~packer_full;
+
+ This stalls update_state_for_neuron when the packer cannot accept more data.
+
+ 2e. Instantiate packer after the update_state_for_neuron instance
+
+ packer spike_packer0 (
+     .clk                (clk),
+     .reset              (reset),
+     .busy_o             (packer_busy),
+     .finish_o           (packer_finish),
+     .pak_write_i        (result_valid),
+     .pak_full_o         (packer_full),
+     .pak_colour_i       (1'b0),
+     .pak_last_i         (neuron_counter_r == num_neurons_i),
+     .pak_index_i        ({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
+     .pak_acc_data_i     ({spike, {(`POT_BITS-1){1'b0}}}),
+     .pot_wr_o           (spike_mem_wr_o),
+     .pot_wait_i         (spike_mem_wait_i),
+     .pot_addr_o         (spike_mem_addr_o),
+     .pot_data_o         (spike_mem_data_o),
+     .pak_colour_sel_o   (),
+     .pak_out_sz_i       ({`POT_OUT_SZ_SZ{1'b0}}),   // 0 = 1-bit fields (32 spikes/word)
+     .pak_colour_bs_o    (),
+     .pak_out_base_addr_i(spike_base_addr_r)
+ );
+
+ Signal rationale:
+ - pak_write_i = result_valid — write to packer whenever a neuron result is ready
+ - pak_last_i = (neuron_counter_r == num_neurons_i) — same condition used by syn_curr_index_last; triggers flush
+  even if word isn't full yet
+ - pak_index_i = neuron_counter_r (zero-padded to PIN_BITS) — encodes both word address (bits [N:5]) and bit
+ position within word (bits [4:0])
+ - pak_acc_data_i = {spike, 31'b0} — packer masks with 32'h8000_0000 for 1-bit mode, so spike must be in bit 31
+ - pak_out_sz_i = 0 — 1-bit field mode: 32 spikes packed per 32-bit word
+ - pot_wr_o / pot_addr_o / pot_data_o → map directly to spike_mem_* ports
+
+ 2f. Remove the dead stub at the bottom
+
+ Delete the // XXXXX comment block and the commented-out spike port declarations (lines 476–483). These are now
+ replaced by the packer instance.
+
+ ---
+ Step 3 — acc_snn_processor.v changes
+
+ 3a. Add config register declaration (~line 202, with the other NP regs)
+
+ reg [MEM_ADDR_BITS-1:0] np_spike_base_addr_r;
+
+ 3b. Reset it (in the reset block)
+
+ np_spike_base_addr_r <= {MEM_ADDR_BITS{1'b0}};
+
+ 3c. Add AXI decode case (suggested offset 8'h64)
+
+ 8'h64: np_spike_base_addr_r <= sys_data_i[MEM_ADDR_BITS-1:0];
+
+ 3d. Add port to neuron_processing instantiation
+
+ .spike_base_addr_i  (np_spike_base_addr_r),
+
+ ---
+ Step 4 — tbAccSNN.bsh
+
+ Add packer.v to the xrun file list:
+
+ xrun ... neuron_processing.v ... packer.v tb_acc_snn_processor.v
+
+ ---
+ Verification
+
+ 1. Compile: Run bash tbAccSNN.bsh — confirm no elaboration errors (no undriven/undeclared ports).
+ 2. Waveform inspection: In SimVision, check:
+   - spike_packer0/pak_write_i pulses once per neuron cycle (when result_valid is high)
+   - spike_packer0/buffer_full asserts after every 32nd write
+   - spike_mem_wr_o fires at each word boundary and on the last (partial) word
+   - spike_mem_data_o contains the expected spike pattern from the random testbench data
+   - spike_packer0/finish_o asserts at the end of the neuron pass
+ 3. Flow control: Confirm that asserting spike_mem_wait_i (if tested) holds pot_wr_o high and stalls
+ result_taken via packer_full.
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+ Claude has written up a plan and is ready to execute. Would you like to proceed?
+
+ ❯ 1. Yes, auto-accept edits
+   2. Yes, manually approve edits
+   3. No, refine with Ultraplan on Claude Code on the web
+   4. Tell Claude what to change
+      shift+tab to approve with this feedback
+
+ ctrl-g to edit in Vim · ~/.claude/plans/i-ve-fixed-the-bug-atomic-bird.md
+
+
+     np_spike_base_addr_r <= {MEM_ADDR_BITS{1'b0}};
+
+     3c. Add AXI decode case (suggested offset 8'h64)
+
+     8'h64: np_spike_base_addr_r <= sys_data_i[MEM_ADDR_BITS-1:0];
+
+     3d. Add port to neuron_processing instantiation
+
+     .spike_base_addr_i  (np_spike_base_addr_r),
+
+     ---
+     Step 4 — tbAccSNN.bsh
+
+     Add packer.v to the xrun file list:
+
+     xrun ... neuron_processing.v ... packer.v tb_acc_snn_processor.v
+
+     ---
+     Verification
+
+     1. Compile: Run bash tbAccSNN.bsh — confirm no elaboration errors (no undriven/undeclared ports).
+     2. Waveform inspection: In SimVision, check:
+       - spike_packer0/pak_write_i pulses once per neuron cycle (when result_valid is high)
+       - spike_packer0/buffer_full asserts after every 32nd write
+       - spike_mem_wr_o fires at each word boundary and on the last (partial) word
+       - spike_mem_data_o contains the expected spike pattern from the random testbench data
+       - spike_packer0/finish_o asserts at the end of the neuron pass
+     3. Flow control: Confirm that asserting spike_mem_wait_i (if tested) holds pot_wr_o high and stalls
+     result_taken via packer_full.
+
+● I'll implement the changes now, starting with the simpler files.
+                                                                                                               
+● Update(packer.v)                                     
+  ⎿  Added 1 line, removed 1 line                                                                                
+      1  /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
+      2 -//`include "constants.v"                                                                                
+      2 +`include "constants.v"                                                                                
+      3                                                                                                          
+      4  module packer(input  wire                  clk,                                                       
+      5                input  wire                  reset,                                                       
+   
+  Read 1 file (ctrl+o to expand)                                                                                 
+                                                                                                               
+● Now I'll make all the changes. Starting with acc_snn_processor.v:
+                                                                                                               
+● Update(acc_snn_processor.v)                                                                                  
+  ⎿  Added 1 line                                                                                                
+      203      reg      [MEM_ADDR_BITS-1:0] np_bias_curr_base_addr_r;                                            
+      204      reg      [MEM_ADDR_BITS-1:0] np_thresh_base_addr_r;                                               
+      205      reg      [MEM_ADDR_BITS-1:0] np_pot_base_addr_r;                                                  
+      206 +    reg      [MEM_ADDR_BITS-1:0] np_spike_base_addr_r;                                                
+      207      reg [NP_SYN_CURR_SLICE_SZ-1:0] np_syn_curr_sz_r;
+      208      reg [NP_BIAS_CURR_SLICE_SZ-1:0] np_bias_curr_sz_r;                                                
+      209      reg    [NP_POT_SLICE_SZ-1:0] np_pot_sz_r;    
+
+● Update(acc_snn_processor.v)                          
+  ⎿  Added 1 line                                                                                              
+      242      //   8'h34  np_syn_curr_sz_r            
+      243      //   8'h38  np_bias_curr_sz_r                                                                     
+      244      //   8'h3C  np_pot_sz_r
+      245 +    //   8'h64  np_spike_base_addr_r                                                                  
+      246      //                                           
+      247      // shared registers:                                                                              
+      248      //   8'h40  bin_point_syn_curr_r             
+
+● Update(acc_snn_processor.v)                          
+  ⎿  Added 1 line                                                                                              
+      269              np_bias_curr_base_addr_r<= {MEM_ADDR_BITS{1'b0}};
+      270              np_thresh_base_addr_r   <= {MEM_ADDR_BITS{1'b0}};                                         
+      271              np_pot_base_addr_r      <= {MEM_ADDR_BITS{1'b0}};
+      272 +            np_spike_base_addr_r    <= {MEM_ADDR_BITS{1'b0}};                                         
+      273              np_syn_curr_sz_r        <= {NP_SYN_CURR_SLICE_SZ{1'b0}};
+      274              np_bias_curr_sz_r       <= {NP_BIAS_CURR_SLICE_SZ{1'b0}};                                 
+      275              np_pot_sz_r             <= {NP_POT_SLICE_SZ{1'b0}};
+
+● Update(acc_snn_processor.v)                          
+  ⎿  Added 1 line                                                                                              
+      292                  8'h28: np_bias_curr_base_addr_r<= sys_data_i[MEM_ADDR_BITS-1:0];
+      293                  8'h2C: np_thresh_base_addr_r   <= sys_data_i[MEM_ADDR_BITS-1:0];                      
+      294                  8'h30: np_pot_base_addr_r      <= sys_data_i[MEM_ADDR_BITS-1:0];
+      295 +                8'h64: np_spike_base_addr_r    <= sys_data_i[MEM_ADDR_BITS-1:0];                      
+      296                  8'h34: np_syn_curr_sz_r        <= sys_data_i[NP_SYN_CURR_SLICE_SZ-1:0];
+      297                  8'h38: np_bias_curr_sz_r       <= sys_data_i[NP_BIAS_CURR_SLICE_SZ-1:0];              
+      298                  8'h3C: np_pot_sz_r             <= sys_data_i[NP_POT_SLICE_SZ-1:0];
+
+● Update(acc_snn_processor.v)                          
+  ⎿  Added 1 line                                                                                              
+      489          .bias_curr_base_addr_i  (np_bias_curr_base_addr_r),
+      490          .thresh_base_addr_i     (np_thresh_base_addr_r),                                              
+      491          .pot_base_addr_i        (np_pot_base_addr_r),
+      492 +        .spike_base_addr_i      (np_spike_base_addr_r),                                               
+      493          .syn_curr_sz_i          (np_syn_curr_sz_r),
+      494          .bias_curr_sz_i         (np_bias_curr_sz_r),                                                  
+      495          .pot_sz_i               (np_pot_sz_r),   
+
+● Now update neuron_processing.v — port, declarations, packer instance, result_taken, and remove the stub:
+                                                                                                               
+● Update(neuron_processing.v)                         
+  ⎿  Added 1 line                                                                                                
+      52      input wire      [MEM_ADDR_BITS-1:0] bias_curr_base_addr_i,
+      53      input wire      [MEM_ADDR_BITS-1:0] thresh_base_addr_i,                                            
+      54      input wire      [MEM_ADDR_BITS-1:0] pot_base_addr_i,
+      55 +    input wire      [MEM_ADDR_BITS-1:0] spike_base_addr_i,                                             
+      56      input wire  [SYN_CURR_SLICE_SZ-1:0] syn_curr_sz_i,
+      57      input wire [BIAS_CURR_SLICE_SZ-1:0] bias_curr_sz_i,                                                
+      58      input wire       [POT_SLICE_SZ-1:0] pot_sz_i, 
+
+● Update(neuron_processing.v)                          
+  ⎿  Added 7 lines                                                                                             
+      118  reg          [NEURON_IDX_SZ-1:0] neuron_counter_r;
+      119  wire                             neuron_update_complete;                                              
+      120  wire                             next_neuron;
+      121 +wire                             neuron_valid;                                                        
+      122 +wire                             result_valid;                                                 
+      123 +wire                             result_taken;                                                        
+      124 +wire                             spike;                                                        
+      125 +wire                             packer_busy;                                                  
+      126 +wire                             packer_finish;                                                
+      127 +wire                             packer_full;                                                  
+      128  // Signals for the synaptic current:
+      129  wire       [SYN_CURR_IDX_SZ-1:0] syn_curr_index;
+      130  wire                             syn_curr_index_valid;
+
+● Now drive spike_base_addr_r from the new port. It's declared as a wire at ~line 161 (now shifted). I'll add the
+   assign near the other base address usage:                                                                   
+
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Added 1 line                                                                                              
+      167  // Signals for the output activations (spikes):                                                       
+      168  wire        [SPIKE_SLICE_SZ-1:0] spike_sz;                                                            
+      169  wire            [`ADDR_SIZE-1:0] spike_base_addr_r;
+      170 +assign spike_base_addr_r = spike_base_addr_i;                                                         
+      171  wire          [SPIKE_IDX_SZ-1:0] spike_index;    
+      172  wire                             spike_index_valid;                                                   
+      173  wire                             spike_wait;     
+
+● Now fix result_taken and add the packer instance, replacing the old stub block:
+                                                                                                               
+● Update(neuron_processing.v)                          
+  ⎿  Added 24 lines, removed 11 lines                                                                            
+      478  assign syn_curr_mem_wr_o = 1'b0;            
+      479  assign pot_mem_wr_o      = 1'b0;                                                                      
+      480                                                   
+      481 -// Once they everything has been written back, acknowledge this entry                                 
+      482 -// to move on to the next:                                                                     
+      483 -assign result_taken = result_valid;                                                                   
+      481 +// Stall update_state_for_neuron while the packer cannot accept data:                          
+      482 +assign result_taken = result_valid & ~packer_full;                                             
+      483  
+      485 -// Assemble the output spike activation word for writeback:                                    
+      486 -// Write the output spike words (activations) to the output                                    
+      487 -// buffer:                                                                                     
+      488 -//wire                     spike_mem_wr_o,                                                     
+      489 -//wire                     spike_mem_wait_i,                                                   
+      490 -//wire    [`ADDR_SIZE-1:0] spike_mem_addr_o,                                                   
+      491 -//wire     [`ACT_BITS-1:0] spike_mem_data_o                                                    
+      492 -// XXXXX                                                                                       
+      484 +// Pack spike bits into 32-bit words and write to spike memory:                                
+      485 +packer spike_packer0 (                                                                         
+      486 +    .clk                 (clk),                                                                
+      487 +    .reset               (reset),                                                              
+      488 +    .busy_o              (packer_busy),                                                        
+      489 +    .finish_o            (packer_finish),                                                      
+      490 +    .pak_write_i         (result_valid),                                                       
+      491 +    .pak_full_o          (packer_full),                                                        
+      492 +    .pak_colour_i        (1'b0),                                                               
+      493 +    .pak_last_i          (neuron_counter_r == num_neurons_i),                                  
+      494 +    .pak_index_i         ({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),              
+      495 +    .pak_acc_data_i      ({spike, {(`POT_BITS-1){1'b0}}}),                                     
+      496 +    .pot_wr_o            (spike_mem_wr_o),                                                     
+      497 +    .pot_wait_i          (spike_mem_wait_i),                                                   
+      498 +    .pot_addr_o          (spike_mem_addr_o),                                                   
+      499 +    .pot_data_o          (spike_mem_data_o),                                                   
+      500 +    .pak_colour_sel_o    (),                                                                   
+      501 +    .pak_out_sz_i        ({`POT_OUT_SZ_SZ{1'b0}}),                                             
+      502 +    .pak_colour_bs_o     (),                                                                   
+      503 +    .pak_out_base_addr_i (spike_base_addr_r)                                                   
+      504 +);                                                                                             
+      505 +                                                                                               
+      506  endmodule
+      507  
+
+● Now add packer.v to the simulation script:           
+                                                                                                               
+● Update(tbAccSNN.bsh)                                 
+  ⎿  Added 1 line, removed 1 line                                                                                
+       9  pot_ss="./pot_subsystem"                     
+      10                                                                                                         
+      11  # Test bench for neuron state update:             
+      12 -xrun -sv -gui -timescale 1ns/1ps -access wrc -top tb_acc_snn_processor acc_snn_processor.v spike       
+         -_processing.v act_index_generator.v weight_generator.v syn_curr_update.v update_state_for_neuron
+         -.v neuron_processing.v dataline_cache_with_xy.v slice_and_align.v tb_acc_snn_processor.v               
+      12 +xrun -sv -gui -timescale 1ns/1ps -access wrc -top tb_acc_snn_processor acc_snn_processor.v spike
+         +_processing.v act_index_generator.v weight_generator.v syn_curr_update.v update_state_for_neuron
+         +.v neuron_processing.v dataline_cache_with_xy.v slice_and_align.v packer.v tb_acc_snn_processor.
+         +v                                                                                               
+      13  
+
+● Let me do a quick sanity check on the final state of the modified sections:
+                                                                                                               
+  Read 1 file (ctrl+o to expand)    
+                                                                                                                 
+● Everything looks correct. Now update CLAUDE.md to reflect that spike output is no longer a stub:
+                                                                                                                 
+● Update(CLAUDE.md)                                                                                            
+  ⎿  Added 1 line, removed 1 line                                                                                
+      120                                                                                                        
+      121  Several modules contain `// TODO` / `// XXXXX` stubs that are under active development:               
+      122                                                                                                        
+      123 -- **`neuron_processing.v`**: `neuron_update_complete` is tied to `1'b0` (loop never exits); `ge       
+          -t_next_syn_curr_value`, `get_next_bias_curr_value`, `get_next_pot_value` are all `1'b0`; `syn_c
+          -urr_mem_wr_o` and `pot_mem_wr_o` write-backs are `1'b0`; output spike assembly is missing.            
+      123 +- **`neuron_processing.v`**: `get_next_bias_curr_value` and `get_next_pot_value` are `1'b0`; `s
+          +yn_curr_mem_wr_o` and `pot_mem_wr_o` write-backs are `1'b0`. Spike output is implemented via `s
+          +pike_packer0` (`packer.v`): accumulates 1-bit spike values into 32-bit words and writes through
+          + `spike_mem_*`.                                                                                
+      124  - **`spike_processing.v`**: `finished_timestep` is `1'b0`; `weight_mode` is hardcoded `0`.
+      125  - **`update_state_for_neuron.v`**: `mul_result` uses `*` (inferred multiplier); signed/unsigned
+            mixing on `mul_b` is intentional (Q0.32 decay factor).
+
+● Also update the AXI config register map in CLAUDE.md to include the new spike base address register:
+                                                                                                               
+● Update(CLAUDE.md)                                    
+  ⎿  Added 1 line                                                                                                
+      81  | `0x38` | `np_bias_curr_sz_r` |             
+      82  | `0x3C` | `np_pot_sz_r` |                                                                             
+      83  | `0x40` | `bin_point_syn_curr_r` |               
+      84 +| `0x64` | `np_spike_base_addr_r` |                                                                    
+      85  | `0x44–0x5C` | Grid/kernel size registers (in/out X/Y, stride, packing) |
+      86                                                                                                         
+      87  `sys_ack_o` is asserted combinationally on the same cycle as `sys_req_i` when the address matche
+          s.
+
+● All changes are complete. Here's a summary of what was done across the four files:
+                                                                                                               
+  packer.v — uncommented `include "constants.v" so PIN_BITS, POT_BITS, ADDR_SIZE, POT_OUT_SZ_SZ are defined.     
+                                                                                                                 
+  neuron_processing.v:                                                                                           
+  - Added new port spike_base_addr_i                                                                             
+  - Added explicit wire declarations for neuron_valid, result_valid, result_taken, spike, and the three packer   
+  interface wires (packer_busy, packer_finish, packer_full)                                                   
+  - Assigned spike_base_addr_r = spike_base_addr_i                                                               
+  - Fixed result_taken to result_valid & ~packer_full (back-pressure when packer is full)
+  - Instantiated spike_packer0: pak_write_i = result_valid, spike in bit-31 of pak_acc_data_i, pak_last_i matches
+   the syn_curr_index_last condition, pak_out_sz_i = 0 for 1-bit mode                                            
+  - Removed the // XXXXX stub                                                                                    
+                                                                                                                 
+  acc_snn_processor.v — added np_spike_base_addr_r config register with reset, AXI decode at offset 8'h64, and   
+  wired it to the neuron_processing instantiation.                                                               
+   
+  tbAccSNN.bsh — added packer.v to the xrun file list.                                                           
+                                                            
+✻ Cogitated for 6m 8s                                                                                            
+                                                                                                               
+※ recap: Instantiating packer.v inside neuron_processing to write packed spike output words to memory. All four  
+  file changes are complete and ready to simulate with bash tbAccSNN.bsh. (disable recaps in /config)            
+                                                                                                                 
+❯ I've tidied up neuron_processing. Could you update the testbench to drive any configuration and base_address   
+  registers that have not yet been set up?                                                                       
+                                                                                                                 
+● Let me read the full testbench and the current state of neuron_processing.v to understand what's already wired 
+  up.                                    
+                                                                                                                 
+  Read 1 file (ctrl+o to expand)    
+                                                                                                                 
+● Now I can see exactly what's missing. The testbench already has most registers but is missing:
+  - sp_weights_per_word_r (0x54)                       
+  - sp_rows_per_neuron_r (0x58)                                                                                  
+  - sp_weight_idx_sz_r (0x5C)                                                                                    
+  - bin_point_syn_curr_r (0x40)                                                                                  
+  - np_spike_base_addr_r (0x64) — the new one we just added                                                      
+                                                                                                                 
+● Update(tb_acc_snn_processor.v)                                                                                 
+  ⎿  Added 11 lines, removed 4 lines
+      448          cfg_write(32'hFFFF_0048, 32'h0000_0003); // sp_in_y_len_r        = 3                          
+      449          cfg_write(32'hFFFF_004C, 32'h0000_0005); // sp_out_x_len_r       = 5
+      450          cfg_write(32'hFFFF_0050, 32'h0000_0002); // sp_out_y_len_r       = 2                          
+      451 +        cfg_write(32'hFFFF_0054, 32'h0000_0004); // sp_weights_per_word_r = 4 (4 x 8-bit weight
+          +s per 32-bit word)                                                                                    
+      452 +        cfg_write(32'hFFFF_0058, 32'h0000_0004); // sp_rows_per_neuron_r = 4                   
+      453 +        cfg_write(32'hFFFF_005C, 32'h0000_000A); // sp_weight_idx_sz_r   = 10                  
+      454  
+      455 +        // ---- shared config registers ----                                                   
+      456 +        cfg_write(32'hFFFF_0040, 32'h0000_0008); // bin_point_syn_curr_r = 8                   
+      457 +                                                                                               
+      458          // ---- neuron_processing config registers ----
+      453 -        cfg_write(32'hFFFF_0020, 32'h0000_0020); // np_num_neurons_r     = 32                  
+      459 +        cfg_write(32'hFFFF_0020, 32'h0000_001F); // np_num_neurons_r     = 31 (last index; 32 n
+          +eurons 0..31)                                                                                  
+      460          cfg_write(32'hFFFF_0028, 32'h0000_2000); // np_bias_curr_base_addr_r
+      461          cfg_write(32'hFFFF_002C, 32'h0000_1000); // np_thresh_base_addr_r
+      462          cfg_write(32'hFFFF_0030, 32'h0000_2000); // np_pot_base_addr_r
+      457 -        cfg_write(32'hFFFF_0034, 32'h0000_0003); // np_syn_curr_sz_r     = 3                   
+      458 -        cfg_write(32'hFFFF_0038, 32'h0000_0003); // np_bias_curr_sz_r    = 3                   
+      459 -        cfg_write(32'hFFFF_003C, 32'h0000_0003); // np_pot_sz_r          = 3                   
+      463 +        cfg_write(32'hFFFF_0064, 32'h0000_3000); // np_spike_base_addr_r                       
+      464 +        cfg_write(32'hFFFF_0034, 32'h0000_0003); // np_syn_curr_sz_r     = 3 (8-bit elements)  
+      465 +        cfg_write(32'hFFFF_0038, 32'h0000_0003); // np_bias_curr_sz_r    = 3 (8-bit elements)  
+      466 +        cfg_write(32'hFFFF_003C, 32'h0000_0003); // np_pot_sz_r          = 3 (8-bit elements)  
+      467  
+      468          $display("[TB] Config registers written at cycle %0d", cycle_count);
+      469  
+
+● One thing I changed that I should flag: I updated np_num_neurons_r from 32 to 31. Looking at the
+  neuron_update_complete condition — (neuron_counter_r == num_neurons_i) ? neuron_taken — num_neurons_i behaves
+  as the last valid neuron index, not a count. With 32 neurons (0..31), the correct value is 31. If the original 
+  32 was intentional, revert that line. Let me verify the other values look right:
+                                                                                                                 
+  Read 1 file (ctrl+o to expand)                            
+                           
+● That looks good. Here's a summary of what was added:                                                           
+                                                      
+  New cfg_write calls added:                                                                                     
+                                                                                                                 
+  ┌────────┬───────────────────────┬────────┬──────────────────────────────────────────────────────────────┐     
+  │ Offset │       Register        │ Value  │                          Rationale                           │     
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤     
+  │ 0x54   │ sp_weights_per_word_r │ 4      │ 4 × 8-bit weights fit in a 32-bit word                       │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x58   │ sp_rows_per_neuron_r  │ 4      │ Matches ROWS_PER_NEURON instantiation parameter              │     
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤     
+  │ 0x5C   │ sp_weight_idx_sz_r    │ 10     │ Matches WEIGHT_IDX_SZ instantiation parameter                │     
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤     
+  │ 0x40   │ bin_point_syn_curr_r  │ 8      │ Bit-8 binary point (Q8.24 fixed-point scaling)               │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤     
+  │ 0x64   │ np_spike_base_addr_r  │ 0x3000 │ Distinct region from syn_curr (0x1000) and bias/pot (0x2000) │
+  └────────┴───────────────────────┴────────┴──────────────────────────────────────────────────────────────┘     
+                                                            
+  np_num_neurons_r changed from 32 → 31: The neuron_update_complete logic treats this as a last-valid-index, not 
+  a count. With 32 neurons (0..31), the correct value is 31. If you intended 33 neurons, revert to 32.
+                                                                                                                 
+✻ Brewed for 1m 34s                                         
+
+───────────────────────────────────────────────────────────────────────── instantiate-packer-neuron-processing ──
+❯  
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)                   
+
+      466 +        cfg_write(32'hFFFF_003C, 32'h0000_0003); // np_pot_sz_r          = 3 (8-bit elements)  
+      467  
+      468          $display("[TB] Config registers written at cycle %0d", cycle_count);
+      469  
+
+● One thing I changed that I should flag: I updated np_num_neurons_r from 32 to 31. Looking at the
+  neuron_update_complete condition — (neuron_counter_r == num_neurons_i) ? neuron_taken — num_neurons_i behaves
+  as the last valid neuron index, not a count. With 32 neurons (0..31), the correct value is 31. If the original
+  32 was intentional, revert that line. Let me verify the other values look right:
+
+  Read 1 file (ctrl+o to expand)
+
+● That looks good. Here's a summary of what was added:
+
+  New cfg_write calls added:
+
+  ┌────────┬───────────────────────┬────────┬──────────────────────────────────────────────────────────────┐
+  │ Offset │       Register        │ Value  │                          Rationale                           │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x54   │ sp_weights_per_word_r │ 4      │ 4 × 8-bit weights fit in a 32-bit word                       │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x58   │ sp_rows_per_neuron_r  │ 4      │ Matches ROWS_PER_NEURON instantiation parameter              │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x5C   │ sp_weight_idx_sz_r    │ 10     │ Matches WEIGHT_IDX_SZ instantiation parameter                │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x40   │ bin_point_syn_curr_r  │ 8      │ Bit-8 binary point (Q8.24 fixed-point scaling)               │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x64   │ np_spike_base_addr_r  │ 0x3000 │ Distinct region from syn_curr (0x1000) and bias/pot (0x2000) │
+  └────────┴───────────────────────┴────────┴──────────────────────────────────────────────────────────────┘
+
+  np_num_neurons_r changed from 32 → 31: The neuron_update_complete logic treats this as a last-valid-index, not
+  a count. With 32 neurons (0..31), the correct value is 31. If you intended 33 neurons, revert to 32.
+
+✻ Brewed for 1m 34s
+
+───────────────────────────────────────────────────────────────────────── instantiate-packer-neuron-processing ──
+❯ 
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)
+
+      465 +        cfg_write(32'hFFFF_0038, 32'h0000_0003); // np_bias_curr_sz_r    = 3 (8-bit elements)  
+      466 +        cfg_write(32'hFFFF_003C, 32'h0000_0003); // np_pot_sz_r          = 3 (8-bit elements)  
+      467  
+      468          $display("[TB] Config registers written at cycle %0d", cycle_count);
+      469  
+
+● One thing I changed that I should flag: I updated np_num_neurons_r from 32 to 31. Looking at the
+  neuron_update_complete condition — (neuron_counter_r == num_neurons_i) ? neuron_taken — num_neurons_i behaves
+  as the last valid neuron index, not a count. With 32 neurons (0..31), the correct value is 31. If the original
+  32 was intentional, revert that line. Let me verify the other values look right:
+
+  Read 1 file (ctrl+o to expand)
+
+● That looks good. Here's a summary of what was added:
+
+  New cfg_write calls added:
+
+  ┌────────┬───────────────────────┬────────┬──────────────────────────────────────────────────────────────┐
+  │ Offset │       Register        │ Value  │                          Rationale                           │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x54   │ sp_weights_per_word_r │ 4      │ 4 × 8-bit weights fit in a 32-bit word                       │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x58   │ sp_rows_per_neuron_r  │ 4      │ Matches ROWS_PER_NEURON instantiation parameter              │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x5C   │ sp_weight_idx_sz_r    │ 10     │ Matches WEIGHT_IDX_SZ instantiation parameter                │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x40   │ bin_point_syn_curr_r  │ 8      │ Bit-8 binary point (Q8.24 fixed-point scaling)               │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x64   │ np_spike_base_addr_r  │ 0x3000 │ Distinct region from syn_curr (0x1000) and bias/pot (0x2000) │
+  └────────┴───────────────────────┴────────┴──────────────────────────────────────────────────────────────┘
+
+  np_num_neurons_r changed from 32 → 31: The neuron_update_complete logic treats this as a last-valid-index, not
+  a count. With 32 neurons (0..31), the correct value is 31. If you intended 33 neurons, revert to 32.
+
+✻ Brewed for 1m 34s
+
+───────────────────────────────────────────────────────────────────────── instantiate-packer-neuron-processing ──
+❯ 
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)
+
+      464 +        cfg_write(32'hFFFF_0034, 32'h0000_0003); // np_syn_curr_sz_r     = 3 (8-bit elements)  
+      465 +        cfg_write(32'hFFFF_0038, 32'h0000_0003); // np_bias_curr_sz_r    = 3 (8-bit elements)  
+      466 +        cfg_write(32'hFFFF_003C, 32'h0000_0003); // np_pot_sz_r          = 3 (8-bit elements)  
+      467  
+      468          $display("[TB] Config registers written at cycle %0d", cycle_count);
+      469  
+
+● One thing I changed that I should flag: I updated np_num_neurons_r from 32 to 31. Looking at the
+  neuron_update_complete condition — (neuron_counter_r == num_neurons_i) ? neuron_taken — num_neurons_i behaves
+  as the last valid neuron index, not a count. With 32 neurons (0..31), the correct value is 31. If the original
+  32 was intentional, revert that line. Let me verify the other values look right:
+
+  Read 1 file (ctrl+o to expand)
+
+● That looks good. Here's a summary of what was added:
+
+  New cfg_write calls added:
+
+  ┌────────┬───────────────────────┬────────┬──────────────────────────────────────────────────────────────┐
+  │ Offset │       Register        │ Value  │                          Rationale                           │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x54   │ sp_weights_per_word_r │ 4      │ 4 × 8-bit weights fit in a 32-bit word                       │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x58   │ sp_rows_per_neuron_r  │ 4      │ Matches ROWS_PER_NEURON instantiation parameter              │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x5C   │ sp_weight_idx_sz_r    │ 10     │ Matches WEIGHT_IDX_SZ instantiation parameter                │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x40   │ bin_point_syn_curr_r  │ 8      │ Bit-8 binary point (Q8.24 fixed-point scaling)               │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x64   │ np_spike_base_addr_r  │ 0x3000 │ Distinct region from syn_curr (0x1000) and bias/pot (0x2000) │
+  └────────┴───────────────────────┴────────┴──────────────────────────────────────────────────────────────┘
+
+  np_num_neurons_r changed from 32 → 31: The neuron_update_complete logic treats this as a last-valid-index, not
+  a count. With 32 neurons (0..31), the correct value is 31. If you intended 33 neurons, revert to 32.
+
+✻ Brewed for 1m 34s
+
+───────────────────────────────────────────────────────────────────────── instantiate-packer-neuron-processing ──
+❯ 
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)
+
+      463 +        cfg_write(32'hFFFF_0064, 32'h0000_3000); // np_spike_base_addr_r                       
+      464 +        cfg_write(32'hFFFF_0034, 32'h0000_0003); // np_syn_curr_sz_r     = 3 (8-bit elements)  
+      465 +        cfg_write(32'hFFFF_0038, 32'h0000_0003); // np_bias_curr_sz_r    = 3 (8-bit elements)  
+      466 +        cfg_write(32'hFFFF_003C, 32'h0000_0003); // np_pot_sz_r          = 3 (8-bit elements)  
+      467  
+      468          $display("[TB] Config registers written at cycle %0d", cycle_count);
+      469  
+
+● One thing I changed that I should flag: I updated np_num_neurons_r from 32 to 31. Looking at the
+  neuron_update_complete condition — (neuron_counter_r == num_neurons_i) ? neuron_taken — num_neurons_i behaves
+  as the last valid neuron index, not a count. With 32 neurons (0..31), the correct value is 31. If the original
+  32 was intentional, revert that line. Let me verify the other values look right:
+
+  Read 1 file (ctrl+o to expand)
+
+● That looks good. Here's a summary of what was added:
+
+  New cfg_write calls added:
+
+  ┌────────┬───────────────────────┬────────┬──────────────────────────────────────────────────────────────┐
+  │ Offset │       Register        │ Value  │                          Rationale                           │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x54   │ sp_weights_per_word_r │ 4      │ 4 × 8-bit weights fit in a 32-bit word                       │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x58   │ sp_rows_per_neuron_r  │ 4      │ Matches ROWS_PER_NEURON instantiation parameter              │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x5C   │ sp_weight_idx_sz_r    │ 10     │ Matches WEIGHT_IDX_SZ instantiation parameter                │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x40   │ bin_point_syn_curr_r  │ 8      │ Bit-8 binary point (Q8.24 fixed-point scaling)               │
+  ├────────┼───────────────────────┼────────┼──────────────────────────────────────────────────────────────┤
+  │ 0x64   │ np_spike_base_addr_r  │ 0x3000 │ Distinct region from syn_curr (0x1000) and bias/pot (0x2000) │
+  └────────┴───────────────────────┴────────┴──────────────────────────────────────────────────────────────┘
+
+  np_num_neurons_r changed from 32 → 31: The neuron_update_complete logic treats this as a last-valid-index, not
+  a count. With 32 neurons (0..31), the correct value is 31. If you intended 33 neurons, revert to 32.
+
+✻ Brewed for 1m 34s
+
+※ recap: Implementing spike output writeback in neuron_processing using the new packer module. Config registers  
+  are all wired up; next step is to run the simulation and check waveforms.
+                                                                                                                 
+❯ Could you rename signals np_num_neurons_* to np_last_neuron_idx_* to reflect correct usage? This affects the   
+  testbench down to neuron_processing.                                                                           
+                                                                                                                 
+● Let me find every occurrence across all affected files first.                                                  
+                                         
+  Searched for 2 patterns (ctrl+o to expand)                                                                     
+   
+● Four files to touch. I'll do them all in parallel:                                                             
+                                                            
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Error editing file                                     
+                                                                                                                 
+● Update(acc_snn_processor.v)                               
+  ⎿  Added 1 line, removed 1 line                                                                                
+      199      //----------------------------------------------------------------                                
+      200      // neuron_processing config registers                                                             
+      201      //----------------------------------------------------------------                                
+      202 -    reg   [NP_NEURON_IDX_SZ-1:0] np_num_neurons_r;                                             
+      202 +    reg   [NP_NEURON_IDX_SZ-1:0] np_last_neuron_idx_r;                                                
+      203      reg      [MEM_ADDR_BITS-1:0] np_bias_curr_base_addr_r;
+      204      reg      [MEM_ADDR_BITS-1:0] np_thresh_base_addr_r;
+      205      reg      [MEM_ADDR_BITS-1:0] np_pot_base_addr_r;
+
+  Read 1 file (ctrl+o to expand)                  
+                        
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Added 6 lines, removed 6 lines               
+      47      input  wire                    reset,                                                              
+      48                                                                                                         
+      49      // Config registers (driven from acc_snn_processor)                                                
+      50 -    input wire      [NEURON_IDX_SZ-1:0] num_neurons_i,                                                 
+      50 +    input wire      [NEURON_IDX_SZ-1:0] last_neuron_idx_i,                                      
+      51      input wire      [MEM_ADDR_BITS-1:0] syn_curr_base_addr_i,                                          
+      52      input wire      [MEM_ADDR_BITS-1:0] bias_curr_base_addr_i,
+      53      input wire      [MEM_ADDR_BITS-1:0] thresh_base_addr_i,
+     ...
+      181  
+      182  assign next_neuron = neuron_taken;
+      183  
+      184 -assign neuron_update_complete = (neuron_counter_r == num_neurons_i) ? neuron_taken : 1'b0;     
+      184 +assign neuron_update_complete = (neuron_counter_r == last_neuron_idx_i) ? neuron_taken : 1'b0; 
+      185  
+      186  always @ (posedge clk)
+      187  begin
+     ...
+      215  
+      216  assign syn_curr_index       = neuron_counter_r;
+      217  assign syn_curr_index_valid = neuron_update_running_r;
+      218 -assign syn_curr_index_last  = (neuron_counter_r == num_neurons_i) ? 1'b1 : 1'b0;               
+      218 +assign syn_curr_index_last  = (neuron_counter_r == last_neuron_idx_i) ? 1'b1 : 1'b0;           
+      219  
+      220  // Reading synaptic currents:
+      221  dataline_cache_with_xy #(
+     ...
+      262  //
+      263  assign bias_curr_index       = neuron_counter_r;
+      264  assign bias_curr_index_valid = neuron_update_running_r;
+      265 -assign bias_curr_index_last  = (neuron_counter_r == num_neurons_i) ? 1'b1 : 1'b0;              
+      265 +assign bias_curr_index_last  = (neuron_counter_r == last_neuron_idx_i) ? 1'b1 : 1'b0;          
+      266  
+      267  // Reading bias currents:
+      268  dataline_cache_with_xy #(
+     ...
+      349  //
+      350  assign pot_index = neuron_counter_r;
+      351  assign pot_index_valid = neuron_update_running_r;
+      352 -assign pot_index_last  = (neuron_counter_r == num_neurons_i) ? 1'b1 : 1'b0;                    
+      352 +assign pot_index_last  = (neuron_counter_r == last_neuron_idx_i) ? 1'b1 : 1'b0;                
+      353  
+      354  // Reading neuron potentials:
+      355  dataline_cache_with_xy #(
+     ...
+      434      .pak_write_i         (result_valid),
+      435      .pak_full_o          (packer_full),
+      436      .pak_colour_i        (1'b0),
+      437 -    .pak_last_i          (neuron_counter_r == num_neurons_i),                                  
+      437 +    .pak_last_i          (neuron_counter_r == last_neuron_idx_i),                              
+      438      .pak_index_i         ({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
+      439      .pak_acc_data_i      ({spike, {(`POT_BITS-1){1'b0}}}),
+      440      .pot_wr_o            (spike_mem_wr_o),
+
+● Now the remaining renames in acc_snn_processor.v, the testbench comment, and CLAUDE.md:
+
+● Update(acc_snn_processor.v)                                                                                    
+  ⎿  Added 4 lines, removed 4 lines
+      235      //   8'h5C  sp_weight_idx_sz_r                                                                    
+      236      //                                           
+      237      // neuron_processing registers:                                                                   
+      238 -    //   8'h20  np_num_neurons_r                                                               
+      238 +    //   8'h20  np_last_neuron_idx_r                                                                  
+      239      //   8'h28  np_bias_curr_base_addr_r         
+      240      //   8'h2C  np_thresh_base_addr_r
+      241      //   8'h30  np_pot_base_addr_r
+     ...
+      265              sp_weights_per_word_r   <= {SP_ELEMS_PER_ROW{1'b0}};
+      266              sp_rows_per_neuron_r    <= {SP_ROWS_PER_NEURON{1'b0}};
+      267              sp_weight_idx_sz_r      <= {SP_WEIGHT_IDX_SZ{1'b0}};
+      268 -            np_num_neurons_r        <= {NP_NEURON_IDX_SZ{1'b0}};                               
+      268 +            np_last_neuron_idx_r        <= {NP_NEURON_IDX_SZ{1'b0}};                           
+      269              np_bias_curr_base_addr_r<= {MEM_ADDR_BITS{1'b0}};
+      270              np_thresh_base_addr_r   <= {MEM_ADDR_BITS{1'b0}};
+      271              np_pot_base_addr_r      <= {MEM_ADDR_BITS{1'b0}};
+     ...
+      288                  8'h54: sp_weights_per_word_r   <= sys_data_i[SP_ELEMS_PER_ROW-1:0];
+      289                  8'h58: sp_rows_per_neuron_r    <= sys_data_i[SP_ROWS_PER_NEURON-1:0];
+      290                  8'h5C: sp_weight_idx_sz_r      <= sys_data_i[SP_WEIGHT_IDX_SZ-1:0];
+      291 -                8'h20: np_num_neurons_r        <= sys_data_i[NP_NEURON_IDX_SZ-1:0];            
+      291 +                8'h20: np_last_neuron_idx_r        <= sys_data_i[NP_NEURON_IDX_SZ-1:0];        
+      292                  8'h28: np_bias_curr_base_addr_r<= sys_data_i[MEM_ADDR_BITS-1:0];
+      293                  8'h2C: np_thresh_base_addr_r   <= sys_data_i[MEM_ADDR_BITS-1:0];
+      294                  8'h30: np_pot_base_addr_r      <= sys_data_i[MEM_ADDR_BITS-1:0];
+     ...
+      484          .reset                  (reset),
+      485  
+      486          // Config registers
+      487 -        .num_neurons_i          (np_num_neurons_r),                                            
+      487 +        .num_neurons_i          (np_last_neuron_idx_r),                                        
+      488          .syn_curr_base_addr_i   (syn_curr_base_addr_r),
+      489          .bias_curr_base_addr_i  (np_bias_curr_base_addr_r),
+      490          .thresh_base_addr_i     (np_thresh_base_addr_r),
+
+● Update(acc_snn_processor.v)                     
+  ⎿  Added 1 line, removed 1 line
+      484          .reset                  (reset),                                                              
+      485  
+      486          // Config registers                                                                           
+      487 -        .num_neurons_i          (np_last_neuron_idx_r),                                        
+      487 +        .last_neuron_idx_i      (np_last_neuron_idx_r),                                               
+      488          .syn_curr_base_addr_i   (syn_curr_base_addr_r),
+      489          .bias_curr_base_addr_i  (np_bias_curr_base_addr_r),
+      490          .thresh_base_addr_i     (np_thresh_base_addr_r),
+
+● Update(acc_snn_processor.v)                     
+  ⎿  Error editing file
+                                                                                                                 
+● Update(tb_acc_snn_processor.v)                  
+  ⎿  Added 1 line, removed 1 line                                                                                
+      456          cfg_write(32'hFFFF_0040, 32'h0000_0008); // bin_point_syn_curr_r = 8                          
+      457                                                                                                        
+      458          // ---- neuron_processing config registers ----                                               
+      459 -        cfg_write(32'hFFFF_0020, 32'h0000_001F); // np_num_neurons_r     = 31 (last index; 32 n
+          -eurons 0..31)                                                                                         
+      459 +        cfg_write(32'hFFFF_0020, 32'h0000_001F); // np_last_neuron_idx_r = 31 (last index; 32 n
+          +eurons 0..31)                                                                                  
+      460          cfg_write(32'hFFFF_0028, 32'h0000_2000); // np_bias_curr_base_addr_r
+      461          cfg_write(32'hFFFF_002C, 32'h0000_1000); // np_thresh_base_addr_r
+      462          cfg_write(32'hFFFF_0030, 32'h0000_2000); // np_pot_base_addr_r
+
+● Update(CLAUDE.md)                               
+  ⎿  Added 1 line, removed 1 line
+      73  | `0x08` | `syn_curr_base_addr_r` (shared) |                                                           
+      74  | `0x0C` | `sp_weight_sz_r` |
+      75  | `0x14` | `sp_total_timesteps_r` |                                                                    
+      76 -| `0x20` | `np_num_neurons_r` |                                                                 
+      76 +| `0x20` | `np_last_neuron_idx_r` |                                                                    
+      77  | `0x28` | `np_bias_curr_base_addr_r` |           
+      78  | `0x2C` | `np_thresh_base_addr_r` |
+      79  | `0x30` | `np_pot_base_addr_r` |
+
+● The comment update in acc_snn_processor.v failed because the replace_all on np_num_neurons_r already updated
+  it. Let me verify:
+                                                                                                                 
+  Searched for 1 pattern (ctrl+o to expand)       
+                                                                                                                 
+● All 12 occurrences renamed cleanly across all four files — no old name remains anywhere.                       
+   
+✻ Brewed for 38s                                                                                                 
+                                                            
+※ recap: Added a packer instance to neuron_processing to write spike outputs to memory, plus config register     
+  wiring and testbench stimulus. Next step is to run the simulation and check the waveforms.
+                                                                                                                 
+❯ I'wc made some edits to neuron_processing. The block update_state_for_neuron was receiving the wrong signals   
+  for syn_curr_i, potential_i, bias_curr_i and threshold_i.                                                      
+                                                                                                                 
+  Read 1 file (ctrl+o to expand)                                                                                 
+                                                                                                                 
+● The signals are now connected to the cache outputs — the right fix. Let me read the surrounding declarations to
+   see what else changed, particularly the threshold signal name:                                                
+                                                                                                                 
+  Read 1 file (ctrl+o to expand)                                                                                 
+                                                                                                                 
+● I see a potential mismatch — the instantiation uses .threshold_i(threshold_data_out) but the wire from the     
+  threshold cache is named thresh_data_out. Let me confirm: 
+                                                                                                                 
+  Read 1 file (ctrl+o to expand)                                                                                 
+                                                                                                                 
+● Confirmed — line 406 uses threshold_data_out but the wire declared at line 152 and driven by the threshold     
+  cache at line 333 is thresh_data_out. That will fail to elaborate. Fixing it:
+                                                                                                                 
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Added 1 line, removed 1 line                                                                                
+      403       .syn_curr_i(syn_curr_data_out),                                                                  
+      404       .potential_i(pot_data_out),                 
+      405       .bias_curr_i(bias_curr_data_out),                                                                
+      406 -     .threshold_i(threshold_data_out),                                                         
+      406 +     .threshold_i(thresh_data_out),                                                                   
+      407       .syn_curr_decay_mult_i(syn_curr_decay_mult),
+      408       .potential_decay_mult_i(potential_decay_mult),
+      409       .neuron_taken_o(neuron_taken),
+
+● The four signals are now correctly wired to the cache outputs:
+
+  ┌─────────────┬──────────────────────────┬───────────────────────────────────────────┐                         
+  │    Port     │           Was            │                    Now                    │
+  ├─────────────┼──────────────────────────┼───────────────────────────────────────────┤                         
+  │ syn_curr_i  │ undeclared syn_curr reg  │ syn_curr_data_out (from syn_curr_cache)   │
+  ├─────────────┼──────────────────────────┼───────────────────────────────────────────┤
+  │ potential_i │ undeclared potential reg │ pot_data_out (from pot_cache)             │                         
+  ├─────────────┼──────────────────────────┼───────────────────────────────────────────┤                         
+  │ bias_curr_i │ undeclared bias_curr reg │ bias_curr_data_out (from bias_curr_cache) │                         
+  ├─────────────┼──────────────────────────┼───────────────────────────────────────────┤                         
+  │ threshold_i │ undeclared threshold reg │ thresh_data_out (from threshold_cache)    │
+  └─────────────┴──────────────────────────┴───────────────────────────────────────────┘                         
+   
+  The threshold_data_out typo introduced in the edit was also fixed to match the declared wire thresh_data_out.  
+                                                            
+✻ Crunched for 35s                                                                                               
+                                                            
+❯ /plan                                                                                                          
+  ⎿  Current Plan
+     /home/davidsos/.claude/plans/i-ve-fixed-the-bug-atomic-bird.md                                              
+                                                                                         
+     Plan: Instantiate packer inside neuron_processing                                                           
+                                                                                                        
+     Context                                                                                                     
+                                                                                                             
+     neuron_processing computes a spike (0 or 1) for each neuron via update_state_for_neuron. These spikes       
+     currently have no writeback path — spike_mem_* ports are undriven stubs. The packer module (newly added
+     packer.v) accumulates 32 individual 1-bit spike values into a 32-bit word and flushes to memory. This plan
+     wires packer between update_state_for_neuron and the spike_mem_* memory interface.
+
+     ---
+     Files to Modify
+
+     ┌─────────────────────┬─────────────────────────────────────────────────────────────────┐
+     │        File         │                             Change                              │
+     ├─────────────────────┼─────────────────────────────────────────────────────────────────┤
+     │ packer.v            │ Uncomment \include "constants.v"`                               │
+     ├─────────────────────┼─────────────────────────────────────────────────────────────────┤
+     │ neuron_processing.v │ Add declarations, port, packer instance, fix result_taken       │
+     ├─────────────────────┼─────────────────────────────────────────────────────────────────┤
+     │ acc_snn_processor.v │ Add np_spike_base_addr_r config reg + wire to neuron_processing │
+     ├─────────────────────┼─────────────────────────────────────────────────────────────────┤
+     │ tbAccSNN.bsh        │ Add packer.v to xrun file list                                  │
+     └─────────────────────┴─────────────────────────────────────────────────────────────────┘
+
+     ---
+     Step 1 — Fix packer.v include
+
+     Line 2 currently: //\include "constants.v"— uncomment it. Without this,PIN_BITS, POT_BITS, ADDR_SIZE,
+     POT_OUT_SZ_SZ` are undefined in packer's compilation unit.
+
+     ---
+     Step 2 — neuron_processing.v changes
+
+     2a. Add missing wire declarations (in the signal declaration block, ~line 115)
+
+     These signals are used but not explicitly declared:
+
+     wire                             neuron_valid;
+     wire                             result_valid;
+     wire                             result_taken;
+     wire                             spike;
+
+     2b. Add new input port for spike base address
+
+     In the port list (after existing pot_base_addr_i or with the other base address ports):
+
+     input wire      [MEM_ADDR_BITS-1:0] spike_base_addr_i,
+
+     Drive the already-declared spike_base_addr_r wire:
+     assign spike_base_addr_r = spike_base_addr_i;
+
+     2c. Add packer interface wire declarations
+
+     wire packer_busy;
+     wire packer_finish;
+     wire packer_full;
+
+     2d. Fix result_taken — back-pressure from packer
+
+     Currently (line 474): assign result_taken = result_valid;
+
+     Replace with:
+     assign result_taken = result_valid & ~packer_full;
+
+     This stalls update_state_for_neuron when the packer cannot accept more data.
+
+     2e. Instantiate packer after the update_state_for_neuron instance
+
+     packer spike_packer0 (
+         .clk                (clk),
+         .reset              (reset),
+         .busy_o             (packer_busy),
+         .finish_o           (packer_finish),
+         .pak_write_i        (result_valid),
+         .pak_full_o         (packer_full),
+         .pak_colour_i       (1'b0),
+         .pak_last_i         (neuron_counter_r == num_neurons_i),
+         .pak_index_i        ({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
+         .pak_acc_data_i     ({spike, {(`POT_BITS-1){1'b0}}}),
+         .pot_wr_o           (spike_mem_wr_o),
+         .pot_wait_i         (spike_mem_wait_i),
+         .pot_addr_o         (spike_mem_addr_o),
+         .pot_data_o         (spike_mem_data_o),
+         .pak_colour_sel_o   (),
+         .pak_out_sz_i       ({`POT_OUT_SZ_SZ{1'b0}}),   // 0 = 1-bit fields (32 spikes/word)
+         .pak_colour_bs_o    (),
+         .pak_out_base_addr_i(spike_base_addr_r)
+     );
+
+     Signal rationale:
+     - pak_write_i = result_valid — write to packer whenever a neuron result is ready
+     - pak_last_i = (neuron_counter_r == num_neurons_i) — same condition used by syn_curr_index_last; triggers
+     flush even if word isn't full yet
+     - pak_index_i = neuron_counter_r (zero-padded to PIN_BITS) — encodes both word address (bits [N:5]) and bit
+     position within word (bits [4:0])
+     - pak_acc_data_i = {spike, 31'b0} — packer masks with 32'h8000_0000 for 1-bit mode, so spike must be in bit
+     31
+     - pak_out_sz_i = 0 — 1-bit field mode: 32 spikes packed per 32-bit word
+     - pot_wr_o / pot_addr_o / pot_data_o → map directly to spike_mem_* ports
+
+     2f. Remove the dead stub at the bottom
+
+     Delete the // XXXXX comment block and the commented-out spike port declarations (lines 476–483). These are
+     now replaced by the packer instance.
+
+     ---
+     Step 3 — acc_snn_processor.v changes
+
+     3a. Add config register declaration (~line 202, with the other NP regs)
+
+     reg [MEM_ADDR_BITS-1:0] np_spike_base_addr_r;
+
+     3b. Reset it (in the reset block)
+
+     np_spike_base_addr_r <= {MEM_ADDR_BITS{1'b0}};
+
+     3c. Add AXI decode case (suggested offset 8'h64)
+
+     8'h64: np_spike_base_addr_r <= sys_data_i[MEM_ADDR_BITS-1:0];
+
+     3d. Add port to neuron_processing instantiation
+
+     .spike_base_addr_i  (np_spike_base_addr_r),
+
+     ---
+     Step 4 — tbAccSNN.bsh
+
+     Add packer.v to the xrun file list:
+
+     xrun ... neuron_processing.v ... packer.v tb_acc_snn_processor.v
+
+     ---
+     Verification
+
+     1. Compile: Run bash tbAccSNN.bsh — confirm no elaboration errors (no undriven/undeclared ports).
+     2. Waveform inspection: In SimVision, check:
+       - spike_packer0/pak_write_i pulses once per neuron cycle (when result_valid is high)
+       - spike_packer0/buffer_full asserts after every 32nd write
+       - spike_mem_wr_o fires at each word boundary and on the last (partial) word
+       - spike_mem_data_o contains the expected spike pattern from the random testbench data
+       - spike_packer0/finish_o asserts at the end of the neuron pass
+     3. Flow control: Confirm that asserting spike_mem_wait_i (if tested) holds pot_wr_o high and stalls
+     result_taken via packer_full.
+
+     "/plan open" to edit this plan in Vim
+
+❯ the updated_synaptic current and potential values in neuron_processing, called updated_syn_curr and            
+  updated_potential need to be written back to their respective memories. Currently they are simply dropped. Can 
+   you plan how to write them back, bearing in mind that there may be stalls in their writeback and the main     
+  pipeline will soon overwrite them when it processes the next neuron? I don't want the main pipeline to stall   
+  completely until they have been written back as there shoudl be more than enough tmie to complete those        
+  writebacks before the data is lost.                                                                            
+                                                                                                                 
+● This is a new planning task. Let me explore the relevant code to understand the timing and interface           
+  constraints before designing the approach.
+                                                                                                                 
+● Explore(Explore writeback timing and memory interfaces)
+  ⎿  Done (3 tool uses · 34.0k tokens · 36s)                                                                     
+  (ctrl+o to expand)                                                                                             
+                                                
+● Now I have a full picture. Let me read the memory interface port connections in the current file to confirm the
+   exact wiring before writing the plan.                                                                         
+                                                                                                                 
+  Read 1 file (ctrl+o to expand)                                                                                 
+                                                                                                                 
+● I have everything I need. Let me write the plan.                                                               
+                                                                                                                 
+● Updated plan                                                                                                   
+  ⎿  /plan to preview                                                                                            
+                                                                                                                 
+✶ Compacting conversation… (8m 34s · ↑ 21.1k tokens · thought for 54s)                                           
+                                                                                                                 
+───────────────────────────────────────────────────────────────────────── instantiate-packer-neuron-processing ──
+❯ 
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ plan mode on (shift+tab to cycle) · esc to interrupt
+
+╭─── Claude Code v2.1.119 ──────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting started                                 │
+│                 Welcome back Simon!                │ Run /init to create a CLAUDE.md file with instructions … │
+│                                                    │ ──────────────────────────────────────────────────────── │
+│                       ▐▛███▜▌                      │ Recent activity                                          │
+│                      ▝▜█████▛▘                     │ No recent activity                                       │
+│                        ▘▘ ▝▝                       │                                                          │
+│   Sonnet 4.6 · Claude Pro ·                        │                                                          │
+│   simon.davidson@manchester.ac.uk's Organization   │                                                          │
+│                    ~/dev/snnAcc                    │                                                          │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+✻ Conversation compacted (ctrl+o for history)
+
+  ⎿  Referenced file neuron_processing.v
+  ⎿  Referenced file tb_acc_snn_processor.v
+  ⎿  Referenced file acc_snn_processor.v
+  ⎿  Read packer.v (148 lines)
+  ⎿  Read tbAccSNN.bsh (14 lines)
+  ⎿  Plan file referenced (~/.claude/plans/i-ve-fixed-the-bug-atomic-bird.md)
+  ⎿  Skills restored (init)
+
+● Let me read the current state of neuron_processing.v to verify the plan details before exiting plan mode.
+
+  Read 1 file (ctrl+o to expand)                                                                                 
+                        
+● The file is in the expected state. The plan is accurate — the two stub assigns at lines 418-419 are the target,
+   and the cache connections to redirect are at lines 250-254 (syn_curr_cache) and 384-388 (pot_cache).
+                                                                                                                 
+  One thing to note before exiting: updated_syn_curr and updated_potential are both declared reg [31:0] (lines   
+  167-168), so wb_syn_curr_data_r and wb_pot_data_r should also be [31:0] rather than [IN_DATA_BITS-1:0] — they  
+  happen to be the same since IN_DATA_BITS=32, but I'll use [31:0] to match.                                     
+                                                        
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Ready to code?
+                                                                                                                 
+ Here is Claude's plan:
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Plan: Writeback updated_syn_curr and updated_potential in neuron_processing
+
+ Context
+
+ After update_state_for_neuron produces decayed updated_syn_curr and updated_potential for each neuron, both
+ values are currently dropped — the memory write-enables are permanently tied to 1'b0. These must be written
+ back to syn_curr_mem and pot_mem respectively. The write must not cause a full pipeline stall: instead, it runs
+  in the 1-cycle gap between result_taken and the point at which the next neuron's neuron_valid can possibly
+ fire, which is at minimum 3 cycles later (cache miss → memory latency → update_state_for_neuron cycle 1).
+
+ ---
+ File Modified
+
+ snnAcc/neuron_processing.v only.
+
+ ---
+ Key Timing Analysis
+
+ For neuron N, on cycle T when result_taken fires:
+ - neuron_counter_r = N (increments to N+1 at the next clock edge)
+ - updated_syn_curr and updated_potential are stable outputs from update_state_for_neuron (cycle 2 of its
+ pipeline)
+ - Both syn_curr and pot caches have a hit for address N → cache_mem_rd = 0 (no ongoing read)
+
+ On cycle T+1:
+ - Writeback pending flags are set; writes are asserted
+ - neuron_counter_r = N+1, but caches are held off (see below)
+
+ The cache cannot deliver valid data for N+1 until a memory read completes (1-cycle latency after the read
+ request, which is suppressed while writeback is pending). So neuron_valid for N+1 cannot fire until T+3 at the
+ earliest, giving at minimum 2 clear cycles for the write to complete before any new result is produced.
+
+ ---
+ Implementation — neuron_processing.v
+
+ Step 1 — New internal wires (in declaration block)
+
+ Redirect the cache memory outputs to internal wires so the address and rd signals can be muxed:
+
+ wire [`ADDR_SIZE-1:0] syn_curr_cache_mem_addr;
+ wire                  syn_curr_cache_mem_rd;
+ wire [`ADDR_SIZE-1:0] pot_cache_mem_addr;
+ wire                  pot_cache_mem_rd;
+
+ Also add writeback state registers:
+
+ reg                   wb_syn_curr_pending_r;
+ reg  [`ADDR_SIZE-1:0] wb_syn_curr_addr_r;
+ reg  [IN_DATA_BITS-1:0] wb_syn_curr_data_r;
+ reg                   wb_pot_pending_r;
+ reg  [`ADDR_SIZE-1:0] wb_pot_addr_r;
+ reg  [IN_DATA_BITS-1:0] wb_pot_data_r;
+
+ Step 2 — Redirect cache port connections
+
+ syn_curr_cache — change three connections:
+ // was: .mem_addr_o(syn_curr_mem_addr_o),
+ //      .mem_req_o(syn_curr_mem_rd_o),
+ //      .mem_wait_i(syn_curr_mem_wait_i)
+ .mem_addr_o(syn_curr_cache_mem_addr),
+ .mem_req_o (syn_curr_cache_mem_rd),
+ .mem_wait_i(syn_curr_mem_wait_i | wb_syn_curr_pending_r)
+
+ pot_cache — change three connections:
+ // was: .mem_addr_o(pot_mem_addr_o),
+ //      .mem_req_o(pot_mem_rd_o),
+ //      .mem_wait_i(pot_mem_wait_i)
+ .mem_addr_o(pot_cache_mem_addr),
+ .mem_req_o (pot_cache_mem_rd),
+ .mem_wait_i(pot_mem_wait_i | wb_pot_pending_r)
+
+ The injected | wb_*_pending_r tells each cache "memory is busy" while the writeback occupies the bus,
+ preventing it from sampling spurious read data.
+
+ Step 3 — Writeback register logic (new always block)
+
+ always @(posedge clk) begin
+     if (reset) begin
+         wb_syn_curr_pending_r <= 1'b0;
+         wb_pot_pending_r      <= 1'b0;
+     end else begin
+         if (result_taken) begin
+             wb_syn_curr_data_r    <= updated_syn_curr;
+             wb_syn_curr_addr_r    <= syn_curr_base_addr_i +
+                                      {{(`ADDR_SIZE-NEURON_IDX_SZ){1'b0}}, neuron_counter_r};
+             wb_syn_curr_pending_r <= 1'b1;
+             wb_pot_data_r         <= updated_potential;
+             wb_pot_addr_r         <= pot_base_addr_i +
+                                      {{(`ADDR_SIZE-NEURON_IDX_SZ){1'b0}}, neuron_counter_r};
+             wb_pot_pending_r      <= 1'b1;
+         end else begin
+             if (wb_syn_curr_pending_r & ~syn_curr_mem_wait_i)
+                 wb_syn_curr_pending_r <= 1'b0;
+             if (wb_pot_pending_r & ~pot_mem_wait_i)
+                 wb_pot_pending_r <= 1'b0;
+         end
+     end
+ end
+
+ Note: result_taken cannot be high while wb_*_pending_r is set, because the injected cache wait prevents
+ neuron_valid from becoming true, which prevents result_valid, which prevents result_taken. The two phases are
+ mutually exclusive.
+
+ Step 4 — Replace stub assigns with real logic
+
+ Remove:
+ assign syn_curr_mem_wr_o = 1'b0;
+ assign pot_mem_wr_o      = 1'b0;
+
+ Replace with:
+ // syn_curr memory — mux between writeback and cache read
+ assign syn_curr_mem_wr_o   = wb_syn_curr_pending_r;
+ assign syn_curr_mem_rd_o   = syn_curr_cache_mem_rd & ~wb_syn_curr_pending_r;
+ assign syn_curr_mem_addr_o = wb_syn_curr_pending_r ? wb_syn_curr_addr_r
+                                                    : syn_curr_cache_mem_addr;
+ assign syn_curr_mem_data_o = wb_syn_curr_data_r;
+
+ // pot memory — mux between writeback and cache read
+ assign pot_mem_wr_o   = wb_pot_pending_r;
+ assign pot_mem_rd_o   = pot_cache_mem_rd & ~wb_pot_pending_r;
+ assign pot_mem_addr_o = wb_pot_pending_r ? wb_pot_addr_r : pot_cache_mem_addr;
+ assign pot_mem_data_o = wb_pot_data_r;
+
+ ---
+ What this does NOT handle (out of scope)
+
+ - Sub-word elements: when syn_curr_sz_i or pot_sz_i selects elements narrower than 32 bits, multiple neurons
+ share one memory word and a read-modify-write is required. The current plan writes a full 32-bit word, which is
+  correct only when SYN_CURR_SLICE_BITS = IN_DATA_BITS (32) and POT_SLICE_BITS = IN_DATA_BITS (32) — matching
+ the testbench configuration.
+ - syn_curr decay writeback via neuron_processing does not conflict with spike_processing's syn_curr arbiter
+ because spike_processing has already completed before neuron_processing starts.
+
+ ---
+ Verification
+
+ 1. Compile: bash tbAccSNN.bsh — no elaboration errors expected.
+ 2. Waveforms (SimVision):
+   - wb_syn_curr_pending_r asserts one cycle after each result_taken, clears one cycle later (no-wait testbench)
+   - syn_curr_mem_wr_o pulses once per neuron with syn_curr_mem_addr_o = syn_curr_base_addr_i + N
+   - syn_curr_mem_data_o holds the expected decayed value
+   - pot_mem_wr_o pulses similarly with pot_mem_addr_o = pot_base_addr_i + N
+   - syn_curr_mem_rd_o and pot_mem_rd_o are suppressed during the write cycle
+   - Per-neuron gap between result_taken and the next neuron_valid is 3+ cycles — confirms writes complete well
+ before the next result
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+ Claude has written up a plan and is ready to execute. Would you like to proceed?
+
+ ❯ 1. Yes, auto-accept edits
+   2. Yes, manually approve edits
+   3. No, refine with Ultraplan on Claude Code on the web
+   4. Tell Claude what to change
+      shift+tab to approve with this feedback
+
+ ctrl-g to edit in Vim · ~/.claude/plans/i-ve-fixed-the-bug-atomic-bird.md
+
+     assign syn_curr_mem_wr_o   = wb_syn_curr_pending_r;
+     assign syn_curr_mem_rd_o   = syn_curr_cache_mem_rd & ~wb_syn_curr_pending_r;
+     assign syn_curr_mem_addr_o = wb_syn_curr_pending_r ? wb_syn_curr_addr_r
+                                                        : syn_curr_cache_mem_addr;
+     assign syn_curr_mem_data_o = wb_syn_curr_data_r;
+
+     // pot memory — mux between writeback and cache read
+     assign pot_mem_wr_o   = wb_pot_pending_r;
+     assign pot_mem_rd_o   = pot_cache_mem_rd & ~wb_pot_pending_r;
+     assign pot_mem_addr_o = wb_pot_pending_r ? wb_pot_addr_r : pot_cache_mem_addr;
+     assign pot_mem_data_o = wb_pot_data_r;
+
+     ---
+     What this does NOT handle (out of scope)
+
+     - Sub-word elements: when syn_curr_sz_i or pot_sz_i selects elements narrower than 32 bits, multiple neurons
+      share one memory word and a read-modify-write is required. The current plan writes a full 32-bit word,
+     which is correct only when SYN_CURR_SLICE_BITS = IN_DATA_BITS (32) and POT_SLICE_BITS = IN_DATA_BITS (32) —
+     matching the testbench configuration.
+     - syn_curr decay writeback via neuron_processing does not conflict with spike_processing's syn_curr arbiter
+     because spike_processing has already completed before neuron_processing starts.
+
+     ---
+     Verification
+
+     1. Compile: bash tbAccSNN.bsh — no elaboration errors expected.
+     2. Waveforms (SimVision):
+       - wb_syn_curr_pending_r asserts one cycle after each result_taken, clears one cycle later (no-wait
+     testbench)
+       - syn_curr_mem_wr_o pulses once per neuron with syn_curr_mem_addr_o = syn_curr_base_addr_i + N
+       - syn_curr_mem_data_o holds the expected decayed value
+       - pot_mem_wr_o pulses similarly with pot_mem_addr_o = pot_base_addr_i + N
+       - syn_curr_mem_rd_o and pot_mem_rd_o are suppressed during the write cycle
+       - Per-neuron gap between result_taken and the next neuron_valid is 3+ cycles — confirms writes complete
+     well before the next result
+
+● Now implementing the changes to neuron_processing.v in sequence.
+
+  Step 1: Add new wires and writeback registers to the declaration block.                                        
+   
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Added 10 lines                                                                                            
+      161  wire                             pot_data_last;                                                       
+      162  wire                             pot_mem_req_o;
+      163  wire            [`ADDR_SIZE-1:0] spike_base_addr_r;                                                   
+      164 +wire            [`ADDR_SIZE-1:0] syn_curr_cache_mem_addr;                                           
+      165 +wire                             syn_curr_cache_mem_rd;                                               
+      166 +wire            [`ADDR_SIZE-1:0] pot_cache_mem_addr;                                                
+      167 +wire                             pot_cache_mem_rd;                                             
+      168 +reg                              wb_syn_curr_pending_r;                                        
+      169 +reg             [`ADDR_SIZE-1:0] wb_syn_curr_addr_r;                                           
+      170 +reg                       [31:0] wb_syn_curr_data_r;                                           
+      171 +reg                              wb_pot_pending_r;                                             
+      172 +reg             [`ADDR_SIZE-1:0] wb_pot_addr_r;                                                
+      173 +reg                       [31:0] wb_pot_data_r;                                                
+      174  reg                              neuron_taken;
+      175  reg                       [31:0] syn_curr_decay_mult;
+      176  reg                       [31:0] potential_decay_mult;
+
+● Step 2: Redirect syn_curr_cache memory port connections.
+
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Added 3 lines, removed 3 lines
+      257      .slice_data_last_o(syn_curr_data_last),                                                           
+      258      .slice_data_taken_i(neuron_taken),                                                              
+      259                                                                                                        
+      260 -    .mem_addr_o(syn_curr_mem_addr_o),                                                               
+      260 +    .mem_addr_o(syn_curr_cache_mem_addr),                                                             
+      261      .mem_data_i(syn_curr_mem_data_i),            
+      262 -    .mem_req_o(syn_curr_mem_rd_o),                                                             
+      263 -    .mem_wait_i(syn_curr_mem_wait_i)                                                           
+      262 +    .mem_req_o (syn_curr_cache_mem_rd),                                                        
+      263 +    .mem_wait_i(syn_curr_mem_wait_i | wb_syn_curr_pending_r)                                   
+      264  );
+      265  
+      266  //////////////////////////////////////////////////////////////
+
+● Step 3: Redirect pot_cache memory port connections.
+
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Added 3 lines, removed 3 lines
+      391      .slice_data_last_o(pot_data_last),                                                                
+      392      .slice_data_taken_i(neuron_taken),           
+      393                                                                                                        
+      394 -    .mem_addr_o(pot_mem_addr_o),                                                               
+      394 +    .mem_addr_o(pot_cache_mem_addr),                                                                  
+      395      .mem_data_i(pot_mem_data_i),                 
+      396 -    .mem_req_o(pot_mem_rd_o),                                                                  
+      397 -    .mem_wait_i(pot_mem_wait_i)                                                                
+      396 +    .mem_req_o (pot_cache_mem_rd),                                                             
+      397 +    .mem_wait_i(pot_mem_wait_i | wb_pot_pending_r)                                             
+      398  );
+      399  
+      400  // The neuron is valid when all of its data fields are available:
+
+● Step 4: Replace the stub assigns and add the writeback always block.
+
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Added 33 lines, removed 2 lines
+      425  );                                                                                                    
+      426                                                   
+      427  // Write back the potential and syn_curr state values:                                                
+      428 -assign syn_curr_mem_wr_o = 1'b0;                                                               
+      429 -assign pot_mem_wr_o      = 1'b0;                                                               
+      428 +always @(posedge clk) begin                                                                    
+      429 +    if (reset) begin                                                                           
+      430 +        wb_syn_curr_pending_r <= 1'b0;                                                         
+      431 +        wb_pot_pending_r      <= 1'b0;                                                         
+      432 +    end else begin                                                                             
+      433 +        if (result_taken) begin                                                                
+      434 +            wb_syn_curr_data_r    <= updated_syn_curr;                                         
+      435 +            wb_syn_curr_addr_r    <= syn_curr_base_addr_i +                                    
+      436 +                                     {{(`ADDR_SIZE-NEURON_IDX_SZ){1'b0}}, neuron_counter_r};   
+      437 +            wb_syn_curr_pending_r <= 1'b1;                                                     
+      438 +            wb_pot_data_r         <= updated_potential;                                        
+      439 +            wb_pot_addr_r         <= pot_base_addr_i +                                         
+      440 +                                     {{(`ADDR_SIZE-NEURON_IDX_SZ){1'b0}}, neuron_counter_r};   
+      441 +            wb_pot_pending_r      <= 1'b1;                                                     
+      442 +        end else begin                                                                         
+      443 +            if (wb_syn_curr_pending_r & ~syn_curr_mem_wait_i)                                  
+      444 +                wb_syn_curr_pending_r <= 1'b0;                                                 
+      445 +            if (wb_pot_pending_r & ~pot_mem_wait_i)                                            
+      446 +                wb_pot_pending_r <= 1'b0;                                                      
+      447 +        end                                                                                    
+      448 +    end                                                                                        
+      449 +end                                                                                            
+      450  
+      451 +assign syn_curr_mem_wr_o   = wb_syn_curr_pending_r;                                            
+      452 +assign syn_curr_mem_rd_o   = syn_curr_cache_mem_rd & ~wb_syn_curr_pending_r;                   
+      453 +assign syn_curr_mem_addr_o = wb_syn_curr_pending_r ? wb_syn_curr_addr_r                        
+      454 +                                                   : syn_curr_cache_mem_addr;                  
+      455 +assign syn_curr_mem_data_o = wb_syn_curr_data_r;                                               
+      456 +                                                                                               
+      457 +assign pot_mem_wr_o   = wb_pot_pending_r;                                                      
+      458 +assign pot_mem_rd_o   = pot_cache_mem_rd & ~wb_pot_pending_r;                                  
+      459 +assign pot_mem_addr_o = wb_pot_pending_r ? wb_pot_addr_r : pot_cache_mem_addr;                 
+      460 +assign pot_mem_data_o = wb_pot_data_r;                                                         
+      461 +                                                                                               
+      462  // Stall update_state_for_neuron while the packer cannot accept data:
+      463  assign result_taken = result_valid & ~packer_full;
+      464  
+
+● Let me verify the final result looks correct around the key sections.
+
+  Read 1 file (ctrl+o to expand)                                                                                 
+                        
+● All four steps are complete and the file looks correct. Here's what changed:                                   
+                                                            
+  - Lines 164–173: New internal wires (syn_curr_cache_mem_addr/rd, pot_cache_mem_addr/rd) and writeback registers
+   (wb_syn_curr_*, wb_pot_*).                                                                                    
+  - syn_curr_cache (around line 262): .mem_addr_o and .mem_req_o now go to the internal wires; .mem_wait_i ORed  
+  with wb_syn_curr_pending_r.                                                                                    
+  - pot_cache (around line 396): same redirection, ORed with wb_pot_pending_r.                                   
+  - Lines 427–460: The two 1'b0 stubs replaced with the writeback always block and the four mux assigns for each 
+  memory bus.                                                                                                    
+                                                                                                                 
+  On result_taken, both pending flags are set and the data/address are registered. On the next cycle (and any    
+  subsequent stall cycles), each pending flag clears as soon as *_mem_wait_i is low. The injected wait into each
+  cache prevents it from issuing a read or sampling read data while its bus is occupied by the write.            
+                                                            
+✻ Cogitated for 9m 46s             
+
+※ recap: Implementing writeback of decayed syn_curr and potential values to memory in neuron_processing.v. The   
+  changes are complete — compile with bash tbAccSNN.bsh to verify.
+                                                                                                                 
+❯ add configuration registers for the registers syn_curr_decay_mult and potential_decay_mult, used in            
+  neuron_processing but never driven. Add initialisation code to the testbench to initialise them to fractional  
+  unsigned numbers between about 0.6 and 0.9                                                                     
+                                                                                                                 
+● Let me read the three affected files to understand the current state.                                          
+                                         
+  Read 2 files (ctrl+o to expand)                                                                                
+                           
+● Now I have the full picture. Three files need changes:                                                         
+                                                            
+  1. neuron_processing.v — convert syn_curr_decay_mult and potential_decay_mult from undriven internal regs to   
+  input ports                                                                                                    
+  2. acc_snn_processor.v — add two 32-bit config registers and AXI decode                                        
+  3. tb_acc_snn_processor.v — add two cfg_write calls                                                            
+                                                                                                                 
+  Starting with neuron_processing.v — add the two ports and remove the internal reg declarations:                
+                                                                                                                 
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Error editing file                                     
+                                                                                                                 
+  Read 1 file (ctrl+o to expand)    
+                                                                                                                 
+● Good. Now I can make all three targeted edits. First, neuron_processing.v:                                     
+                                                                                                                 
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Added 2 lines                                                                                               
+      57      input wire [BIAS_CURR_SLICE_SZ-1:0] bias_curr_sz_i,                                                
+      58      input wire       [POT_SLICE_SZ-1:0] pot_sz_i,                                                      
+      59      input wire                    [4:0] bin_point_syn_curr_i,                                          
+      60 +    input wire                   [31:0] syn_curr_decay_mult_i,                                  
+      61 +    input wire                   [31:0] pot_decay_mult_i,                                              
+      62                                                    
+      63      // Interface to Scheduler:
+      64      input  wire                     start_new_block_i,
+
+● Now remove the internal reg declarations and update the instantiation to use _i suffixed port names:
+
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Removed 2 lines
+      174  reg             [`ADDR_SIZE-1:0] wb_pot_addr_r;                                                       
+      175  reg                       [31:0] wb_pot_data_r;  
+      176  reg                              neuron_taken;                                                        
+      177 -reg                       [31:0] syn_curr_decay_mult;                                          
+      178 -reg                       [31:0] potential_decay_mult;                                                
+      177  reg                       [31:0] updated_potential;
+      178  reg                       [31:0] updated_syn_curr;
+      179  
+
+● Now update the update_state_for_neuron instantiation to use the new port names:
+
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Added 2 lines, removed 2 lines
+      419       .potential_i(pot_data_out),                                                                      
+      420       .bias_curr_i(bias_curr_data_out),           
+      421       .threshold_i(thresh_data_out),                                                                   
+      422 -     .syn_curr_decay_mult_i(syn_curr_decay_mult),                                              
+      423 -     .potential_decay_mult_i(potential_decay_mult),                                                   
+      422 +     .syn_curr_decay_mult_i(syn_curr_decay_mult_i),                                            
+      423 +     .potential_decay_mult_i(pot_decay_mult_i),                                                
+      424       .neuron_taken_o(neuron_taken),
+      425       .result_valid_o(result_valid),
+      426       .potential_o(updated_potential),
+
+● Now acc_snn_processor.v — add the two config registers. First the declarations:
+
+● Update(acc_snn_processor.v)                                                                                    
+  ⎿  Added 2 lines
+      212      // Shared config registers                                                                        
+      213      //----------------------------------------------------------------
+      214      reg                    [4:0] bin_point_syn_curr_r;                                                
+      215 +    reg                   [31:0] np_syn_curr_decay_mult_r;                                     
+      216 +    reg                   [31:0] np_pot_decay_mult_r;                                                 
+      217                                                   
+      218      //================================================================
+      219      // AXI config register decode
+
+● Add reset initialisation:       
+
+● Update(acc_snn_processor.v)                                                                                    
+  ⎿  Added 2 lines
+      276              np_bias_curr_sz_r       <= {NP_BIAS_CURR_SLICE_SZ{1'b0}};                                 
+      277              np_pot_sz_r             <= {NP_POT_SLICE_SZ{1'b0}};
+      278              bin_point_syn_curr_r    <= 5'b0;                                                          
+      279 +            np_syn_curr_decay_mult_r <= 32'b0;                                                 
+      280 +            np_pot_decay_mult_r      <= 32'b0;                                                        
+      281          end else if (sys_req_i & addr_match) begin
+      282              case (sys_addr_i[7:0])
+      283                  8'h00: sp_act_base_addr_r      <= sys_data_i[MEM_ADDR_BITS-1:0];
+
+● Add AXI decode cases and update the comment block. First the comment:
+
+● Update(acc_snn_processor.v)                                                                                    
+  ⎿  Added 2 lines
+      248      //                                                                                                
+      249      // shared registers:                         
+      250      //   8'h40  bin_point_syn_curr_r                                                                  
+      251 +    //   8'h68  np_syn_curr_decay_mult_r                                                       
+      252 +    //   8'h6C  np_pot_decay_mult_r                                                                   
+      253      //================================================================
+      254      wire addr_match = (sys_addr_i[31:16] == TGT_CONFIG_BASE_ADDR[31:16]);
+      255  
+
+● Now add the decode cases:        
+
+● Update(acc_snn_processor.v)                                                                                    
+  ⎿  Added 3 lines, removed 1 line
+      302                  8'h34: np_syn_curr_sz_r        <= sys_data_i[NP_SYN_CURR_SLICE_SZ-1:0];               
+      303                  8'h38: np_bias_curr_sz_r       <= sys_data_i[NP_BIAS_CURR_SLICE_SZ-1:0];
+      304                  8'h3C: np_pot_sz_r             <= sys_data_i[NP_POT_SLICE_SZ-1:0];                    
+      305 -                8'h40: bin_point_syn_curr_r    <= sys_data_i[4:0];                             
+      305 +                8'h40: bin_point_syn_curr_r      <= sys_data_i[4:0];                                  
+      306 +                8'h68: np_syn_curr_decay_mult_r  <= sys_data_i[31:0];                          
+      307 +                8'h6C: np_pot_decay_mult_r        <= sys_data_i[31:0];                         
+      308                  default: ; // ignore unrecognised addresses
+      309              endcase
+      310          end
+
+● Now wire the two new registers into the neuron_processing instantiation:
+
+● Update(acc_snn_processor.v)                                                                                    
+  ⎿  Added 2 lines
+      502          .bias_curr_sz_i         (np_bias_curr_sz_r),                                                  
+      503          .pot_sz_i               (np_pot_sz_r),   
+      504          .bin_point_syn_curr_i   (bin_point_syn_curr_r),                                               
+      505 +        .syn_curr_decay_mult_i  (np_syn_curr_decay_mult_r),                                    
+      506 +        .pot_decay_mult_i       (np_pot_decay_mult_r),                                                
+      507                                                   
+      508          // Scheduler – triggered by spike_processing completion
+      509          .start_new_block_i      (sp_acc_finished),
+
+● Now add the two cfg_write calls in the testbench. 0.75 (= 3/4) and 0.875 (= 7/8) are exact Q0.32 values and sit
+   in the 0.6–0.9 range:
+  - syn_curr_decay_mult: 0.75 → 0xC000_0000                                                                      
+  - pot_decay_mult: 0.875 → 0xE000_0000                                                                          
+                                                                                                                 
+● Update(tb_acc_snn_processor.v)                                                                                 
+  ⎿  Added 2 lines                                          
+      464          cfg_write(32'hFFFF_0034, 32'h0000_0003); // np_syn_curr_sz_r     = 3 (8-bit elements)         
+      465          cfg_write(32'hFFFF_0038, 32'h0000_0003); // np_bias_curr_sz_r    = 3 (8-bit elements)
+      466          cfg_write(32'hFFFF_003C, 32'h0000_0003); // np_pot_sz_r          = 3 (8-bit elements)         
+      467 +        cfg_write(32'hFFFF_0068, 32'hC000_0000); // np_syn_curr_decay_mult_r = 0.75 (Q0.32)    
+      468 +        cfg_write(32'hFFFF_006C, 32'hE000_0000); // np_pot_decay_mult_r      = 0.875 (Q0.32)          
+      469                                                   
+      470          $display("[TB] Config registers written at cycle %0d", cycle_count);
+      471  
+
+● Let me do a quick sanity check on the key changed sections:
+
+  Searched for 1 pattern (ctrl+o to expand)                                                                      
+   
+● Every reference is consistent and the old undriven regs are gone. The chain is complete: testbench cfg_write → 
+  AXI decode → np_syn_curr_decay_mult_r / np_pot_decay_mult_r → neuron_processing ports →
+  update_state_for_neuron.                                                                                       
+                                                            
+  The two values chosen are exact power-of-2 fractions in Q0.32 unsigned format:                                 
+  - syn_curr_decay_mult: 0xC000_0000 = 3/4 = 0.75 (faster synaptic current decay)
+  - pot_decay_mult: 0xE000_0000 = 7/8 = 0.875 (slower membrane potential decay)                                  
+                                                                               
+  Both sit comfortably in the 0.6–0.9 range and have no rounding error.                                          
+                                                                                                                 
+✻ Worked for 1m 37s                   
+                                                                                                                 
+※ recap: Added writeback for updated_syn_curr and updated_potential, and wired up decay multiplier config        
+  registers. Next: compile with bash tbAccSNN.bsh and check for elaboration errors.
+                                                                                                                 
+❯ /plan                                                                                                          
+  ⎿  Current Plan
+     /home/davidsos/.claude/plans/i-ve-fixed-the-bug-atomic-bird.md                                              
+                                                                                         
+     Plan: Writeback updated_syn_curr and updated_potential in neuron_processing                                 
+                                                                                                        
+     Context                                                                                                     
+                                                                                                             
+     After update_state_for_neuron produces decayed updated_syn_curr and updated_potential for each neuron, both 
+     values are currently dropped — the memory write-enables are permanently tied to 1'b0. These must be written
+     back to syn_curr_mem and pot_mem respectively. The write must not cause a full pipeline stall: instead, it
+     runs in the 1-cycle gap between result_taken and the point at which the next neuron's neuron_valid can
+     possibly fire, which is at minimum 3 cycles later (cache miss → memory latency → update_state_for_neuron
+     cycle 1).
+
+     ---
+     File Modified
+
+     snnAcc/neuron_processing.v only.
+
+     ---
+     Key Timing Analysis
+
+     For neuron N, on cycle T when result_taken fires:
+     - neuron_counter_r = N (increments to N+1 at the next clock edge)
+     - updated_syn_curr and updated_potential are stable outputs from update_state_for_neuron (cycle 2 of its
+     pipeline)
+     - Both syn_curr and pot caches have a hit for address N → cache_mem_rd = 0 (no ongoing read)
+
+     On cycle T+1:
+     - Writeback pending flags are set; writes are asserted
+     - neuron_counter_r = N+1, but caches are held off (see below)
+
+     The cache cannot deliver valid data for N+1 until a memory read completes (1-cycle latency after the read
+     request, which is suppressed while writeback is pending). So neuron_valid for N+1 cannot fire until T+3 at
+     the earliest, giving at minimum 2 clear cycles for the write to complete before any new result is produced.
+
+     ---
+     Implementation — neuron_processing.v
+
+     Step 1 — New internal wires (in declaration block)
+
+     Redirect the cache memory outputs to internal wires so the address and rd signals can be muxed:
+
+     wire [`ADDR_SIZE-1:0] syn_curr_cache_mem_addr;
+     wire                  syn_curr_cache_mem_rd;
+     wire [`ADDR_SIZE-1:0] pot_cache_mem_addr;
+     wire                  pot_cache_mem_rd;
+
+     Also add writeback state registers:
+
+     reg                   wb_syn_curr_pending_r;
+     reg  [`ADDR_SIZE-1:0] wb_syn_curr_addr_r;
+     reg  [IN_DATA_BITS-1:0] wb_syn_curr_data_r;
+     reg                   wb_pot_pending_r;
+     reg  [`ADDR_SIZE-1:0] wb_pot_addr_r;
+     reg  [IN_DATA_BITS-1:0] wb_pot_data_r;
+
+     Step 2 — Redirect cache port connections
+
+     syn_curr_cache — change three connections:
+     // was: .mem_addr_o(syn_curr_mem_addr_o),
+     //      .mem_req_o(syn_curr_mem_rd_o),
+     //      .mem_wait_i(syn_curr_mem_wait_i)
+     .mem_addr_o(syn_curr_cache_mem_addr),
+     .mem_req_o (syn_curr_cache_mem_rd),
+     .mem_wait_i(syn_curr_mem_wait_i | wb_syn_curr_pending_r)
+
+     pot_cache — change three connections:
+     // was: .mem_addr_o(pot_mem_addr_o),
+     //      .mem_req_o(pot_mem_rd_o),
+     //      .mem_wait_i(pot_mem_wait_i)
+     .mem_addr_o(pot_cache_mem_addr),
+     .mem_req_o (pot_cache_mem_rd),
+     .mem_wait_i(pot_mem_wait_i | wb_pot_pending_r)
+
+     The injected | wb_*_pending_r tells each cache "memory is busy" while the writeback occupies the bus,
+     preventing it from sampling spurious read data.
+
+     Step 3 — Writeback register logic (new always block)
+
+     always @(posedge clk) begin
+         if (reset) begin
+             wb_syn_curr_pending_r <= 1'b0;
+             wb_pot_pending_r      <= 1'b0;
+         end else begin
+             if (result_taken) begin
+                 wb_syn_curr_data_r    <= updated_syn_curr;
+                 wb_syn_curr_addr_r    <= syn_curr_base_addr_i +
+                                          {{(`ADDR_SIZE-NEURON_IDX_SZ){1'b0}}, neuron_counter_r};
+                 wb_syn_curr_pending_r <= 1'b1;
+                 wb_pot_data_r         <= updated_potential;
+                 wb_pot_addr_r         <= pot_base_addr_i +
+                                          {{(`ADDR_SIZE-NEURON_IDX_SZ){1'b0}}, neuron_counter_r};
+                 wb_pot_pending_r      <= 1'b1;
+             end else begin
+                 if (wb_syn_curr_pending_r & ~syn_curr_mem_wait_i)
+                     wb_syn_curr_pending_r <= 1'b0;
+                 if (wb_pot_pending_r & ~pot_mem_wait_i)
+                     wb_pot_pending_r <= 1'b0;
+             end
+         end
+     end
+
+     Note: result_taken cannot be high while wb_*_pending_r is set, because the injected cache wait prevents
+     neuron_valid from becoming true, which prevents result_valid, which prevents result_taken. The two phases
+     are mutually exclusive.
+
+     Step 4 — Replace stub assigns with real logic
+
+     Remove:
+     assign syn_curr_mem_wr_o = 1'b0;
+     assign pot_mem_wr_o      = 1'b0;
+
+     Replace with:
+     // syn_curr memory — mux between writeback and cache read
+     assign syn_curr_mem_wr_o   = wb_syn_curr_pending_r;
+     assign syn_curr_mem_rd_o   = syn_curr_cache_mem_rd & ~wb_syn_curr_pending_r;
+     assign syn_curr_mem_addr_o = wb_syn_curr_pending_r ? wb_syn_curr_addr_r
+                                                        : syn_curr_cache_mem_addr;
+     assign syn_curr_mem_data_o = wb_syn_curr_data_r;
+
+     // pot memory — mux between writeback and cache read
+     assign pot_mem_wr_o   = wb_pot_pending_r;
+     assign pot_mem_rd_o   = pot_cache_mem_rd & ~wb_pot_pending_r;
+     assign pot_mem_addr_o = wb_pot_pending_r ? wb_pot_addr_r : pot_cache_mem_addr;
+     assign pot_mem_data_o = wb_pot_data_r;
+
+     ---
+     What this does NOT handle (out of scope)
+
+     - Sub-word elements: when syn_curr_sz_i or pot_sz_i selects elements narrower than 32 bits, multiple neurons
+      share one memory word and a read-modify-write is required. The current plan writes a full 32-bit word,
+     which is correct only when SYN_CURR_SLICE_BITS = IN_DATA_BITS (32) and POT_SLICE_BITS = IN_DATA_BITS (32) —
+     matching the testbench configuration.
+     - syn_curr decay writeback via neuron_processing does not conflict with spike_processing's syn_curr arbiter
+     because spike_processing has already completed before neuron_processing starts.
+
+     ---
+     Verification
+
+     1. Compile: bash tbAccSNN.bsh — no elaboration errors expected.
+     2. Waveforms (SimVision):
+       - wb_syn_curr_pending_r asserts one cycle after each result_taken, clears one cycle later (no-wait
+     testbench)
+       - syn_curr_mem_wr_o pulses once per neuron with syn_curr_mem_addr_o = syn_curr_base_addr_i + N
+       - syn_curr_mem_data_o holds the expected decayed value
+       - pot_mem_wr_o pulses similarly with pot_mem_addr_o = pot_base_addr_i + N
+       - syn_curr_mem_rd_o and pot_mem_rd_o are suppressed during the write cycle
+       - Per-neuron gap between result_taken and the next neuron_valid is 3+ cycles — confirms writes complete
+     well before the next result
+
+     "/plan open" to edit this plan in Vim
+
+❯ I want to support syn_curr and potential elements with sizes ranging from 1-bit to 32-bits in powers of 2. The 
+   missing support is the writeback, which you pointed out must be 32-bit. Can you propose modifications to      
+  support the read-modify-write protocol needed for this? Do we need a second copy of dataline_cache_with_xy for 
+   each data stream? Or can we make use of the fact that elements are always processed in order to have a packer 
+   for each stream (syn_curr and potential) and assemvle then write back the value? This would work if there is  
+  always time to write back the packed data to memory before it is read again. This is always going to be true   
+  for the networks we will run on it.                                                                            
+                                                                                                                 
+● Let me check packer.v's interface constraints and constants.v before proposing anything.                       
+                                     
+  Read 1 file (ctrl+o to expand)                                                                                 
+                
+● POT_OUT_SZ_SZ = 3, POT_BITS = 32. Both match the neuron_processing parameter widths, so no zero-extension is   
+  needed for pak_out_sz_i, and the left-justified value is directly 32 bits.
+                                                                                                                 
+  Now I have everything I need to write the plan.                                                                
+   
+● Updated plan                                                                                                   
+  ⎿  Error writing file                                 
+                                                                                                                 
+  Read 1 file (ctrl+o to expand)    
+                                                                                                                 
+● Updated plan                                                                                                   
+  ⎿  /plan to preview                                                                                            
+                                                                                                                 
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Ready to code?                                                                                                  
+                                                                                                                 
+ Here is Claude's plan:                                 
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Plan: Sub-word writeback for syn_curr and pot using packer instances
+
+ Context
+
+ The current writeback implementation writes one full 32-bit word per neuron. This is only correct when elements
+  are exactly 32 bits wide (syn_curr_sz_i = 5, pot_sz_i = 5). For narrower elements (e.g. 8-bit: 4 neurons per
+ word), multiple neurons share a memory word and the current logic overwrites the adjacent slots with zeros each
+  time a neuron completes.
+
+ The fix is to use the existing packer.v module — the same module used for spike packing — to accumulate
+ sub-word elements into complete 32-bit words before writing back. This is correct because:
+ 1. Neurons are always processed in ascending index order.
+ 2. The packer assembles a full word from consecutive elements, then writes it once — no read-modify-write is
+ needed.
+ 3. Each written word's address will not be re-read until the next timestep (many cycles later). The user has
+ confirmed this holds for all networks to be run on this hardware.
+
+ No second dataline_cache_with_xy is required.
+
+ ---
+ File Modified
+
+ snnAcc/neuron_processing.v only.
+
+ ---
+ What to Remove (reverting the previous single-word writeback)
+
+ - Registers: wb_syn_curr_pending_r, wb_syn_curr_addr_r, wb_syn_curr_data_r, wb_pot_pending_r, wb_pot_addr_r,
+ wb_pot_data_r
+ - The always @(posedge clk) writeback state machine block
+ - The four assign statements for syn_curr_mem_wr_o, syn_curr_mem_rd_o, syn_curr_mem_addr_o, syn_curr_mem_data_o
+ - The four assign statements for pot_mem_wr_o, pot_mem_rd_o, pot_mem_addr_o, pot_mem_data_o
+
+ Keep (from the previous plan's Step 1 and Step 2):
+ - Internal wires syn_curr_cache_mem_addr, syn_curr_cache_mem_rd, pot_cache_mem_addr, pot_cache_mem_rd
+ - The redirected .mem_addr_o and .mem_req_o in syn_curr_cache and pot_cache — only the .mem_wait_i expression
+ changes (see Step 2 below).
+
+ ---
+ Step 1 — New wires and left-justify combinational logic
+
+ Add to the declaration block:
+
+ wire                  syn_curr_wb_wr;
+ wire [`ADDR_SIZE-1:0] syn_curr_wb_addr;
+ wire          [31:0]  syn_curr_wb_data_bus;
+ wire                  syn_curr_wb_full;
+ wire                  pot_wb_wr;
+ wire [`ADDR_SIZE-1:0] pot_wb_addr;
+ wire          [31:0]  pot_wb_data_bus;
+ wire                  pot_wb_full;
+ reg           [31:0]  syn_curr_wb_lj;
+ reg           [31:0]  pot_wb_lj;
+
+ Left-justify combinational logic (the packer expects the element value in the MSBs of pak_acc_data_i, matching
+ the data_mask encoding in packer.v):
+
+ always @(*) begin
+     case (syn_curr_sz_i)
+         3'b000: syn_curr_wb_lj = {updated_syn_curr[0],    31'b0};
+         3'b001: syn_curr_wb_lj = {updated_syn_curr[1:0],  30'b0};
+         3'b010: syn_curr_wb_lj = {updated_syn_curr[3:0],  28'b0};
+         3'b011: syn_curr_wb_lj = {updated_syn_curr[7:0],  24'b0};
+         3'b100: syn_curr_wb_lj = {updated_syn_curr[15:0], 16'b0};
+         3'b101: syn_curr_wb_lj = updated_syn_curr[31:0];
+         default: syn_curr_wb_lj = 32'b0;
+     endcase
+ end
+
+ always @(*) begin
+     case (pot_sz_i)
+         3'b000: pot_wb_lj = {updated_potential[0],    31'b0};
+         3'b001: pot_wb_lj = {updated_potential[1:0],  30'b0};
+         3'b010: pot_wb_lj = {updated_potential[3:0],  28'b0};
+         3'b011: pot_wb_lj = {updated_potential[7:0],  24'b0};
+         3'b100: pot_wb_lj = {updated_potential[15:0], 16'b0};
+         3'b101: pot_wb_lj = updated_potential[31:0];
+         default: pot_wb_lj = 32'b0;
+     endcase
+ end
+
+ ---
+ Step 2 — Update cache .mem_wait_i connections
+
+ Replace wb_syn_curr_pending_r / wb_pot_pending_r with the packer write-enables:
+
+ syn_curr_cache:
+ .mem_wait_i(syn_curr_mem_wait_i | syn_curr_wb_wr)
+
+ pot_cache:
+ .mem_wait_i(pot_mem_wait_i | pot_wb_wr)
+
+ ---
+ Step 3 — Memory bus mux assigns
+
+ assign syn_curr_mem_wr_o   = syn_curr_wb_wr;
+ assign syn_curr_mem_rd_o   = syn_curr_cache_mem_rd & ~syn_curr_wb_wr;
+ assign syn_curr_mem_addr_o = syn_curr_wb_wr ? syn_curr_wb_addr : syn_curr_cache_mem_addr;
+ assign syn_curr_mem_data_o = syn_curr_wb_data_bus;
+
+ assign pot_mem_wr_o   = pot_wb_wr;
+ assign pot_mem_rd_o   = pot_cache_mem_rd & ~pot_wb_wr;
+ assign pot_mem_addr_o = pot_wb_wr ? pot_wb_addr : pot_cache_mem_addr;
+ assign pot_mem_data_o = pot_wb_data_bus;
+
+ ---
+ Step 4 — Extend result_taken back-pressure
+
+ assign result_taken = result_valid & ~packer_full & ~syn_curr_wb_full & ~pot_wb_full;
+
+ ---
+ Step 5 — Two writeback packer instances
+
+ Place alongside spike_packer0. pak_write_i = result_valid (matches the spike packer pattern). pak_out_sz_i =
+ syn_curr_sz_i / pot_sz_i directly — both SYN_CURR_SLICE_SZ and POT_SLICE_SZ are 3 bits, matching POT_OUT_SZ_SZ
+ = 3. pak_acc_data_i is POT_BITS = 32 wide, same as syn_curr_wb_lj.
+
+ packer syn_curr_wb_packer (
+     .clk                 (clk),
+     .reset               (reset),
+     .busy_o              (),
+     .finish_o            (),
+     .pak_write_i         (result_valid),
+     .pak_full_o          (syn_curr_wb_full),
+     .pak_colour_i        (1'b0),
+     .pak_last_i          (neuron_counter_r == last_neuron_idx_i),
+     .pak_index_i         ({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
+     .pak_acc_data_i      (syn_curr_wb_lj),
+     .pot_wr_o            (syn_curr_wb_wr),
+     .pot_wait_i          (syn_curr_mem_wait_i),
+     .pot_addr_o          (syn_curr_wb_addr),
+     .pot_data_o          (syn_curr_wb_data_bus),
+     .pak_colour_sel_o    (),
+     .pak_out_sz_i        (syn_curr_sz_i),
+     .pak_colour_bs_o     (),
+     .pak_out_base_addr_i (syn_curr_base_addr_i)
+ );
+
+ packer pot_wb_packer (
+     .clk                 (clk),
+     .reset               (reset),
+     .busy_o              (),
+     .finish_o            (),
+     .pak_write_i         (result_valid),
+     .pak_full_o          (pot_wb_full),
+     .pak_colour_i        (1'b0),
+     .pak_last_i          (neuron_counter_r == last_neuron_idx_i),
+     .pak_index_i         ({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
+     .pak_acc_data_i      (pot_wb_lj),
+     .pot_wr_o            (pot_wb_wr),
+     .pot_wait_i          (pot_mem_wait_i),
+     .pot_addr_o          (pot_wb_addr),
+     .pot_data_o          (pot_wb_data_bus),
+     .pak_colour_sel_o    (),
+     .pak_out_sz_i        (pot_sz_i),
+     .pak_colour_bs_o     (),
+     .pak_out_base_addr_i (pot_base_addr_i)
+ );
+
+ ---
+ Why no read-modify-write is needed
+
+ A read-modify-write would be required if neurons could be updated out of order, leaving a word in a
+ partially-updated state when it is re-read. Because neurons are always processed 0…N in order, the packer
+ accumulates all elements of a word in one pass before asserting pot_wr_o. The written word is complete and
+ correct. The same address is not read again until the following timestep.
+
+ ---
+ Verification
+
+ 1. Compile: bash tbAccSNN.bsh — no elaboration errors.
+ 2. Waveforms (SimVision) for 8-bit elements (syn_curr_sz_i = 3, 4 elements per word):
+   - syn_curr_wb_wr pulses once every 4 result_taken events, and once at the last neuron (flush).
+   - syn_curr_mem_addr_o during write = syn_curr_base_addr_i + N/4 (word index).
+   - syn_curr_mem_data_o contains 4 decayed 8-bit values packed LSByte-first.
+   - syn_curr_mem_rd_o is suppressed while syn_curr_wb_wr is high.
+   - pot_wb_wr pulses similarly.
+ 3. For 32-bit elements (sz = 5): one write per neuron — identical behaviour to the previous single-word plan.
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+ Claude has written up a plan and is ready to execute. Would you like to proceed?
+
+ ❯ 1. Yes, auto-accept edits
+   2. Yes, manually approve edits
+   3. No, refine with Ultraplan on Claude Code on the web
+   4. Tell Claude what to change
+      shift+tab to approve with this feedback
+
+ ctrl-g to edit in Vim · ~/.claude/plans/i-ve-fixed-the-bug-atomic-bird.md
+
+         .pak_full_o          (pot_wb_full),
+         .pak_colour_i        (1'b0),
+         .pak_last_i          (neuron_counter_r == last_neuron_idx_i),
+         .pak_index_i         ({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
+         .pak_acc_data_i      (pot_wb_lj),
+         .pot_wr_o            (pot_wb_wr),
+         .pot_wait_i          (pot_mem_wait_i),
+         .pot_addr_o          (pot_wb_addr),
+         .pot_data_o          (pot_wb_data_bus),
+         .pak_colour_sel_o    (),
+         .pak_out_sz_i        (pot_sz_i),
+         .pak_colour_bs_o     (),
+         .pak_out_base_addr_i (pot_base_addr_i)
+     );
+
+     ---
+     Why no read-modify-write is needed
+
+     A read-modify-write would be required if neurons could be updated out of order, leaving a word in a
+     partially-updated state when it is re-read. Because neurons are always processed 0…N in order, the packer
+     accumulates all elements of a word in one pass before asserting pot_wr_o. The written word is complete and
+     correct. The same address is not read again until the following timestep.
+
+     ---
+     Verification
+
+     1. Compile: bash tbAccSNN.bsh — no elaboration errors.
+     2. Waveforms (SimVision) for 8-bit elements (syn_curr_sz_i = 3, 4 elements per word):
+       - syn_curr_wb_wr pulses once every 4 result_taken events, and once at the last neuron (flush).
+       - syn_curr_mem_addr_o during write = syn_curr_base_addr_i + N/4 (word index).
+       - syn_curr_mem_data_o contains 4 decayed 8-bit values packed LSByte-first.
+       - syn_curr_mem_rd_o is suppressed while syn_curr_wb_wr is high.
+       - pot_wb_wr pulses similarly.
+     3. For 32-bit elements (sz = 5): one write per neuron — identical behaviour to the previous single-word
+     plan.
+
+● Reading the current file before making changes.              
+
+  Read 1 file (ctrl+o to expand)                                                                                 
+                        
+● Now making all changes in sequence.                                                                            
+                                                                                                               
+  Step 1: Replace wb_* registers with packer wire declarations.                                                  
+                                                                                                                 
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Added 10 lines, removed 6 lines                                                                             
+      167  wire                             syn_curr_cache_mem_rd;                                               
+      168  wire            [`ADDR_SIZE-1:0] pot_cache_mem_addr;
+      169  wire                             pot_cache_mem_rd;                                                    
+      170 -reg                              wb_syn_curr_pending_r;                                        
+      171 -reg             [`ADDR_SIZE-1:0] wb_syn_curr_addr_r;                                                  
+      172 -reg                       [31:0] wb_syn_curr_data_r;                                           
+      173 -reg                              wb_pot_pending_r;                                             
+      174 -reg             [`ADDR_SIZE-1:0] wb_pot_addr_r;                                                
+      175 -reg                       [31:0] wb_pot_data_r;                                                
+      170 +wire                             syn_curr_wb_wr;                                               
+      171 +wire            [`ADDR_SIZE-1:0] syn_curr_wb_addr;                                             
+      172 +wire                      [31:0] syn_curr_wb_data_bus;                                         
+      173 +wire                             syn_curr_wb_full;                                             
+      174 +wire                             pot_wb_wr;                                                    
+      175 +wire            [`ADDR_SIZE-1:0] pot_wb_addr;                                                  
+      176 +wire                      [31:0] pot_wb_data_bus;                                              
+      177 +wire                             pot_wb_full;                                                  
+      178 +reg                       [31:0] syn_curr_wb_lj;                                               
+      179 +reg                       [31:0] pot_wb_lj;                                                    
+      180  reg                              neuron_taken;
+      181  reg                       [31:0] updated_potential;
+      182  reg                       [31:0] updated_syn_curr;
+
+● Step 2: Update syn_curr_cache .mem_wait_i.
+
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Added 1 line, removed 1 line
+      265      .mem_addr_o(syn_curr_cache_mem_addr),                                                             
+      266      .mem_data_i(syn_curr_mem_data_i),            
+      267      .mem_req_o (syn_curr_cache_mem_rd),                                                               
+      268 -    .mem_wait_i(syn_curr_mem_wait_i | wb_syn_curr_pending_r)                                   
+      268 +    .mem_wait_i(syn_curr_mem_wait_i | syn_curr_wb_wr)                                                 
+      269  );                                               
+      270  
+      271  //////////////////////////////////////////////////////////////
+
+● Step 3: Update pot_cache .mem_wait_i. 
+
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Added 1 line, removed 1 line
+      399      .mem_addr_o(pot_cache_mem_addr),                                                                  
+      400      .mem_data_i(pot_mem_data_i),                 
+      401      .mem_req_o (pot_cache_mem_rd),                                                                    
+      402 -    .mem_wait_i(pot_mem_wait_i | wb_pot_pending_r)                                             
+      402 +    .mem_wait_i(pot_mem_wait_i | pot_wb_wr)                                                           
+      403  );                                               
+      404  
+      405  // The neuron is valid when all of its data fields are available:
+
+● Step 4: Replace the writeback state machine and old assigns with LJ logic + new mux assigns.
+
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Added 31 lines, removed 31 lines
+      433       .result_taken_i(result_taken)                                                                    
+      434  );                                               
+      435                                                                                                        
+      436 -// Write back the potential and syn_curr state values:                                         
+      437 -always @(posedge clk) begin                                                                           
+      438 -    if (reset) begin                                                                           
+      439 -        wb_syn_curr_pending_r <= 1'b0;                                                         
+      440 -        wb_pot_pending_r      <= 1'b0;                                                         
+      441 -    end else begin                                                                             
+      442 -        if (result_taken) begin                                                                
+      443 -            wb_syn_curr_data_r    <= updated_syn_curr;                                         
+      444 -            wb_syn_curr_addr_r    <= syn_curr_base_addr_i +                                    
+      445 -                                     {{(`ADDR_SIZE-NEURON_IDX_SZ){1'b0}}, neuron_counter_r};   
+      446 -            wb_syn_curr_pending_r <= 1'b1;                                                     
+      447 -            wb_pot_data_r         <= updated_potential;                                        
+      448 -            wb_pot_addr_r         <= pot_base_addr_i +                                         
+      449 -                                     {{(`ADDR_SIZE-NEURON_IDX_SZ){1'b0}}, neuron_counter_r};   
+      450 -            wb_pot_pending_r      <= 1'b1;                                                     
+      451 -        end else begin                                                                         
+      452 -            if (wb_syn_curr_pending_r & ~syn_curr_mem_wait_i)                                  
+      453 -                wb_syn_curr_pending_r <= 1'b0;                                                 
+      454 -            if (wb_pot_pending_r & ~pot_mem_wait_i)                                            
+      455 -                wb_pot_pending_r <= 1'b0;                                                      
+      456 -        end                                                                                    
+      457 -    end                                                                                        
+      436 +// Left-justify updated values for packer input (element in MSBs of 32-bit word):              
+      437 +always @(*) begin                                                                              
+      438 +    case (syn_curr_sz_i)                                                                       
+      439 +        3'b000: syn_curr_wb_lj = {updated_syn_curr[0],    31'b0};                              
+      440 +        3'b001: syn_curr_wb_lj = {updated_syn_curr[1:0],  30'b0};                              
+      441 +        3'b010: syn_curr_wb_lj = {updated_syn_curr[3:0],  28'b0};                              
+      442 +        3'b011: syn_curr_wb_lj = {updated_syn_curr[7:0],  24'b0};                              
+      443 +        3'b100: syn_curr_wb_lj = {updated_syn_curr[15:0], 16'b0};                              
+      444 +        3'b101: syn_curr_wb_lj = updated_syn_curr[31:0];                                       
+      445 +        default: syn_curr_wb_lj = 32'b0;                                                       
+      446 +    endcase                                                                                    
+      447  end
+      448  
+      460 -assign syn_curr_mem_wr_o   = wb_syn_curr_pending_r;                                            
+      461 -assign syn_curr_mem_rd_o   = syn_curr_cache_mem_rd & ~wb_syn_curr_pending_r;                   
+      462 -assign syn_curr_mem_addr_o = wb_syn_curr_pending_r ? wb_syn_curr_addr_r                        
+      463 -                                                   : syn_curr_cache_mem_addr;                  
+      464 -assign syn_curr_mem_data_o = wb_syn_curr_data_r;                                               
+      449 +always @(*) begin                                                                              
+      450 +    case (pot_sz_i)                                                                            
+      451 +        3'b000: pot_wb_lj = {updated_potential[0],    31'b0};                                  
+      452 +        3'b001: pot_wb_lj = {updated_potential[1:0],  30'b0};                                  
+      453 +        3'b010: pot_wb_lj = {updated_potential[3:0],  28'b0};                                  
+      454 +        3'b011: pot_wb_lj = {updated_potential[7:0],  24'b0};                                  
+      455 +        3'b100: pot_wb_lj = {updated_potential[15:0], 16'b0};                                  
+      456 +        3'b101: pot_wb_lj = updated_potential[31:0];                                           
+      457 +        default: pot_wb_lj = 32'b0;                                                            
+      458 +    endcase                                                                                    
+      459 +end                                                                                            
+      460  
+      466 -assign pot_mem_wr_o   = wb_pot_pending_r;                                                      
+      467 -assign pot_mem_rd_o   = pot_cache_mem_rd & ~wb_pot_pending_r;                                  
+      468 -assign pot_mem_addr_o = wb_pot_pending_r ? wb_pot_addr_r : pot_cache_mem_addr;                 
+      469 -assign pot_mem_data_o = wb_pot_data_r;                                                         
+      461 +assign syn_curr_mem_wr_o   = syn_curr_wb_wr;                                                   
+      462 +assign syn_curr_mem_rd_o   = syn_curr_cache_mem_rd & ~syn_curr_wb_wr;                          
+      463 +assign syn_curr_mem_addr_o = syn_curr_wb_wr ? syn_curr_wb_addr : syn_curr_cache_mem_addr;      
+      464 +assign syn_curr_mem_data_o = syn_curr_wb_data_bus;                                             
+      465  
+      466 +assign pot_mem_wr_o   = pot_wb_wr;                                                             
+      467 +assign pot_mem_rd_o   = pot_cache_mem_rd & ~pot_wb_wr;                                         
+      468 +assign pot_mem_addr_o = pot_wb_wr ? pot_wb_addr : pot_cache_mem_addr;                          
+      469 +assign pot_mem_data_o = pot_wb_data_bus;                                                       
+      470 +                                                                                               
+      471  // Stall update_state_for_neuron while the packer cannot accept data:
+      472  assign result_taken = result_valid & ~packer_full;
+      473  
+
+● Step 5: Extend result_taken back-pressure and add the two writeback packers.
+
+● Update(neuron_processing.v)                                                                                    
+  ⎿  Added 2 lines, removed 2 lines
+      468  assign pot_mem_addr_o = pot_wb_wr ? pot_wb_addr : pot_cache_mem_addr;                                 
+      469  assign pot_mem_data_o = pot_wb_data_bus;         
+      470                                                                                                        
+      471 -// Stall update_state_for_neuron while the packer cannot accept data:                          
+      472 -assign result_taken = result_valid & ~packer_full;                                                    
+      471 +// Stall update_state_for_neuron while any packer cannot accept data:                          
+      472 +assign result_taken = result_valid & ~packer_full & ~syn_curr_wb_full & ~pot_wb_full;          
+      473  
+      474  // Pack spike bits into 32-bit words and write to spike memory:
+      475  packer spike_packer0 (
+
+● Update(neuron_processing.v)            
+  ⎿  Added 44 lines
+      493      .pak_out_base_addr_i (spike_base_addr_r)                                                          
+      494  );
+      495                                                                                                        
+      496 +// Accumulate decayed syn_curr elements into 32-bit words and write back:                      
+      497 +packer syn_curr_wb_packer (                                                                           
+      498 +    .clk                 (clk),                                                                
+      499 +    .reset               (reset),                                                              
+      500 +    .busy_o              (),                                                                   
+      501 +    .finish_o            (),                                                                   
+      502 +    .pak_write_i         (result_valid),                                                       
+      503 +    .pak_full_o          (syn_curr_wb_full),                                                   
+      504 +    .pak_colour_i        (1'b0),                                                               
+      505 +    .pak_last_i          (neuron_counter_r == last_neuron_idx_i),                              
+      506 +    .pak_index_i         ({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),              
+      507 +    .pak_acc_data_i      (syn_curr_wb_lj),                                                     
+      508 +    .pot_wr_o            (syn_curr_wb_wr),                                                     
+      509 +    .pot_wait_i          (syn_curr_mem_wait_i),                                                
+      510 +    .pot_addr_o          (syn_curr_wb_addr),                                                   
+      511 +    .pot_data_o          (syn_curr_wb_data_bus),                                               
+      512 +    .pak_colour_sel_o    (),                                                                   
+      513 +    .pak_out_sz_i        (syn_curr_sz_i),                                                      
+      514 +    .pak_colour_bs_o     (),                                                                   
+      515 +    .pak_out_base_addr_i (syn_curr_base_addr_i)                                                
+      516 +);                                                                                             
+      517 +                                                                                               
+      518 +// Accumulate decayed potential elements into 32-bit words and write back:                     
+      519 +packer pot_wb_packer (                                                                         
+      520 +    .clk                 (clk),                                                                
+      521 +    .reset               (reset),                                                              
+      522 +    .busy_o              (),                                                                   
+      523 +    .finish_o            (),                                                                   
+      524 +    .pak_write_i         (result_valid),                                                       
+      525 +    .pak_full_o          (pot_wb_full),                                                        
+      526 +    .pak_colour_i        (1'b0),                                                               
+      527 +    .pak_last_i          (neuron_counter_r == last_neuron_idx_i),                              
+      528 +    .pak_index_i         ({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),              
+      529 +    .pak_acc_data_i      (pot_wb_lj),                                                          
+      530 +    .pot_wr_o            (pot_wb_wr),                                                          
+      531 +    .pot_wait_i          (pot_mem_wait_i),                                                     
+      532 +    .pot_addr_o          (pot_wb_addr),                                                        
+      533 +    .pot_data_o          (pot_wb_data_bus),                                                    
+      534 +    .pak_colour_sel_o    (),                                                                   
+      535 +    .pak_out_sz_i        (pot_sz_i),                                                           
+      536 +    .pak_colour_bs_o     (),                                                                   
+      537 +    .pak_out_base_addr_i (pot_base_addr_i)                                                     
+      538 +);                                                                                             
+      539 +                                                                                               
+      540  endmodule
+      541  
+
+● Quick sanity check on the key changed regions:
+
+  Searched for 2 patterns (ctrl+o to expand)                                                                     
+   
+● All old wb_* state registers are gone, every new signal appears exactly where expected. The implementation is  
+  complete.                                                 
+                                                                                                                 
+  To summarise what changed in neuron_processing.v:                                                              
+                                                                                                                 
+  - Removed: 6 wb_* registers, the writeback state-machine always block, and the 8 old assign statements.        
+  - Added: 8 new wires (syn_curr_wb_*, pot_wb_*), 2 LJ regs, 2 always @(*) left-justify case statements, the 8
+  replacement assign statements (mux using packer write-enable), and 2 packer instances (syn_curr_wb_packer,     
+  pot_wb_packer).                                           
+  - Modified: result_taken now also gates on ~syn_curr_wb_full & ~pot_wb_full; both cache .mem_wait_i now use the
+   packer write-enable instead of the old pending register.                                                      
+   
+  For 8-bit elements the packer will emit one memory write every 4 neurons (4 bytes per word), packed            
+  LSByte-first, which matches how the read cache extracts them. For 32-bit elements behaviour is identical to
+  what was there before.                                                                                         
+                                                            
+✻ Churned for 6m 57s
+
+※ recap: Implementing sub-word writeback for decayed syn_curr and potential values in neuron_processing using    
+  packer instances. All code changes are done; next step is to compile with bash tbAccSNN.bsh and verify in 
+  SimVision.                                                                                                     
+                                         
+───────────────────────────────────────────────────────────────────────── instantiate-packer-neuron-processing ──
+❯  
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)
+
+
