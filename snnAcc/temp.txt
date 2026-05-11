@@ -1,5 +1,0 @@
-I want to instantiate the top level design, acc_snn_processor inside a wrapper that includes some memories so that we don't have to   
-  go off-chip to access memory. Could you create a new module, wrapped_acc_snn_processor_plus_memories.v, which instantiates the design  
-  acc_snn_processor, but each memory interface has its own 16KB memory? The interface for the synaptic current, read and written by      
-  both spike_processing and by neuron_processing should drive the same memory. For arbitration during access, always given               
-  spike_processing priority. 
