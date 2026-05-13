@@ -1,0 +1,44 @@
+#!/bin/bash
+# Elaborate the flexman top-level design (no simulation — compile/link check only).
+# Run from this directory (top_module/).
+xrun -sv -elaborate -timescale 10ps/1ps -top flexman \
+  flexman.v \
+  ../scheduler/scheduler.v \
+  ../scheduler/sch_table.v \
+  ../scheduler/sch_entry.v \
+  ../scheduler/sch_buffer_state.v \
+  ../scheduler/buffer_state_entry.v \
+  ../scheduler/acc_hw_buffer_tracker.v \
+  ../scheduler/prog_cache.v \
+  ../config_manager/config_manager.v \
+  ../snnAcc/acc_snn_processor.v \
+  ../snnAcc/spike_processing.v \
+  ../snnAcc/neuron_processing.v \
+  ../snnAcc/act_index_generator.v \
+  ../snnAcc/weight_generator.v \
+  ../snnAcc/syn_curr_update.v \
+  ../snnAcc/update_state_for_neuron.v \
+  ../snnAcc/dataline_cache_with_xy.v \
+  ../snnAcc/slice_and_align.v \
+  ../snnAcc/packer.v \
+  ../annAcc/acc_snn_processor.v \
+  ../annAcc/spike_processing.v \
+  ../annAcc/neuron_processing.v \
+  ../annAcc/syn_curr_update.v \
+  ../annAcc/update_state_for_neuron.v \
+  ../Hadamard/hadamard_unit.v \
+  ../Hadamard/hu_compute.v \
+  ../Hadamard/hu_config_regs.v \
+  ../Hadamard/stream_generator.v \
+  ../fillUnit/fill_unit.v
+# Notes on file selection:
+#   - sch_ctrl.v excluded: stub module, not instantiated by scheduler
+#   - annAcc/{act_index_generator,weight_generator,dataline_cache_with_xy,
+#             slice_and_align,packer}.v excluded: identical to snnAcc versions
+#   - Hadamard/{dataline_cache_with_xy,slice_and_align,packer}.v excluded:
+#     functionally identical to snnAcc versions (whitespace/style diffs only)
+#   - annAcc sub-modules renamed to avoid collision with snnAcc:
+#       spike_processing      → ann_spike_processing
+#       neuron_processing     → ann_neuron_processing
+#       syn_curr_update       → ann_syn_curr_update
+#       update_state_for_neuron → ann_update_state_for_neuron

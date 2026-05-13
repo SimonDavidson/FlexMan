@@ -78,13 +78,13 @@ endmodule
 module top;
 
 // ---- Parameters matching DUT -----------------------------------------------
-localparam TGT_ACC_SZ          = 2;
+localparam TGT_ACC_SZ          = 3;
 localparam TGT_COUNT_SZ        = 3;
 localparam CFG_ID_SZ           = 5;
 localparam NUM_BUFFERS         = 16;
 localparam COL_BUFF_ID_SZ      = 16;
 localparam NUM_SCH_ENTRIES     = 4;
-localparam NUM_HW_ACCELERATORS = 2;
+localparam NUM_HW_ACCELERATORS = 5;
 localparam PROG_ADDR_BITS      = 10;
 localparam PROG_DATA_BITS      = 32;
 localparam BUFF_INDX_SZ        = 4;
@@ -95,13 +95,13 @@ localparam MODE_SZ             = 2;
 localparam SLOT_SHORT_SZ = MODE_SZ + BUFF_INDX_SZ;                    // 6
 localparam SLOT_LONG_SZ  = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ;    // 9
 localparam ENTRY_DATA_SZ = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ
-                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;              // 53
+                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;              // 54
 
 // Entry field offsets within buffer_info_o:
 localparam LONG_BASE   = 3 * SLOT_SHORT_SZ;              // 18
 localparam E_COLOUR    = LONG_BASE + 3 * SLOT_LONG_SZ;   // 45
 localparam E_ACC_START = E_COLOUR + 1;                   // 46
-localparam E_CFG_START = E_ACC_START + TGT_ACC_SZ;       // 48
+localparam E_CFG_START = E_ACC_START + TGT_ACC_SZ;       // 49
 
 localparam MODE_UNUSED = 2'b00;
 localparam MODE_SRC    = 2'b01;
@@ -195,9 +195,9 @@ wire busy_0,     busy_1;
 wire finished_0, finished_1;
 wire result_0,   result_1;
 
-assign acc_busy_w     = {busy_1,     busy_0};
-assign acc_finished_w = {finished_1, finished_0};
-assign acc_result_w   = {result_1,   result_0};
+assign acc_busy_w     = {3'b0, busy_1,     busy_0};
+assign acc_finished_w = {3'b0, finished_1, finished_0};
+assign acc_result_w   = {3'b0, result_1,   result_0};
 
 dummy_acc #(.ACC_ID(0), .TGT_ACC_SZ(TGT_ACC_SZ)) acc0 (
     .clk(clk), .reset(reset),
@@ -245,6 +245,8 @@ scheduler #(
     .buffer_info_o(buffer_info),
     .nxt_input_pulse_o(nxt_in_pulse),
     .nxt_output_pulse_o(nxt_out_pulse),
+    .fill_value_o(),
+    .fill_block_size_o(),
     .mark_buff_as_full_i(mark_buff_as_full),
     .full_buff_id_i(full_buff_id),
     .full_buff_usage_i(full_buff_usage)

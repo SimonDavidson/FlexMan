@@ -1,0 +1,1198 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Simon Davidson, University of Manchester
+`timescale 10ps/1ps
+`include "../shared/constants.v"
+
+// Top-level integration module for FlexMan.
+// Instantiates: 1× scheduler, 1× config_manager, 2× snnAcc, 1× annAcc,
+// 1× hadamard_unit, 1× fill_unit.
+//
+// AXI bus sharing:
+//   A single host AXI bus (sys_req_i/sys_addr_i/sys_data_i) is broadcast to
+//   all sub-modules.  Each sub-module self-filters by address.  Acks are OR'd.
+//   Only the scheduler produces read data (sys_data_o).
+//
+// Config write adapter (per accelerator):
+//   config_manager outputs cm_config_wr_o[i] + cm_config_data_o with no address.
+//   An internal word counter per accelerator generates the AXI write address
+//   (BASE + word_cnt*4), with config_manager writes taking priority over the
+//   external host for each accelerator's AXI port.
+//
+// BBA register bank (per accelerator):
+//   config_manager sends 4 buffer base-addresses sequentially:
+//   [0]=tgt, [1]=src1, [2]=src2, [3]=src3.
+//   An internal counter captures each into a 32-bit register and drives the
+//   accelerator's sp_*/np_*_buff_addr_i ports (lower PIN_BITS bits).
+//
+// fill_unit (acc_id = FILL_ACC_ID = NUM_HW_ACCELERATORS-1 = 4):
+//   FILL dispatches are gated away from the computation accelerators and
+//   config_manager.  fill_unit gets its own start_new_block pulse.
+//   Memory write arbitration: accelerator wins over fill_unit on shared buses
+//   (syn_curr, pot, spike, hd_src_r write port).  Read-only-from-acc memories
+//   (weight, act, bias_curr, thresh, hd_src_a/b/z) expose dedicated write
+//   ports at the top level for fill_unit (dual-port SRAM model).
+
+module flexman #(
+    // AXI config base addresses for each accelerator.
+    // Address decode: sys_addr_i[31:16] == XYZW_CFG_BASE[31:16].
+    parameter [31:0] SNN0_CFG_BASE           = 32'h1000_0000,
+    parameter [31:0] SNN1_CFG_BASE           = 32'h1001_0000,
+    parameter [31:0] ANN_CFG_BASE            = 32'h1002_0000,
+    parameter [31:0] HAD_CFG_BASE            = 32'h1003_0000,
+    // config_manager AXI slave address ranges (must not overlap with above).
+    parameter [31:0] CM_CFG_MEM_ADDR         = 32'hA000_0000,
+    parameter [31:0] CM_CFG_MEM_MASK         = 32'hFF00_0000,
+    parameter [31:0] CM_BBA_MEM_ADDR         = 32'hB000_0000,
+    parameter [31:0] CM_BBA_MEM_MASK         = 32'hFF00_0000,
+    // fill_unit AXI slave address range for mem_sel table.
+    parameter [31:0] FU_TABLE_ADDR           = 32'hC000_0000,
+    parameter [31:0] FU_TABLE_ADDR_MASK      = 32'hFF00_0000,
+    // System sizing — must be consistent across all sub-modules.
+    parameter NUM_BUFFERS         = 16,
+    parameter NUM_HW_ACCELERATORS = 5,    // 4 computation + 1 fill_unit
+    parameter WORDS_PER_CONFIG    = 4,    // must be a power of 2 >= 2
+    parameter CFG_ID_SZ           = 5,
+    parameter BUFF_INDX_SZ        = 4,    // = $clog2(NUM_BUFFERS)
+    parameter TGT_ACC_SZ          = 3,    // extended to hold FILL_ACC_ID=4
+    parameter TGT_COUNT_SZ        = 3,
+    parameter PROG_ADDR_BITS      = 10,
+    parameter PROG_DATA_BITS      = 32,
+    parameter NUM_SCH_ENTRIES     = 4,
+    parameter COL_BUFF_ID_SZ      = 16
+)(
+    input  wire clk,
+    input  wire reset,
+    input  wire test_stall_pipe,
+
+    // ── Shared host AXI bus ──────────────────────────────────────────────────
+    input  wire         sys_req_i,
+    output wire         sys_ack_o,
+    input  wire  [31:0] sys_addr_i,
+    input  wire  [31:0] sys_data_i,
+    output wire  [31:0] sys_data_o,
+
+    // ── Program memory (scheduler) ───────────────────────────────────────────
+    input  wire                      start_program_i,
+    input  wire [PROG_ADDR_BITS-1:0] program_addr_i,
+    output wire [`ADDR_SIZE-1:0]     prog_mem_addr_o,
+    input  wire [PROG_DATA_BITS-1:0] prog_mem_data_i,
+    output wire                      prog_mem_req_o,
+    input  wire                      prog_mem_wait_i,
+
+    // ── Config memory (config_manager read/write) ────────────────────────────
+    output wire         cfg_mem_rd_o,
+    input  wire         cfg_mem_wait_i,
+    output wire  [31:0] cfg_mem_addr_o,
+    input  wire  [31:0] cfg_mem_data_i,
+    output wire         cfg_mem_wr_o,
+    output wire  [31:0] cfg_mem_wr_addr_o,
+    output wire  [31:0] cfg_mem_wr_data_o,
+
+    // ── Buffer base-address memory — config_manager port (read/write) ────────
+    output wire         bba_mem_rd_o,
+    input  wire         bba_mem_wait_i,
+    output wire  [31:0] bba_mem_addr_o,
+    input  wire  [31:0] bba_mem_data_i,
+    output wire         bba_mem_wr_o,
+    output wire  [31:0] bba_mem_wr_addr_o,
+    output wire  [31:0] bba_mem_wr_data_o,
+
+    // ── Buffer base-address memory — fill_unit second read port ─────────────
+    output wire         fu_bba_mem_rd_o,
+    input  wire         fu_bba_mem_wait_i,
+    output wire  [31:0] fu_bba_mem_addr_o,
+    input  wire  [31:0] fu_bba_mem_data_i,
+
+    // ── Scheduler buffer pre-fill / NXT pulses ───────────────────────────────
+    input  wire                   mark_buff_as_full_i,
+    input  wire [BUFF_INDX_SZ-1:0] full_buff_id_i,
+    input  wire [TGT_COUNT_SZ-1:0] full_buff_usage_i,
+    output wire                   nxt_input_pulse_o,
+    output wire                   nxt_output_pulse_o,
+
+    // ── Config manager status ────────────────────────────────────────────────
+    output wire cm_config_finished_o,
+
+    // ── snnAcc0 memory ports (prefix s0_) ────────────────────────────────────
+    // Existing accelerator read/write ports (acc priority on shared buses)
+    output wire                  s0_weight_mem_rd_o,
+    input  wire                  s0_weight_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] s0_weight_mem_addr_o,
+    input  wire  [`WTD_BITS-1:0] s0_weight_mem_data_i,
+    // fill_unit dedicated write port (dual-port; no arbitration needed)
+    output wire                  s0_weight_mem_wr_o,
+    input  wire                  s0_weight_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] s0_weight_mem_wr_addr_o,
+    output wire           [31:0] s0_weight_mem_wr_data_o,
+
+    output wire                  s0_act_mem_req_o,
+    input  wire                  s0_act_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] s0_act_mem_addr_o,
+    input  wire  [`ACT_BITS-1:0] s0_act_mem_data_i,
+    output wire                  s0_act_mem_wr_o,
+    input  wire                  s0_act_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] s0_act_mem_wr_addr_o,
+    output wire           [31:0] s0_act_mem_wr_data_o,
+
+    // Shared read/write bus (arbitrated: acc wins)
+    output wire                  s0_syn_curr_mem_wr_o,
+    output wire                  s0_syn_curr_mem_rd_o,
+    input  wire                  s0_syn_curr_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] s0_syn_curr_mem_addr_o,
+    output wire  [`POT_BITS-1:0] s0_syn_curr_mem_data_o,
+    input  wire  [`POT_BITS-1:0] s0_syn_curr_mem_data_i,
+
+    output wire                  s0_bias_curr_mem_rd_o,
+    input  wire                  s0_bias_curr_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] s0_bias_curr_mem_addr_o,
+    input  wire  [`WTD_BITS-1:0] s0_bias_curr_mem_data_i,
+    output wire                  s0_bias_curr_mem_wr_o,
+    input  wire                  s0_bias_curr_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] s0_bias_curr_mem_wr_addr_o,
+    output wire           [31:0] s0_bias_curr_mem_wr_data_o,
+
+    output wire                  s0_thresh_mem_rd_o,
+    input  wire                  s0_thresh_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] s0_thresh_mem_addr_o,
+    input  wire  [`WTD_BITS-1:0] s0_thresh_mem_data_i,
+    output wire                  s0_thresh_mem_wr_o,
+    input  wire                  s0_thresh_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] s0_thresh_mem_wr_addr_o,
+    output wire           [31:0] s0_thresh_mem_wr_data_o,
+
+    // Shared read/write bus (arbitrated: acc wins)
+    output wire                  s0_pot_mem_wr_o,
+    output wire                  s0_pot_mem_rd_o,
+    input  wire                  s0_pot_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] s0_pot_mem_addr_o,
+    output wire  [`POT_BITS-1:0] s0_pot_mem_data_o,
+    input  wire  [`POT_BITS-1:0] s0_pot_mem_data_i,
+
+    // Shared write bus (arbitrated: acc wins)
+    output wire                  s0_spike_mem_wr_o,
+    input  wire                  s0_spike_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] s0_spike_mem_addr_o,
+    output wire  [`ACT_BITS-1:0] s0_spike_mem_data_o,
+
+    // ── snnAcc1 memory ports (prefix s1_) ────────────────────────────────────
+    output wire                  s1_weight_mem_rd_o,
+    input  wire                  s1_weight_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] s1_weight_mem_addr_o,
+    input  wire  [`WTD_BITS-1:0] s1_weight_mem_data_i,
+    output wire                  s1_weight_mem_wr_o,
+    input  wire                  s1_weight_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] s1_weight_mem_wr_addr_o,
+    output wire           [31:0] s1_weight_mem_wr_data_o,
+
+    output wire                  s1_act_mem_req_o,
+    input  wire                  s1_act_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] s1_act_mem_addr_o,
+    input  wire  [`ACT_BITS-1:0] s1_act_mem_data_i,
+    output wire                  s1_act_mem_wr_o,
+    input  wire                  s1_act_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] s1_act_mem_wr_addr_o,
+    output wire           [31:0] s1_act_mem_wr_data_o,
+
+    output wire                  s1_syn_curr_mem_wr_o,
+    output wire                  s1_syn_curr_mem_rd_o,
+    input  wire                  s1_syn_curr_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] s1_syn_curr_mem_addr_o,
+    output wire  [`POT_BITS-1:0] s1_syn_curr_mem_data_o,
+    input  wire  [`POT_BITS-1:0] s1_syn_curr_mem_data_i,
+
+    output wire                  s1_bias_curr_mem_rd_o,
+    input  wire                  s1_bias_curr_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] s1_bias_curr_mem_addr_o,
+    input  wire  [`WTD_BITS-1:0] s1_bias_curr_mem_data_i,
+    output wire                  s1_bias_curr_mem_wr_o,
+    input  wire                  s1_bias_curr_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] s1_bias_curr_mem_wr_addr_o,
+    output wire           [31:0] s1_bias_curr_mem_wr_data_o,
+
+    output wire                  s1_thresh_mem_rd_o,
+    input  wire                  s1_thresh_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] s1_thresh_mem_addr_o,
+    input  wire  [`WTD_BITS-1:0] s1_thresh_mem_data_i,
+    output wire                  s1_thresh_mem_wr_o,
+    input  wire                  s1_thresh_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] s1_thresh_mem_wr_addr_o,
+    output wire           [31:0] s1_thresh_mem_wr_data_o,
+
+    output wire                  s1_pot_mem_wr_o,
+    output wire                  s1_pot_mem_rd_o,
+    input  wire                  s1_pot_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] s1_pot_mem_addr_o,
+    output wire  [`POT_BITS-1:0] s1_pot_mem_data_o,
+    input  wire  [`POT_BITS-1:0] s1_pot_mem_data_i,
+
+    output wire                  s1_spike_mem_wr_o,
+    input  wire                  s1_spike_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] s1_spike_mem_addr_o,
+    output wire  [`ACT_BITS-1:0] s1_spike_mem_data_o,
+
+    // ── annAcc memory ports (prefix a0_) ─────────────────────────────────────
+    output wire                  a0_weight_mem_rd_o,
+    input  wire                  a0_weight_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] a0_weight_mem_addr_o,
+    input  wire  [`WTD_BITS-1:0] a0_weight_mem_data_i,
+    output wire                  a0_weight_mem_wr_o,
+    input  wire                  a0_weight_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] a0_weight_mem_wr_addr_o,
+    output wire           [31:0] a0_weight_mem_wr_data_o,
+
+    output wire                  a0_act_mem_req_o,
+    input  wire                  a0_act_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] a0_act_mem_addr_o,
+    input  wire  [`ACT_BITS-1:0] a0_act_mem_data_i,
+    output wire                  a0_act_mem_wr_o,
+    input  wire                  a0_act_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] a0_act_mem_wr_addr_o,
+    output wire           [31:0] a0_act_mem_wr_data_o,
+
+    output wire                  a0_syn_curr_mem_wr_o,
+    output wire                  a0_syn_curr_mem_rd_o,
+    input  wire                  a0_syn_curr_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] a0_syn_curr_mem_addr_o,
+    output wire  [`POT_BITS-1:0] a0_syn_curr_mem_data_o,
+    input  wire  [`POT_BITS-1:0] a0_syn_curr_mem_data_i,
+
+    output wire                  a0_bias_curr_mem_rd_o,
+    input  wire                  a0_bias_curr_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] a0_bias_curr_mem_addr_o,
+    input  wire  [`WTD_BITS-1:0] a0_bias_curr_mem_data_i,
+    output wire                  a0_bias_curr_mem_wr_o,
+    input  wire                  a0_bias_curr_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] a0_bias_curr_mem_wr_addr_o,
+    output wire           [31:0] a0_bias_curr_mem_wr_data_o,
+
+    output wire                  a0_thresh_mem_rd_o,
+    input  wire                  a0_thresh_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] a0_thresh_mem_addr_o,
+    input  wire  [`WTD_BITS-1:0] a0_thresh_mem_data_i,
+    output wire                  a0_thresh_mem_wr_o,
+    input  wire                  a0_thresh_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] a0_thresh_mem_wr_addr_o,
+    output wire           [31:0] a0_thresh_mem_wr_data_o,
+
+    output wire                  a0_pot_mem_wr_o,
+    output wire                  a0_pot_mem_rd_o,
+    input  wire                  a0_pot_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] a0_pot_mem_addr_o,
+    output wire  [`POT_BITS-1:0] a0_pot_mem_data_o,
+    input  wire  [`POT_BITS-1:0] a0_pot_mem_data_i,
+
+    output wire                  a0_spike_mem_wr_o,
+    input  wire                  a0_spike_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] a0_spike_mem_addr_o,
+    output wire  [`ACT_BITS-1:0] a0_spike_mem_data_o,
+
+    // ── Hadamard memory ports (prefix hd_) ───────────────────────────────────
+    output wire                  hd_src_a_mem_rd_o,
+    input  wire                  hd_src_a_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] hd_src_a_mem_addr_o,
+    input  wire           [31:0] hd_src_a_mem_data_i,
+    // fill_unit dedicated write port
+    output wire                  hd_src_a_mem_wr_o,
+    input  wire                  hd_src_a_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] hd_src_a_mem_wr_addr_o,
+    output wire           [31:0] hd_src_a_mem_wr_data_o,
+
+    output wire                  hd_src_b_mem_rd_o,
+    input  wire                  hd_src_b_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] hd_src_b_mem_addr_o,
+    input  wire           [31:0] hd_src_b_mem_data_i,
+    output wire                  hd_src_b_mem_wr_o,
+    input  wire                  hd_src_b_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] hd_src_b_mem_wr_addr_o,
+    output wire           [31:0] hd_src_b_mem_wr_data_o,
+
+    output wire                  hd_src_z_mem_rd_o,
+    input  wire                  hd_src_z_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] hd_src_z_mem_addr_o,
+    input  wire           [31:0] hd_src_z_mem_data_i,
+    output wire                  hd_src_z_mem_wr_o,
+    input  wire                  hd_src_z_mem_wr_wait_i,
+    output wire [`ADDR_SIZE-1:0] hd_src_z_mem_wr_addr_o,
+    output wire           [31:0] hd_src_z_mem_wr_data_o,
+
+    // Hadamard src_r: separate read bus + shared write bus (arbitrated)
+    output wire                  hd_src_r_mem_rd_o,
+    input  wire                  hd_src_r_mem_wait_i,
+    output wire [`ADDR_SIZE-1:0] hd_src_r_mem_addr_o,
+    input  wire           [31:0] hd_src_r_mem_data_i,
+    output wire                  hd_src_r_mem_wr_o,
+    output wire [`ADDR_SIZE-1:0] hd_src_r_mem_wr_addr_o,
+    input  wire                  hd_src_r_mem_wr_wait_i,
+    output wire           [31:0] hd_src_r_mem_data_o
+);
+
+// ─── Derived constants ────────────────────────────────────────────────────────
+localparam MODE_SZ       = 2;
+localparam SLOT_SHORT_SZ = MODE_SZ + BUFF_INDX_SZ;                            // 6
+localparam SLOT_LONG_SZ  = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ;            // 9
+// Entry layout: 3 short + 3 long + colour + acc_id + cfg_id
+localparam ENTRY_DATA_SZ = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ
+                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;                      // 54
+localparam LONG_BASE     = 3 * SLOT_SHORT_SZ;                                 // 18
+// Field offsets within buffer_info_o (matches scheduler internals):
+//   Short slot 0: mode=[1:0],   id=[5:2]
+//   Long  slot 0: mode=[19:18], id=[23:20], ntgt=[26:24]   (BASE=18)
+//   Long  slot 1: mode=[28:27], id=[32:29], ntgt=[35:33]   (BASE=27)
+//   Long  slot 2: mode=[37:36], id=[41:38], ntgt=[44:42]   (BASE=36)
+//   colour=[45], acc_id=[48:46], cfg_id=[53:49]
+localparam E_COLOUR    = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ;                    // 45
+localparam E_ACC_START = E_COLOUR + 1;                                         // 46
+localparam E_CFG_START = E_ACC_START + TGT_ACC_SZ;                            // 49
+
+// fill_unit is the last accelerator slot; TASK's 2-bit acc_id field can only
+// reach 0-3, so FILL_ACC_ID=4 is unreachable by normal TASK instructions.
+localparam [TGT_ACC_SZ-1:0] FILL_ACC_ID = NUM_HW_ACCELERATORS - 1;           // 4
+
+localparam LOG2_WPC    = 2;   // $clog2(WORDS_PER_CONFIG=4)
+localparam BBA_CNT_SZ  = 2;   // $clog2(NUM_BBA_SENDS=4)
+
+// Number of computation accelerators served by config_manager (excludes fill_unit)
+localparam NUM_COMP_ACC = NUM_HW_ACCELERATORS - 1;                            // 4
+
+// ─── Scheduler outputs ───────────────────────────────────────────────────────
+wire                      sch_ack;
+wire               [31:0] sch_data_o;
+wire [ENTRY_DATA_SZ-1:0]  sch_buffer_info;
+wire [TGT_ACC_SZ-1:0]     sch_target_acc;
+wire                      sch_start_new_block;
+wire               [31:0] sch_fill_value;
+wire               [19:0] sch_fill_block_size;
+
+// FILL dispatch gating — separates fill_unit dispatch from computation acc dispatch
+wire is_fill_dispatch    = sch_start_new_block & (sch_target_acc == FILL_ACC_ID);
+wire acc_start_new_block = sch_start_new_block & ~is_fill_dispatch;
+
+// Target buffer ID for fill_unit (long slot 0 id = bits [LONG_BASE+MODE_SZ +: BUFF_INDX_SZ])
+wire [BUFF_INDX_SZ-1:0] fu_buff_id = sch_buffer_info[LONG_BASE + MODE_SZ +: BUFF_INDX_SZ];
+
+// ─── Config manager outputs ───────────────────────────────────────────────────
+wire                         cm_ack;
+wire [NUM_COMP_ACC-1:0]      cm_config_wr;
+wire [NUM_COMP_ACC-1:0]      cm_buff_base_wr;
+wire [31:0]                  cm_config_data;
+wire [31:0]                  cm_buff_base_data;
+
+// config_manager start is suppressed for FILL dispatches
+wire cm_start_new_block = sch_start_new_block & ~is_fill_dispatch;
+
+// ─── Accelerator AXI (config write mux outputs) ───────────────────────────────
+wire  snn0_sys_req, snn0_sys_ack;
+wire [31:0] snn0_sys_addr, snn0_sys_data_in;
+wire  snn1_sys_req, snn1_sys_ack;
+wire [31:0] snn1_sys_addr, snn1_sys_data_in;
+wire  ann_sys_req,  ann_sys_ack;
+wire [31:0] ann_sys_addr,  ann_sys_data_in;
+wire  had_sys_req,  had_sys_ack;
+wire [31:0] had_sys_addr,  had_sys_data_in;
+
+// ─── Accelerator and fill_unit status ────────────────────────────────────────
+wire  snn0_busy, snn0_finished, snn0_result;
+wire  snn1_busy, snn1_finished, snn1_result;
+wire  ann_busy,  ann_finished,  ann_result;
+wire  had_busy,  had_finished;
+wire  fu_busy,   fu_finished,   fu_ack;
+
+// ─── Buffer address wires (BBA register bank outputs) ────────────────────────
+wire [`PIN_BITS-1:0] snn0_sp_tgt,  snn0_sp_src1, snn0_sp_src2, snn0_sp_src3;
+wire [`PIN_BITS-1:0] snn0_np_tgt,  snn0_np_src1, snn0_np_src2, snn0_np_src3;
+wire [`PIN_BITS-1:0] snn1_sp_tgt,  snn1_sp_src1, snn1_sp_src2, snn1_sp_src3;
+wire [`PIN_BITS-1:0] snn1_np_tgt,  snn1_np_src1, snn1_np_src2, snn1_np_src3;
+wire [`PIN_BITS-1:0] ann_sp_tgt,   ann_sp_src1,  ann_sp_src2,  ann_sp_src3;
+wire [`PIN_BITS-1:0] ann_np_tgt,   ann_np_src1,  ann_np_src2,  ann_np_src3;
+
+// ─── Config write counters (one 2-bit counter per computation accelerator) ───
+// Reset at each new dispatch to that accelerator; increment per config word write.
+reg [LOG2_WPC-1:0] cfg_cnt_0, cfg_cnt_1, cfg_cnt_2, cfg_cnt_3;
+
+always @(posedge clk or posedge reset) begin
+    if (reset || (sch_start_new_block && sch_target_acc == 3'd0))
+        cfg_cnt_0 <= 2'b00;
+    else if (cm_config_wr[0])
+        cfg_cnt_0 <= cfg_cnt_0 + 1'b1;
+end
+always @(posedge clk or posedge reset) begin
+    if (reset || (sch_start_new_block && sch_target_acc == 3'd1))
+        cfg_cnt_1 <= 2'b00;
+    else if (cm_config_wr[1])
+        cfg_cnt_1 <= cfg_cnt_1 + 1'b1;
+end
+always @(posedge clk or posedge reset) begin
+    if (reset || (sch_start_new_block && sch_target_acc == 3'd2))
+        cfg_cnt_2 <= 2'b00;
+    else if (cm_config_wr[2])
+        cfg_cnt_2 <= cfg_cnt_2 + 1'b1;
+end
+always @(posedge clk or posedge reset) begin
+    if (reset || (sch_start_new_block && sch_target_acc == 3'd3))
+        cfg_cnt_3 <= 2'b00;
+    else if (cm_config_wr[3])
+        cfg_cnt_3 <= cfg_cnt_3 + 1'b1;
+end
+
+// ─── AXI mux: config_manager writes take priority over external host ──────────
+wire snn0_ext_req = sys_req_i & (sys_addr_i[31:16] == SNN0_CFG_BASE[31:16]);
+wire snn1_ext_req = sys_req_i & (sys_addr_i[31:16] == SNN1_CFG_BASE[31:16]);
+wire ann_ext_req  = sys_req_i & (sys_addr_i[31:16] == ANN_CFG_BASE[31:16]);
+wire had_ext_req  = sys_req_i & (sys_addr_i[31:16] == HAD_CFG_BASE[31:16]);
+
+assign snn0_sys_req     = cm_config_wr[0] ? 1'b1 : snn0_ext_req;
+assign snn0_sys_addr    = cm_config_wr[0]
+                        ? (SNN0_CFG_BASE | {{28{1'b0}}, cfg_cnt_0, 2'b00})
+                        : sys_addr_i;
+assign snn0_sys_data_in = cm_config_wr[0] ? cm_config_data : sys_data_i;
+
+assign snn1_sys_req     = cm_config_wr[1] ? 1'b1 : snn1_ext_req;
+assign snn1_sys_addr    = cm_config_wr[1]
+                        ? (SNN1_CFG_BASE | {{28{1'b0}}, cfg_cnt_1, 2'b00})
+                        : sys_addr_i;
+assign snn1_sys_data_in = cm_config_wr[1] ? cm_config_data : sys_data_i;
+
+assign ann_sys_req      = cm_config_wr[2] ? 1'b1 : ann_ext_req;
+assign ann_sys_addr     = cm_config_wr[2]
+                        ? (ANN_CFG_BASE | {{28{1'b0}}, cfg_cnt_2, 2'b00})
+                        : sys_addr_i;
+assign ann_sys_data_in  = cm_config_wr[2] ? cm_config_data : sys_data_i;
+
+assign had_sys_req      = cm_config_wr[3] ? 1'b1 : had_ext_req;
+assign had_sys_addr     = cm_config_wr[3]
+                        ? (HAD_CFG_BASE | {{28{1'b0}}, cfg_cnt_3, 2'b00})
+                        : sys_addr_i;
+assign had_sys_data_in  = cm_config_wr[3] ? cm_config_data : sys_data_i;
+
+wire snn0_ext_ack = snn0_sys_ack & ~cm_config_wr[0];
+wire snn1_ext_ack = snn1_sys_ack & ~cm_config_wr[1];
+wire ann_ext_ack  = ann_sys_ack  & ~cm_config_wr[2];
+wire had_ext_ack  = had_sys_ack  & ~cm_config_wr[3];
+
+wire [NUM_COMP_ACC-1:0] cm_config_wait    = {NUM_COMP_ACC{1'b0}};
+wire [NUM_COMP_ACC-1:0] cm_buff_base_wait = {NUM_COMP_ACC{1'b0}};
+
+assign sys_ack_o  = sch_ack | cm_ack | fu_ack
+                  | snn0_ext_ack | snn1_ext_ack | ann_ext_ack | had_ext_ack;
+assign sys_data_o = sch_data_o;
+
+// ─── BBA register banks ───────────────────────────────────────────────────────
+reg [BBA_CNT_SZ-1:0] bba_cnt_0, bba_cnt_1, bba_cnt_2, bba_cnt_3;
+reg [31:0] bba_r0 [0:3];
+reg [31:0] bba_r1 [0:3];
+reg [31:0] bba_r2 [0:3];
+reg [31:0] bba_r3 [0:3];
+
+always @(posedge clk or posedge reset) begin
+    if (reset || (sch_start_new_block && sch_target_acc == 3'd0))
+        bba_cnt_0 <= 2'b00;
+    else if (cm_buff_base_wr[0])
+        bba_cnt_0 <= bba_cnt_0 + 1'b1;
+end
+always @(posedge clk) begin
+    if (cm_buff_base_wr[0])
+        bba_r0[bba_cnt_0] <= cm_buff_base_data;
+end
+
+always @(posedge clk or posedge reset) begin
+    if (reset || (sch_start_new_block && sch_target_acc == 3'd1))
+        bba_cnt_1 <= 2'b00;
+    else if (cm_buff_base_wr[1])
+        bba_cnt_1 <= bba_cnt_1 + 1'b1;
+end
+always @(posedge clk) begin
+    if (cm_buff_base_wr[1])
+        bba_r1[bba_cnt_1] <= cm_buff_base_data;
+end
+
+always @(posedge clk or posedge reset) begin
+    if (reset || (sch_start_new_block && sch_target_acc == 3'd2))
+        bba_cnt_2 <= 2'b00;
+    else if (cm_buff_base_wr[2])
+        bba_cnt_2 <= bba_cnt_2 + 1'b1;
+end
+always @(posedge clk) begin
+    if (cm_buff_base_wr[2])
+        bba_r2[bba_cnt_2] <= cm_buff_base_data;
+end
+
+always @(posedge clk or posedge reset) begin
+    if (reset || (sch_start_new_block && sch_target_acc == 3'd3))
+        bba_cnt_3 <= 2'b00;
+    else if (cm_buff_base_wr[3])
+        bba_cnt_3 <= bba_cnt_3 + 1'b1;
+end
+always @(posedge clk) begin
+    if (cm_buff_base_wr[3])
+        bba_r3[bba_cnt_3] <= cm_buff_base_data;
+end
+
+assign snn0_sp_tgt  = bba_r0[0][`PIN_BITS-1:0];
+assign snn0_sp_src1 = bba_r0[1][`PIN_BITS-1:0];
+assign snn0_sp_src2 = bba_r0[2][`PIN_BITS-1:0];
+assign snn0_sp_src3 = bba_r0[3][`PIN_BITS-1:0];
+assign snn0_np_tgt  = bba_r0[0][`PIN_BITS-1:0];
+assign snn0_np_src1 = bba_r0[1][`PIN_BITS-1:0];
+assign snn0_np_src2 = bba_r0[2][`PIN_BITS-1:0];
+assign snn0_np_src3 = bba_r0[3][`PIN_BITS-1:0];
+
+assign snn1_sp_tgt  = bba_r1[0][`PIN_BITS-1:0];
+assign snn1_sp_src1 = bba_r1[1][`PIN_BITS-1:0];
+assign snn1_sp_src2 = bba_r1[2][`PIN_BITS-1:0];
+assign snn1_sp_src3 = bba_r1[3][`PIN_BITS-1:0];
+assign snn1_np_tgt  = bba_r1[0][`PIN_BITS-1:0];
+assign snn1_np_src1 = bba_r1[1][`PIN_BITS-1:0];
+assign snn1_np_src2 = bba_r1[2][`PIN_BITS-1:0];
+assign snn1_np_src3 = bba_r1[3][`PIN_BITS-1:0];
+
+assign ann_sp_tgt   = bba_r2[0][`PIN_BITS-1:0];
+assign ann_sp_src1  = bba_r2[1][`PIN_BITS-1:0];
+assign ann_sp_src2  = bba_r2[2][`PIN_BITS-1:0];
+assign ann_sp_src3  = bba_r2[3][`PIN_BITS-1:0];
+assign ann_np_tgt   = bba_r2[0][`PIN_BITS-1:0];
+assign ann_np_src1  = bba_r2[1][`PIN_BITS-1:0];
+assign ann_np_src2  = bba_r2[2][`PIN_BITS-1:0];
+assign ann_np_src3  = bba_r2[3][`PIN_BITS-1:0];
+
+// ─── Buffer info extraction for config_manager ────────────────────────────────
+// config_manager (BUFF_INDEX_SZ=BUFF_INDX_SZ=4):
+//   buffer_info_i[3:0]   = src1 id  (long  slot 0 id: sch_buffer_info[23:20])
+//   buffer_info_i[7:4]   = src2 id  (long  slot 1 id: sch_buffer_info[32:29])
+//   buffer_info_i[11:8]  = src3 id  (long  slot 2 id: sch_buffer_info[41:38])
+//   buffer_info_i[15:12] = tgt  id  (short slot 0 id: sch_buffer_info[5:2])
+//   buffer_info_i[31:16] = 16'b0
+wire [`SCH_ENTRY_SZ-1:0] cm_buffer_info;
+assign cm_buffer_info = {16'b0,
+                          sch_buffer_info[5:2],    // tgt:  short slot 0 id
+                          sch_buffer_info[41:38],   // src3: long  slot 2 id
+                          sch_buffer_info[32:29],   // src2: long  slot 1 id
+                          sch_buffer_info[23:20]};  // src1: long  slot 0 id
+
+wire [CFG_ID_SZ-1:0] cm_config_id = sch_buffer_info[E_CFG_START +: CFG_ID_SZ];
+
+// ─── Accelerator-side internal wires for write-shared memories ────────────────
+// These decouple the accelerator outputs from the top-level ports so the
+// arbitration mux can choose between acc and fill_unit.
+
+// snnAcc0 — syn_curr (rd+wr), pot (rd+wr), spike (wr)
+wire                  acc_s0_syn_curr_wr,   acc_s0_syn_curr_rd;
+wire [`ADDR_SIZE-1:0] acc_s0_syn_curr_addr;
+wire  [`POT_BITS-1:0] acc_s0_syn_curr_data;
+wire                  acc_s0_pot_wr,        acc_s0_pot_rd;
+wire [`ADDR_SIZE-1:0] acc_s0_pot_addr;
+wire  [`POT_BITS-1:0] acc_s0_pot_data;
+wire                  acc_s0_spike_wr;
+wire [`ADDR_SIZE-1:0] acc_s0_spike_addr;
+wire  [`ACT_BITS-1:0] acc_s0_spike_data;
+
+// snnAcc1 — syn_curr, pot, spike
+wire                  acc_s1_syn_curr_wr,   acc_s1_syn_curr_rd;
+wire [`ADDR_SIZE-1:0] acc_s1_syn_curr_addr;
+wire  [`POT_BITS-1:0] acc_s1_syn_curr_data;
+wire                  acc_s1_pot_wr,        acc_s1_pot_rd;
+wire [`ADDR_SIZE-1:0] acc_s1_pot_addr;
+wire  [`POT_BITS-1:0] acc_s1_pot_data;
+wire                  acc_s1_spike_wr;
+wire [`ADDR_SIZE-1:0] acc_s1_spike_addr;
+wire  [`ACT_BITS-1:0] acc_s1_spike_data;
+
+// annAcc — syn_curr, pot, spike
+wire                  acc_a0_syn_curr_wr,   acc_a0_syn_curr_rd;
+wire [`ADDR_SIZE-1:0] acc_a0_syn_curr_addr;
+wire  [`POT_BITS-1:0] acc_a0_syn_curr_data;
+wire                  acc_a0_pot_wr,        acc_a0_pot_rd;
+wire [`ADDR_SIZE-1:0] acc_a0_pot_addr;
+wire  [`POT_BITS-1:0] acc_a0_pot_data;
+wire                  acc_a0_spike_wr;
+wire [`ADDR_SIZE-1:0] acc_a0_spike_addr;
+wire  [`ACT_BITS-1:0] acc_a0_spike_data;
+
+// Hadamard — src_r write port only
+wire                  acc_hd_src_r_wr;
+wire [`ADDR_SIZE-1:0] acc_hd_src_r_wr_addr;
+wire           [31:0] acc_hd_src_r_wr_data;
+wire                  acc_hd_src_r_wr_wait;
+
+// ─── fill_unit internal wires for write-shared memory buses ──────────────────
+// (fill-only memory buses connect directly in the u_fill instantiation below)
+
+wire                  fu_s0_syn_curr_wr;
+wire [`ADDR_SIZE-1:0] fu_s0_syn_curr_addr;
+wire           [31:0] fu_s0_syn_curr_data;
+wire                  fu_s0_syn_curr_wait;
+
+wire                  fu_s0_pot_wr;
+wire [`ADDR_SIZE-1:0] fu_s0_pot_addr;
+wire           [31:0] fu_s0_pot_data;
+wire                  fu_s0_pot_wait;
+
+wire                  fu_s0_spike_wr;
+wire [`ADDR_SIZE-1:0] fu_s0_spike_addr;
+wire           [31:0] fu_s0_spike_data;
+wire                  fu_s0_spike_wait;
+
+wire                  fu_s1_syn_curr_wr;
+wire [`ADDR_SIZE-1:0] fu_s1_syn_curr_addr;
+wire           [31:0] fu_s1_syn_curr_data;
+wire                  fu_s1_syn_curr_wait;
+
+wire                  fu_s1_pot_wr;
+wire [`ADDR_SIZE-1:0] fu_s1_pot_addr;
+wire           [31:0] fu_s1_pot_data;
+wire                  fu_s1_pot_wait;
+
+wire                  fu_s1_spike_wr;
+wire [`ADDR_SIZE-1:0] fu_s1_spike_addr;
+wire           [31:0] fu_s1_spike_data;
+wire                  fu_s1_spike_wait;
+
+wire                  fu_a0_syn_curr_wr;
+wire [`ADDR_SIZE-1:0] fu_a0_syn_curr_addr;
+wire           [31:0] fu_a0_syn_curr_data;
+wire                  fu_a0_syn_curr_wait;
+
+wire                  fu_a0_pot_wr;
+wire [`ADDR_SIZE-1:0] fu_a0_pot_addr;
+wire           [31:0] fu_a0_pot_data;
+wire                  fu_a0_pot_wait;
+
+wire                  fu_a0_spike_wr;
+wire [`ADDR_SIZE-1:0] fu_a0_spike_addr;
+wire           [31:0] fu_a0_spike_data;
+wire                  fu_a0_spike_wait;
+
+wire                  fu_hd_src_r_wr;
+wire [`ADDR_SIZE-1:0] fu_hd_src_r_addr;
+wire           [31:0] fu_hd_src_r_data;
+wire                  fu_hd_src_r_wait;
+
+// ─── Write-shared memory arbitration muxes (acc wins) ────────────────────────
+// Pattern per bus:
+//   acc_uses = any acc rd or wr on this bus
+//   top-level wr/addr/data = acc's if acc_uses, else fill_unit's
+//   rd port always routed from acc (only acc reads)
+//   acc sees real mem_wait (irrelevant when not requesting)
+//   fill_unit sees wait = acc_uses | mem_wait (when fu has the bus, mem_wait applies)
+
+// snnAcc0 syn_curr
+wire acc_uses_s0_syn_curr = acc_s0_syn_curr_rd | acc_s0_syn_curr_wr;
+assign s0_syn_curr_mem_wr_o   = acc_uses_s0_syn_curr ? acc_s0_syn_curr_wr   : fu_s0_syn_curr_wr;
+assign s0_syn_curr_mem_rd_o   = acc_s0_syn_curr_rd;
+assign s0_syn_curr_mem_addr_o = acc_uses_s0_syn_curr ? acc_s0_syn_curr_addr : fu_s0_syn_curr_addr;
+assign s0_syn_curr_mem_data_o = acc_uses_s0_syn_curr ? acc_s0_syn_curr_data : fu_s0_syn_curr_data[`POT_BITS-1:0];
+assign fu_s0_syn_curr_wait    = acc_uses_s0_syn_curr | s0_syn_curr_mem_wait_i;
+
+// snnAcc0 pot
+wire acc_uses_s0_pot = acc_s0_pot_rd | acc_s0_pot_wr;
+assign s0_pot_mem_wr_o   = acc_uses_s0_pot ? acc_s0_pot_wr   : fu_s0_pot_wr;
+assign s0_pot_mem_rd_o   = acc_s0_pot_rd;
+assign s0_pot_mem_addr_o = acc_uses_s0_pot ? acc_s0_pot_addr : fu_s0_pot_addr;
+assign s0_pot_mem_data_o = acc_uses_s0_pot ? acc_s0_pot_data : fu_s0_pot_data[`POT_BITS-1:0];
+assign fu_s0_pot_wait    = acc_uses_s0_pot | s0_pot_mem_wait_i;
+
+// snnAcc0 spike (write-only from acc)
+wire acc_uses_s0_spike = acc_s0_spike_wr;
+assign s0_spike_mem_wr_o   = acc_uses_s0_spike ? acc_s0_spike_wr   : fu_s0_spike_wr;
+assign s0_spike_mem_addr_o = acc_uses_s0_spike ? acc_s0_spike_addr : fu_s0_spike_addr;
+assign s0_spike_mem_data_o = acc_uses_s0_spike ? acc_s0_spike_data : fu_s0_spike_data[`ACT_BITS-1:0];
+assign fu_s0_spike_wait    = acc_uses_s0_spike | s0_spike_mem_wait_i;
+
+// snnAcc1 syn_curr
+wire acc_uses_s1_syn_curr = acc_s1_syn_curr_rd | acc_s1_syn_curr_wr;
+assign s1_syn_curr_mem_wr_o   = acc_uses_s1_syn_curr ? acc_s1_syn_curr_wr   : fu_s1_syn_curr_wr;
+assign s1_syn_curr_mem_rd_o   = acc_s1_syn_curr_rd;
+assign s1_syn_curr_mem_addr_o = acc_uses_s1_syn_curr ? acc_s1_syn_curr_addr : fu_s1_syn_curr_addr;
+assign s1_syn_curr_mem_data_o = acc_uses_s1_syn_curr ? acc_s1_syn_curr_data : fu_s1_syn_curr_data[`POT_BITS-1:0];
+assign fu_s1_syn_curr_wait    = acc_uses_s1_syn_curr | s1_syn_curr_mem_wait_i;
+
+// snnAcc1 pot
+wire acc_uses_s1_pot = acc_s1_pot_rd | acc_s1_pot_wr;
+assign s1_pot_mem_wr_o   = acc_uses_s1_pot ? acc_s1_pot_wr   : fu_s1_pot_wr;
+assign s1_pot_mem_rd_o   = acc_s1_pot_rd;
+assign s1_pot_mem_addr_o = acc_uses_s1_pot ? acc_s1_pot_addr : fu_s1_pot_addr;
+assign s1_pot_mem_data_o = acc_uses_s1_pot ? acc_s1_pot_data : fu_s1_pot_data[`POT_BITS-1:0];
+assign fu_s1_pot_wait    = acc_uses_s1_pot | s1_pot_mem_wait_i;
+
+// snnAcc1 spike
+wire acc_uses_s1_spike = acc_s1_spike_wr;
+assign s1_spike_mem_wr_o   = acc_uses_s1_spike ? acc_s1_spike_wr   : fu_s1_spike_wr;
+assign s1_spike_mem_addr_o = acc_uses_s1_spike ? acc_s1_spike_addr : fu_s1_spike_addr;
+assign s1_spike_mem_data_o = acc_uses_s1_spike ? acc_s1_spike_data : fu_s1_spike_data[`ACT_BITS-1:0];
+assign fu_s1_spike_wait    = acc_uses_s1_spike | s1_spike_mem_wait_i;
+
+// annAcc syn_curr
+wire acc_uses_a0_syn_curr = acc_a0_syn_curr_rd | acc_a0_syn_curr_wr;
+assign a0_syn_curr_mem_wr_o   = acc_uses_a0_syn_curr ? acc_a0_syn_curr_wr   : fu_a0_syn_curr_wr;
+assign a0_syn_curr_mem_rd_o   = acc_a0_syn_curr_rd;
+assign a0_syn_curr_mem_addr_o = acc_uses_a0_syn_curr ? acc_a0_syn_curr_addr : fu_a0_syn_curr_addr;
+assign a0_syn_curr_mem_data_o = acc_uses_a0_syn_curr ? acc_a0_syn_curr_data : fu_a0_syn_curr_data[`POT_BITS-1:0];
+assign fu_a0_syn_curr_wait    = acc_uses_a0_syn_curr | a0_syn_curr_mem_wait_i;
+
+// annAcc pot
+wire acc_uses_a0_pot = acc_a0_pot_rd | acc_a0_pot_wr;
+assign a0_pot_mem_wr_o   = acc_uses_a0_pot ? acc_a0_pot_wr   : fu_a0_pot_wr;
+assign a0_pot_mem_rd_o   = acc_a0_pot_rd;
+assign a0_pot_mem_addr_o = acc_uses_a0_pot ? acc_a0_pot_addr : fu_a0_pot_addr;
+assign a0_pot_mem_data_o = acc_uses_a0_pot ? acc_a0_pot_data : fu_a0_pot_data[`POT_BITS-1:0];
+assign fu_a0_pot_wait    = acc_uses_a0_pot | a0_pot_mem_wait_i;
+
+// annAcc spike
+wire acc_uses_a0_spike = acc_a0_spike_wr;
+assign a0_spike_mem_wr_o   = acc_uses_a0_spike ? acc_a0_spike_wr   : fu_a0_spike_wr;
+assign a0_spike_mem_addr_o = acc_uses_a0_spike ? acc_a0_spike_addr : fu_a0_spike_addr;
+assign a0_spike_mem_data_o = acc_uses_a0_spike ? acc_a0_spike_data : fu_a0_spike_data[`ACT_BITS-1:0];
+assign fu_a0_spike_wait    = acc_uses_a0_spike | a0_spike_mem_wait_i;
+
+// Hadamard src_r write port (read port routes directly from acc, unchanged)
+wire acc_uses_hd_src_r_wr = acc_hd_src_r_wr;
+assign hd_src_r_mem_wr_o      = acc_uses_hd_src_r_wr ? acc_hd_src_r_wr      : fu_hd_src_r_wr;
+assign hd_src_r_mem_wr_addr_o = acc_uses_hd_src_r_wr ? acc_hd_src_r_wr_addr : fu_hd_src_r_addr;
+assign hd_src_r_mem_data_o    = acc_uses_hd_src_r_wr ? acc_hd_src_r_wr_data : fu_hd_src_r_data;
+assign acc_hd_src_r_wr_wait   = hd_src_r_mem_wr_wait_i;
+assign fu_hd_src_r_wait       = acc_uses_hd_src_r_wr | hd_src_r_mem_wr_wait_i;
+
+// ─── Scheduler ────────────────────────────────────────────────────────────────
+scheduler #(
+    .NUM_HW_ACCELERATORS (NUM_HW_ACCELERATORS),
+    .TGT_ACC_SZ          (TGT_ACC_SZ),
+    .NUM_BUFFERS         (NUM_BUFFERS),
+    .COL_BUFF_ID_SZ      (COL_BUFF_ID_SZ),
+    .NUM_SCH_ENTRIES     (NUM_SCH_ENTRIES),
+    .CFG_ID_SZ           (CFG_ID_SZ),
+    .TGT_COUNT_SZ        (TGT_COUNT_SZ),
+    .PROG_ADDR_BITS      (PROG_ADDR_BITS),
+    .PROG_DATA_BITS      (PROG_DATA_BITS)
+) u_scheduler (
+    .clk                (clk),
+    .reset              (reset),
+    .test_stall_pipe    (test_stall_pipe),
+    .sys_req_i          (sys_req_i),
+    .sys_ack_o          (sch_ack),
+    .sys_data_i         (sys_data_i),
+    .sys_data_o         (sch_data_o),
+    .start_program_i    (start_program_i),
+    .program_addr_i     (program_addr_i),
+    .prog_mem_addr_o    (prog_mem_addr_o),
+    .prog_mem_data_i    (prog_mem_data_i),
+    .prog_mem_req_o     (prog_mem_req_o),
+    .prog_mem_wait_i    (prog_mem_wait_i),
+    .acc_busy_i         ({fu_busy,   had_busy,     ann_busy,     snn1_busy,     snn0_busy}),
+    .acc_finished_i     ({fu_finished, had_finished, ann_finished, snn1_finished, snn0_finished}),
+    .acc_result_i       ({1'b0,      1'b0,         ann_result,   snn1_result,   snn0_result}),
+    .start_new_block_o  (sch_start_new_block),
+    .target_acc_o       (sch_target_acc),
+    .buffer_info_o      (sch_buffer_info),
+    .fill_value_o       (sch_fill_value),
+    .fill_block_size_o  (sch_fill_block_size),
+    .nxt_input_pulse_o  (nxt_input_pulse_o),
+    .nxt_output_pulse_o (nxt_output_pulse_o),
+    .mark_buff_as_full_i(mark_buff_as_full_i),
+    .full_buff_id_i     (full_buff_id_i),
+    .full_buff_usage_i  (full_buff_usage_i)
+);
+
+// ─── Config manager ───────────────────────────────────────────────────────────
+// NUM_ACC=4: config_manager only serves computation accelerators 0-3.
+// start_new_block_i is suppressed for FILL dispatches.
+// target_acc_i is 2-bit ($clog2(4)); acc_id 0-3 always fit in 2 bits.
+config_manager #(
+    .NUM_ACC                 (NUM_COMP_ACC),
+    .BUFF_INDEX_SZ           (BUFF_INDX_SZ),
+    .NUM_BUFFERS             (NUM_BUFFERS),
+    .CFG_ID_SZ               (CFG_ID_SZ),
+    .WORDS_PER_CONFIG        (WORDS_PER_CONFIG),
+    .TGT_CONFIG_MEM_ADDR     (CM_CFG_MEM_ADDR),
+    .TGT_CONFIG_MEM_ADDR_MASK(CM_CFG_MEM_MASK),
+    .TGT_BUFF_STORE_ADDR     (CM_BBA_MEM_ADDR),
+    .TGT_BUFF_STORE_ADDR_MASK(CM_BBA_MEM_MASK)
+) u_config_manager (
+    .clk                  (clk),
+    .reset                (reset),
+    .cm_sys_req_i         (sys_req_i),
+    .cm_sys_ack_o         (cm_ack),
+    .cm_sys_addr_i        (sys_addr_i),
+    .cm_sys_data_i        (sys_data_i),
+    .start_new_block_i    (cm_start_new_block),
+    .target_acc_i         (sch_target_acc[1:0]),   // always 0-3 for non-FILL
+    .config_id_i          (cm_config_id),
+    .buffer_info_i        (cm_buffer_info),
+    .cm_config_finished_o (cm_config_finished_o),
+    .cfg_mem_rd_o         (cfg_mem_rd_o),
+    .cfg_mem_wait_i       (cfg_mem_wait_i),
+    .cfg_mem_addr_o       (cfg_mem_addr_o),
+    .cfg_mem_data_i       (cfg_mem_data_i),
+    .cfg_mem_wr_o         (cfg_mem_wr_o),
+    .cfg_mem_wr_addr_o    (cfg_mem_wr_addr_o),
+    .cfg_mem_wr_data_o    (cfg_mem_wr_data_o),
+    .bba_mem_rd_o         (bba_mem_rd_o),
+    .bba_mem_wait_i       (bba_mem_wait_i),
+    .bba_mem_addr_o       (bba_mem_addr_o),
+    .bba_mem_data_i       (bba_mem_data_i),
+    .bba_mem_wr_o         (bba_mem_wr_o),
+    .bba_mem_wr_addr_o    (bba_mem_wr_addr_o),
+    .bba_mem_wr_data_o    (bba_mem_wr_data_o),
+    .cm_tgt_acc_o         (),
+    .cm_config_wr_o       (cm_config_wr),
+    .cm_config_wait_i     (cm_config_wait),
+    .cm_config_data_o     (cm_config_data),
+    .cm_buff_base_wr_o    (cm_buff_base_wr),
+    .cm_buff_base_wait_i  (cm_buff_base_wait),
+    .cm_buff_base_data_o  (cm_buff_base_data)
+);
+
+// ─── snnAcc0 (TGT_ACC_ID = 0) ────────────────────────────────────────────────
+acc_snn_processor #(
+    .TGT_ACC_ID           (0),
+    .TGT_CONFIG_BASE_ADDR (SNN0_CFG_BASE)
+) u_snn0 (
+    .clk                   (clk),
+    .reset                 (reset),
+    .sys_req_i             (snn0_sys_req),
+    .sys_ack_o             (snn0_sys_ack),
+    .sys_addr_i            (snn0_sys_addr),
+    .sys_data_i            (snn0_sys_data_in),
+    .start_new_block_i     (acc_start_new_block),
+    .target_acc_i          (sch_target_acc),
+    .buffer_info_i         (sch_buffer_info[`SCH_ENTRY_SZ-1:0]),
+    .spike_proc_finished_o (snn0_result),
+    .acc_busy_o            (snn0_busy),
+    .acc_finished_o        (snn0_finished),
+    .sp_src1_buff_addr_i   (snn0_sp_src1),
+    .sp_src2_buff_addr_i   (snn0_sp_src2),
+    .sp_src3_buff_addr_i   (snn0_sp_src3),
+    .sp_tgt_buff_addr_i    (snn0_sp_tgt),
+    .sp_weight_row_len_i   ({`PIN_BITS{1'b0}}),
+    .np_src1_buff_addr_i   (snn0_np_src1),
+    .np_src2_buff_addr_i   (snn0_np_src2),
+    .np_src3_buff_addr_i   (snn0_np_src3),
+    .np_tgt_buff_addr_i    (snn0_np_tgt),
+    .np_weight_row_len_i   ({`PIN_BITS{1'b0}}),
+    .weight_mem_rd_o       (s0_weight_mem_rd_o),
+    .weight_mem_wait_i     (s0_weight_mem_wait_i),
+    .weight_mem_addr_o     (s0_weight_mem_addr_o),
+    .weight_mem_data_i     (s0_weight_mem_data_i),
+    .act_mem_req_o         (s0_act_mem_req_o),
+    .act_mem_wait_i        (s0_act_mem_wait_i),
+    .act_mem_addr_o        (s0_act_mem_addr_o),
+    .act_mem_data_i        (s0_act_mem_data_i),
+    .syn_curr_mem_wr_o     (acc_s0_syn_curr_wr),
+    .syn_curr_mem_rd_o     (acc_s0_syn_curr_rd),
+    .syn_curr_mem_wait_i   (s0_syn_curr_mem_wait_i),
+    .syn_curr_mem_addr_o   (acc_s0_syn_curr_addr),
+    .syn_curr_mem_data_o   (acc_s0_syn_curr_data),
+    .syn_curr_mem_data_i   (s0_syn_curr_mem_data_i),
+    .bias_curr_mem_rd_o    (s0_bias_curr_mem_rd_o),
+    .bias_curr_mem_wait_i  (s0_bias_curr_mem_wait_i),
+    .bias_curr_mem_addr_o  (s0_bias_curr_mem_addr_o),
+    .bias_curr_mem_data_i  (s0_bias_curr_mem_data_i),
+    .thresh_mem_rd_o       (s0_thresh_mem_rd_o),
+    .thresh_mem_wait_i     (s0_thresh_mem_wait_i),
+    .thresh_mem_addr_o     (s0_thresh_mem_addr_o),
+    .thresh_mem_data_i     (s0_thresh_mem_data_i),
+    .pot_mem_wr_o          (acc_s0_pot_wr),
+    .pot_mem_rd_o          (acc_s0_pot_rd),
+    .pot_mem_wait_i        (s0_pot_mem_wait_i),
+    .pot_mem_addr_o        (acc_s0_pot_addr),
+    .pot_mem_data_o        (acc_s0_pot_data),
+    .pot_mem_data_i        (s0_pot_mem_data_i),
+    .spike_mem_wr_o        (acc_s0_spike_wr),
+    .spike_mem_wait_i      (s0_spike_mem_wait_i),
+    .spike_mem_addr_o      (acc_s0_spike_addr),
+    .spike_mem_data_o      (acc_s0_spike_data)
+);
+
+// ─── snnAcc1 (TGT_ACC_ID = 1) ────────────────────────────────────────────────
+acc_snn_processor #(
+    .TGT_ACC_ID           (1),
+    .TGT_CONFIG_BASE_ADDR (SNN1_CFG_BASE)
+) u_snn1 (
+    .clk                   (clk),
+    .reset                 (reset),
+    .sys_req_i             (snn1_sys_req),
+    .sys_ack_o             (snn1_sys_ack),
+    .sys_addr_i            (snn1_sys_addr),
+    .sys_data_i            (snn1_sys_data_in),
+    .start_new_block_i     (acc_start_new_block),
+    .target_acc_i          (sch_target_acc),
+    .buffer_info_i         (sch_buffer_info[`SCH_ENTRY_SZ-1:0]),
+    .spike_proc_finished_o (snn1_result),
+    .acc_busy_o            (snn1_busy),
+    .acc_finished_o        (snn1_finished),
+    .sp_src1_buff_addr_i   (snn1_sp_src1),
+    .sp_src2_buff_addr_i   (snn1_sp_src2),
+    .sp_src3_buff_addr_i   (snn1_sp_src3),
+    .sp_tgt_buff_addr_i    (snn1_sp_tgt),
+    .sp_weight_row_len_i   ({`PIN_BITS{1'b0}}),
+    .np_src1_buff_addr_i   (snn1_np_src1),
+    .np_src2_buff_addr_i   (snn1_np_src2),
+    .np_src3_buff_addr_i   (snn1_np_src3),
+    .np_tgt_buff_addr_i    (snn1_np_tgt),
+    .np_weight_row_len_i   ({`PIN_BITS{1'b0}}),
+    .weight_mem_rd_o       (s1_weight_mem_rd_o),
+    .weight_mem_wait_i     (s1_weight_mem_wait_i),
+    .weight_mem_addr_o     (s1_weight_mem_addr_o),
+    .weight_mem_data_i     (s1_weight_mem_data_i),
+    .act_mem_req_o         (s1_act_mem_req_o),
+    .act_mem_wait_i        (s1_act_mem_wait_i),
+    .act_mem_addr_o        (s1_act_mem_addr_o),
+    .act_mem_data_i        (s1_act_mem_data_i),
+    .syn_curr_mem_wr_o     (acc_s1_syn_curr_wr),
+    .syn_curr_mem_rd_o     (acc_s1_syn_curr_rd),
+    .syn_curr_mem_wait_i   (s1_syn_curr_mem_wait_i),
+    .syn_curr_mem_addr_o   (acc_s1_syn_curr_addr),
+    .syn_curr_mem_data_o   (acc_s1_syn_curr_data),
+    .syn_curr_mem_data_i   (s1_syn_curr_mem_data_i),
+    .bias_curr_mem_rd_o    (s1_bias_curr_mem_rd_o),
+    .bias_curr_mem_wait_i  (s1_bias_curr_mem_wait_i),
+    .bias_curr_mem_addr_o  (s1_bias_curr_mem_addr_o),
+    .bias_curr_mem_data_i  (s1_bias_curr_mem_data_i),
+    .thresh_mem_rd_o       (s1_thresh_mem_rd_o),
+    .thresh_mem_wait_i     (s1_thresh_mem_wait_i),
+    .thresh_mem_addr_o     (s1_thresh_mem_addr_o),
+    .thresh_mem_data_i     (s1_thresh_mem_data_i),
+    .pot_mem_wr_o          (acc_s1_pot_wr),
+    .pot_mem_rd_o          (acc_s1_pot_rd),
+    .pot_mem_wait_i        (s1_pot_mem_wait_i),
+    .pot_mem_addr_o        (acc_s1_pot_addr),
+    .pot_mem_data_o        (acc_s1_pot_data),
+    .pot_mem_data_i        (s1_pot_mem_data_i),
+    .spike_mem_wr_o        (acc_s1_spike_wr),
+    .spike_mem_wait_i      (s1_spike_mem_wait_i),
+    .spike_mem_addr_o      (acc_s1_spike_addr),
+    .spike_mem_data_o      (acc_s1_spike_data)
+);
+
+// ─── annAcc (TGT_ACC_ID = 2) ─────────────────────────────────────────────────
+ann_processor #(
+    .TGT_ACC_ID           (2),
+    .TGT_CONFIG_BASE_ADDR (ANN_CFG_BASE)
+) u_ann (
+    .clk                   (clk),
+    .reset                 (reset),
+    .sys_req_i             (ann_sys_req),
+    .sys_ack_o             (ann_sys_ack),
+    .sys_addr_i            (ann_sys_addr),
+    .sys_data_i            (ann_sys_data_in),
+    .start_new_block_i     (acc_start_new_block),
+    .target_acc_i          (sch_target_acc),
+    .buffer_info_i         (sch_buffer_info[`SCH_ENTRY_SZ-1:0]),
+    .spike_proc_finished_o (ann_result),
+    .acc_busy_o            (ann_busy),
+    .acc_finished_o        (ann_finished),
+    .sp_src1_buff_addr_i   (ann_sp_src1),
+    .sp_src2_buff_addr_i   (ann_sp_src2),
+    .sp_src3_buff_addr_i   (ann_sp_src3),
+    .sp_tgt_buff_addr_i    (ann_sp_tgt),
+    .sp_weight_row_len_i   ({`PIN_BITS{1'b0}}),
+    .np_src1_buff_addr_i   (ann_np_src1),
+    .np_src2_buff_addr_i   (ann_np_src2),
+    .np_src3_buff_addr_i   (ann_np_src3),
+    .np_tgt_buff_addr_i    (ann_np_tgt),
+    .np_weight_row_len_i   ({`PIN_BITS{1'b0}}),
+    .weight_mem_rd_o       (a0_weight_mem_rd_o),
+    .weight_mem_wait_i     (a0_weight_mem_wait_i),
+    .weight_mem_addr_o     (a0_weight_mem_addr_o),
+    .weight_mem_data_i     (a0_weight_mem_data_i),
+    .act_mem_req_o         (a0_act_mem_req_o),
+    .act_mem_wait_i        (a0_act_mem_wait_i),
+    .act_mem_addr_o        (a0_act_mem_addr_o),
+    .act_mem_data_i        (a0_act_mem_data_i),
+    .syn_curr_mem_wr_o     (acc_a0_syn_curr_wr),
+    .syn_curr_mem_rd_o     (acc_a0_syn_curr_rd),
+    .syn_curr_mem_wait_i   (a0_syn_curr_mem_wait_i),
+    .syn_curr_mem_addr_o   (acc_a0_syn_curr_addr),
+    .syn_curr_mem_data_o   (acc_a0_syn_curr_data),
+    .syn_curr_mem_data_i   (a0_syn_curr_mem_data_i),
+    .bias_curr_mem_rd_o    (a0_bias_curr_mem_rd_o),
+    .bias_curr_mem_wait_i  (a0_bias_curr_mem_wait_i),
+    .bias_curr_mem_addr_o  (a0_bias_curr_mem_addr_o),
+    .bias_curr_mem_data_i  (a0_bias_curr_mem_data_i),
+    .thresh_mem_rd_o       (a0_thresh_mem_rd_o),
+    .thresh_mem_wait_i     (a0_thresh_mem_wait_i),
+    .thresh_mem_addr_o     (a0_thresh_mem_addr_o),
+    .thresh_mem_data_i     (a0_thresh_mem_data_i),
+    .pot_mem_wr_o          (acc_a0_pot_wr),
+    .pot_mem_rd_o          (acc_a0_pot_rd),
+    .pot_mem_wait_i        (a0_pot_mem_wait_i),
+    .pot_mem_addr_o        (acc_a0_pot_addr),
+    .pot_mem_data_o        (acc_a0_pot_data),
+    .pot_mem_data_i        (a0_pot_mem_data_i),
+    .spike_mem_wr_o        (acc_a0_spike_wr),
+    .spike_mem_wait_i      (a0_spike_mem_wait_i),
+    .spike_mem_addr_o      (acc_a0_spike_addr),
+    .spike_mem_data_o      (acc_a0_spike_data)
+);
+
+// ─── Hadamard (TGT_ACC_ID = 3) ───────────────────────────────────────────────
+hadamard_unit #(
+    .TGT_ACC_ID           (3),
+    .TGT_CONFIG_BASE_ADDR (HAD_CFG_BASE[31:16]),
+    .TGT_ACC_SZ           (TGT_ACC_SZ)
+) u_hadamard (
+    .clk                  (clk),
+    .reset                (reset),
+    .hu_sys_req_i         (had_sys_req),
+    .hu_sys_ack_o         (had_sys_ack),
+    .hu_sys_addr_i        (had_sys_addr),
+    .hu_sys_data_i        (had_sys_data_in),
+    .hu_start_new_block_i (acc_start_new_block),
+    .hu_target_acc_i      (sch_target_acc),
+    .hu_buffer_info_i     (sch_buffer_info[`SCH_ENTRY_SZ-1:0]),
+    .hu_acc_busy_o        (had_busy),
+    .hu_acc_finished_o    (had_finished),
+    .src_a_mem_rd_o       (hd_src_a_mem_rd_o),
+    .src_a_mem_wait_i     (hd_src_a_mem_wait_i),
+    .src_a_mem_addr_o     (hd_src_a_mem_addr_o),
+    .src_a_mem_data_i     (hd_src_a_mem_data_i),
+    .src_b_mem_rd_o       (hd_src_b_mem_rd_o),
+    .src_b_mem_wait_i     (hd_src_b_mem_wait_i),
+    .src_b_mem_addr_o     (hd_src_b_mem_addr_o),
+    .src_b_mem_data_i     (hd_src_b_mem_data_i),
+    .src_z_mem_rd_o       (hd_src_z_mem_rd_o),
+    .src_z_mem_wait_i     (hd_src_z_mem_wait_i),
+    .src_z_mem_addr_o     (hd_src_z_mem_addr_o),
+    .src_z_mem_data_i     (hd_src_z_mem_data_i),
+    .src_r_mem_rd_o       (hd_src_r_mem_rd_o),
+    .src_r_mem_wait_i     (hd_src_r_mem_wait_i),
+    .src_r_mem_addr_o     (hd_src_r_mem_addr_o),
+    .src_r_mem_data_i     (hd_src_r_mem_data_i),
+    .src_r_mem_wr_o       (acc_hd_src_r_wr),
+    .src_r_mem_wr_addr_o  (acc_hd_src_r_wr_addr),
+    .src_r_mem_wr_wait_i  (acc_hd_src_r_wr_wait),
+    .src_r_mem_data_o     (acc_hd_src_r_wr_data)
+);
+
+// ─── fill_unit (TGT_ACC_ID = FILL_ACC_ID = 4) ────────────────────────────────
+fill_unit #(
+    .FU_TABLE_ADDR      (FU_TABLE_ADDR),
+    .FU_TABLE_ADDR_MASK (FU_TABLE_ADDR_MASK),
+    .NUM_BUFFERS        (NUM_BUFFERS),
+    .BUFF_INDX_SZ       (BUFF_INDX_SZ)
+) u_fill (
+    .clk                (clk),
+    .reset              (reset),
+    .sys_req_i          (sys_req_i),
+    .sys_ack_o          (fu_ack),
+    .sys_addr_i         (sys_addr_i),
+    .sys_data_i         (sys_data_i),
+    .start_new_block_i  (is_fill_dispatch),
+    .acc_busy_o         (fu_busy),
+    .acc_finished_o     (fu_finished),
+    .buff_id_i          (fu_buff_id),
+    .fill_value_i       (sch_fill_value),
+    .fill_block_size_i  (sch_fill_block_size),
+    .fu_bba_rd_o        (fu_bba_mem_rd_o),
+    .fu_bba_wait_i      (fu_bba_mem_wait_i),
+    .fu_bba_addr_o      (fu_bba_mem_addr_o),
+    .fu_bba_data_i      (fu_bba_mem_data_i),
+    // snnAcc0 — fill-only (dual-port write) buses
+    .s0_weight_wr_o     (s0_weight_mem_wr_o),
+    .s0_weight_addr_o   (s0_weight_mem_wr_addr_o),
+    .s0_weight_data_o   (s0_weight_mem_wr_data_o),
+    .s0_weight_wait_i   (s0_weight_mem_wr_wait_i),
+    .s0_act_wr_o        (s0_act_mem_wr_o),
+    .s0_act_addr_o      (s0_act_mem_wr_addr_o),
+    .s0_act_data_o      (s0_act_mem_wr_data_o),
+    .s0_act_wait_i      (s0_act_mem_wr_wait_i),
+    // snnAcc0 — arbitrated buses
+    .s0_syn_curr_wr_o   (fu_s0_syn_curr_wr),
+    .s0_syn_curr_addr_o (fu_s0_syn_curr_addr),
+    .s0_syn_curr_data_o (fu_s0_syn_curr_data),
+    .s0_syn_curr_wait_i (fu_s0_syn_curr_wait),
+    .s0_bias_curr_wr_o  (s0_bias_curr_mem_wr_o),
+    .s0_bias_curr_addr_o(s0_bias_curr_mem_wr_addr_o),
+    .s0_bias_curr_data_o(s0_bias_curr_mem_wr_data_o),
+    .s0_bias_curr_wait_i(s0_bias_curr_mem_wr_wait_i),
+    .s0_thresh_wr_o     (s0_thresh_mem_wr_o),
+    .s0_thresh_addr_o   (s0_thresh_mem_wr_addr_o),
+    .s0_thresh_data_o   (s0_thresh_mem_wr_data_o),
+    .s0_thresh_wait_i   (s0_thresh_mem_wr_wait_i),
+    .s0_pot_wr_o        (fu_s0_pot_wr),
+    .s0_pot_addr_o      (fu_s0_pot_addr),
+    .s0_pot_data_o      (fu_s0_pot_data),
+    .s0_pot_wait_i      (fu_s0_pot_wait),
+    .s0_spike_wr_o      (fu_s0_spike_wr),
+    .s0_spike_addr_o    (fu_s0_spike_addr),
+    .s0_spike_data_o    (fu_s0_spike_data),
+    .s0_spike_wait_i    (fu_s0_spike_wait),
+    // snnAcc1 — fill-only buses
+    .s1_weight_wr_o     (s1_weight_mem_wr_o),
+    .s1_weight_addr_o   (s1_weight_mem_wr_addr_o),
+    .s1_weight_data_o   (s1_weight_mem_wr_data_o),
+    .s1_weight_wait_i   (s1_weight_mem_wr_wait_i),
+    .s1_act_wr_o        (s1_act_mem_wr_o),
+    .s1_act_addr_o      (s1_act_mem_wr_addr_o),
+    .s1_act_data_o      (s1_act_mem_wr_data_o),
+    .s1_act_wait_i      (s1_act_mem_wr_wait_i),
+    // snnAcc1 — arbitrated buses
+    .s1_syn_curr_wr_o   (fu_s1_syn_curr_wr),
+    .s1_syn_curr_addr_o (fu_s1_syn_curr_addr),
+    .s1_syn_curr_data_o (fu_s1_syn_curr_data),
+    .s1_syn_curr_wait_i (fu_s1_syn_curr_wait),
+    .s1_bias_curr_wr_o  (s1_bias_curr_mem_wr_o),
+    .s1_bias_curr_addr_o(s1_bias_curr_mem_wr_addr_o),
+    .s1_bias_curr_data_o(s1_bias_curr_mem_wr_data_o),
+    .s1_bias_curr_wait_i(s1_bias_curr_mem_wr_wait_i),
+    .s1_thresh_wr_o     (s1_thresh_mem_wr_o),
+    .s1_thresh_addr_o   (s1_thresh_mem_wr_addr_o),
+    .s1_thresh_data_o   (s1_thresh_mem_wr_data_o),
+    .s1_thresh_wait_i   (s1_thresh_mem_wr_wait_i),
+    .s1_pot_wr_o        (fu_s1_pot_wr),
+    .s1_pot_addr_o      (fu_s1_pot_addr),
+    .s1_pot_data_o      (fu_s1_pot_data),
+    .s1_pot_wait_i      (fu_s1_pot_wait),
+    .s1_spike_wr_o      (fu_s1_spike_wr),
+    .s1_spike_addr_o    (fu_s1_spike_addr),
+    .s1_spike_data_o    (fu_s1_spike_data),
+    .s1_spike_wait_i    (fu_s1_spike_wait),
+    // annAcc — fill-only buses
+    .a0_weight_wr_o     (a0_weight_mem_wr_o),
+    .a0_weight_addr_o   (a0_weight_mem_wr_addr_o),
+    .a0_weight_data_o   (a0_weight_mem_wr_data_o),
+    .a0_weight_wait_i   (a0_weight_mem_wr_wait_i),
+    .a0_act_wr_o        (a0_act_mem_wr_o),
+    .a0_act_addr_o      (a0_act_mem_wr_addr_o),
+    .a0_act_data_o      (a0_act_mem_wr_data_o),
+    .a0_act_wait_i      (a0_act_mem_wr_wait_i),
+    // annAcc — arbitrated buses
+    .a0_syn_curr_wr_o   (fu_a0_syn_curr_wr),
+    .a0_syn_curr_addr_o (fu_a0_syn_curr_addr),
+    .a0_syn_curr_data_o (fu_a0_syn_curr_data),
+    .a0_syn_curr_wait_i (fu_a0_syn_curr_wait),
+    .a0_bias_curr_wr_o  (a0_bias_curr_mem_wr_o),
+    .a0_bias_curr_addr_o(a0_bias_curr_mem_wr_addr_o),
+    .a0_bias_curr_data_o(a0_bias_curr_mem_wr_data_o),
+    .a0_bias_curr_wait_i(a0_bias_curr_mem_wr_wait_i),
+    .a0_thresh_wr_o     (a0_thresh_mem_wr_o),
+    .a0_thresh_addr_o   (a0_thresh_mem_wr_addr_o),
+    .a0_thresh_data_o   (a0_thresh_mem_wr_data_o),
+    .a0_thresh_wait_i   (a0_thresh_mem_wr_wait_i),
+    .a0_pot_wr_o        (fu_a0_pot_wr),
+    .a0_pot_addr_o      (fu_a0_pot_addr),
+    .a0_pot_data_o      (fu_a0_pot_data),
+    .a0_pot_wait_i      (fu_a0_pot_wait),
+    .a0_spike_wr_o      (fu_a0_spike_wr),
+    .a0_spike_addr_o    (fu_a0_spike_addr),
+    .a0_spike_data_o    (fu_a0_spike_data),
+    .a0_spike_wait_i    (fu_a0_spike_wait),
+    // Hadamard — fill-only buses
+    .hd_src_a_wr_o      (hd_src_a_mem_wr_o),
+    .hd_src_a_addr_o    (hd_src_a_mem_wr_addr_o),
+    .hd_src_a_data_o    (hd_src_a_mem_wr_data_o),
+    .hd_src_a_wait_i    (hd_src_a_mem_wr_wait_i),
+    .hd_src_b_wr_o      (hd_src_b_mem_wr_o),
+    .hd_src_b_addr_o    (hd_src_b_mem_wr_addr_o),
+    .hd_src_b_data_o    (hd_src_b_mem_wr_data_o),
+    .hd_src_b_wait_i    (hd_src_b_mem_wr_wait_i),
+    .hd_src_z_wr_o      (hd_src_z_mem_wr_o),
+    .hd_src_z_addr_o    (hd_src_z_mem_wr_addr_o),
+    .hd_src_z_data_o    (hd_src_z_mem_wr_data_o),
+    .hd_src_z_wait_i    (hd_src_z_mem_wr_wait_i),
+    // Hadamard src_r — arbitrated bus
+    .hd_src_r_wr_o      (fu_hd_src_r_wr),
+    .hd_src_r_addr_o    (fu_hd_src_r_addr),
+    .hd_src_r_data_o    (fu_hd_src_r_data),
+    .hd_src_r_wait_i    (fu_hd_src_r_wait)
+);
+
+endmodule // flexman

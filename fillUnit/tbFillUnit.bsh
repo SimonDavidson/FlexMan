@@ -1,0 +1,6 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+
+xrun -sv -exit -timescale 10ps/1ps -access wrc -top tb_fill_unit \
+  ../shared/constants.v fill_unit.v tb_fill_unit.v
