@@ -15,7 +15,10 @@ reg  [2:0] mark_buff_usage_i;
 reg        buff_new_tgt_i;
 reg  [2:0] buff_new_usage_count_i;
 reg        buff_new_colour_i;
+reg        buff_rw_claim_i;
+reg        buff_rw_colour_i;
 reg        buff_now_full_i;
+reg  [2:0] buff_now_usage_count_i;
 reg        buff_content_consumed_i;
 
 wire [2:0] buff_usage_count_o;
@@ -66,7 +69,10 @@ buffer_state_entry dut (
     .buff_new_tgt_i(buff_new_tgt_i),
     .buff_new_usage_count_i(buff_new_usage_count_i),
     .buff_new_colour_i(buff_new_colour_i),
+    .buff_rw_claim_i(buff_rw_claim_i),
+    .buff_rw_colour_i(buff_rw_colour_i),
     .buff_now_full_i(buff_now_full_i),
+    .buff_now_usage_count_i(buff_now_usage_count_i),
     .buff_content_consumed_i(buff_content_consumed_i),
     .buff_usage_count_o(buff_usage_count_o),
     .buff_colour_o(buff_colour_o),
@@ -81,7 +87,10 @@ initial begin
     buff_new_tgt_i          = 1'b0;
     buff_new_usage_count_i  = 3'd0;
     buff_new_colour_i       = 1'b0;
+    buff_rw_claim_i         = 1'b0;
+    buff_rw_colour_i        = 1'b0;
     buff_now_full_i         = 1'b0;
+    buff_now_usage_count_i  = 3'd0;
     buff_content_consumed_i = 1'b0;
 
     repeat(3) @(posedge clk); #1;
@@ -111,9 +120,10 @@ initial begin
     chk_count(buff_usage_count_o, 3'd2, "new_tgt: usage_count=2");
 
     // ------------------------------------------------------------------
-    // Test 3: producing task completes → buffer becomes full
+    // Test 3: producing task completes → buffer becomes full with count=2
     // ------------------------------------------------------------------
     @(posedge clk); #1;
+    buff_now_usage_count_i = 3'd2;
     buff_now_full_i = 1'b1;
     @(posedge clk); #1;
     buff_now_full_i = 1'b0;
@@ -169,6 +179,38 @@ initial begin
     @(negedge clk);
     chk(buff_free_o, 1'b1, "3x consume: free→1");
     chk(buff_full_o, 1'b0, "3x consume: full→0");
+
+    // ------------------------------------------------------------------
+    // Test 8: RW claim – buffer is full, task claims it: full→0, free→0 (busy)
+    //         Then task completes: full→1 with new usage count.
+    // ------------------------------------------------------------------
+    @(posedge clk); #1;
+    mark_as_full_i    = 1'b1;
+    mark_buff_usage_i = 3'd2;
+    @(posedge clk); #1;
+    mark_as_full_i = 1'b0;
+    @(negedge clk);
+    chk(buff_full_o, 1'b1, "RW setup: full=1");
+    chk(buff_free_o, 1'b0, "RW setup: free=0");
+
+    @(posedge clk); #1;
+    buff_rw_claim_i  = 1'b1;
+    buff_rw_colour_i = 1'b1;
+    @(posedge clk); #1;
+    buff_rw_claim_i = 1'b0;
+    @(negedge clk);
+    chk(buff_full_o,   1'b0, "RW claim: full→0 (busy)");
+    chk(buff_free_o,   1'b0, "RW claim: free stays 0");
+    chk(buff_colour_o, 1'b1, "RW claim: colour latched");
+
+    @(posedge clk); #1;
+    buff_now_full_i        = 1'b1;
+    buff_now_usage_count_i = 3'd3;
+    @(posedge clk); #1;
+    buff_now_full_i = 1'b0;
+    @(negedge clk);
+    chk(buff_full_o,           1'b1, "RW done: full→1");
+    chk_count(buff_usage_count_o, 3'd3, "RW done: new count=3");
 
     // ------------------------------------------------------------------
     @(posedge clk);

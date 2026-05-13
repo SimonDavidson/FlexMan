@@ -11,7 +11,7 @@
 
 `include "../shared/constants.v"
 
-module spike_processing # (parameter NUM_TIMESTEPS      = 32,
+module ann_spike_processing # (parameter NUM_TIMESTEPS      = 32,
 	                   parameter X_INPUT_SZ         = 8,
                            parameter Y_INPUT_SZ         = 8,
                            parameter X_OUTPUT_SZ        = 8,
@@ -552,7 +552,7 @@ always @ (posedge clk)
                actual_index, actual_weight, syn_curr_mem_addr_o);
 `endif
 
-syn_curr_update # (
+ann_syn_curr_update # (
    .X_OUTPUT_SZ(X_OUTPUT_SZ),
    .Y_OUTPUT_SZ(Y_OUTPUT_SZ),
    .IN_DATA_BITS(IN_DATA_BITS),

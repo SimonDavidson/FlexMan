@@ -164,7 +164,7 @@ module tb_acc_snn_processor;
     // ----------------------------------------------------------------
     // DUT instantiation
     // ----------------------------------------------------------------
-    acc_snn_processor # (
+    ann_processor # (
     .TGT_ACC_ID(`TGT_ACC_ID),
     .TGT_CONFIG_BASE_ADDR(`TGT_CONFIG_BASE_ADDR),
     .SP_NUM_TIMESTEPS(`NUM_TIMESTEPS),

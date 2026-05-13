@@ -44,14 +44,26 @@ Decode is combinatorial: a `case` on `inst_word[2:0]` asserts one of eight one-h
 The key handshake signal is `inst_consumed`, which advances the PC and allows a new fetch.
 Each instruction type has its own condition for being consumed:
 
-| Instruction | Consumed when |
-|-------------|---------------|
-| TASK | A free slot exists in the scheduler table |
-| JUMP | Immediately (unconditional) |
-| LOOP / LOOPEND | Immediately |
-| CHECK | The nominated result buffer is full (i.e. the producing task has completed) |
-| NXT | The task table is completely empty |
-| FILL | On DMA completion *(stub — not yet implemented)* |
+| Instruction    | Consumed when                                                    |
+|----------------|------------------------------------------------------------------|
+| TASK (word 1)  | A free slot exists in the scheduler table; PC advances to word 2 |
+| TASK (word 2)  | Immediately after word 1 is accepted; entry loaded into table    |
+| JUMP           | Immediately (unconditional)                                      |
+| LOOP / LOOPEND | Immediately                                                      |
+| CHECK          | The nominated result buffer is full (i.e. the producing task has completed) |
+| NXT            | The task table is completely empty                               |
+| FILL           | On completion                                                    |
+
+### Two-Word TASK Fetch
+
+TASK is a 64-bit instruction split across two consecutive 32-bit words. When word 1 is
+recognised (`inst_word[2:0] == 3'b000`) and a table slot is free, the fetch engine sets a
+`task_w2_pending_r` flag and latches word 1 into `task_w1_r`. Normal instruction decode is
+suppressed while `task_w2_pending_r` is set, so the following word cannot be misinterpreted
+as a new instruction. When the next word arrives it is latched into `task_w2_r` and consumed
+immediately (`inst_consumed_w2`), clearing the pending flag. `load_new_entry` fires on word 2
+arrival — not word 1 — so the scheduler table entry is only created once both words are held
+and the full entry can be packed.
 
 The NXT instruction is therefore a full pipeline barrier: the fetch engine stalls until every
 in-flight task has completed and the table drains to zero, then pulses `nxt_input_pulse_o`
@@ -97,22 +109,31 @@ four tasks beyond whatever is currently executing.
 
 ### Readiness and Arbitration
 
-Each `sch_entry` instance evaluates three conditions **combinatorially every cycle**, without
-waiting for an explicit check request:
+Each `sch_entry` instance evaluates readiness **combinatorially every cycle** across all six
+buffer slots and the target accelerator. Each slot carries a 2-bit mode field that controls
+which checks are applied:
 
-1. **Source buffers full** — constructs a one-hot mask of required source buffers from the
-   stored buffer IDs, ANDs with the broadcast `buffers_full_i` vector, and asserts
-   `got_all_inbuffers` when no required buffer is still empty.
+| Mode                  | Full+colour required | Free required |
+|-----------------------|----------------------|---------------|
+| UNUSED     (`00`)     | No                   | No            |
+| SOURCE     (`01`)     | Yes                  | No            |
+| READ-WRITE (`10`)     | Yes                  | No            |
+| TARGET     (`11`)     | No                   | Yes           |
 
-2. **Target buffer free** — same one-hot construction for the destination buffer, checked
-   against `buffers_free_i`.
+For READ-WRITE slots the "not busy" condition is implicitly captured by the full check: a busy
+buffer has `full=0`, so the full check fails. A separate free check would incorrectly block
+dispatch because a full buffer always has `free=0`.
 
-3. **Accelerator free** — decodes the stored accelerator ID into a one-hot and checks it
-   against the broadcast `acc_busy_i` vector.
+For each slot the entry computes two single-bit signals:
+- `slot_src_ok[s]` — true if the slot does not need a full buffer, or if `buffers_full_i[id]`
+  is set **and** `buffers_colour_i[id]` matches the stored entry colour.
+- `slot_tgt_ok[s]` — true if the slot does not need a free buffer, or if `buffers_free_i[id]`
+  is set. Only TARGET slots set this requirement; RW slots do not.
 
-`ready_to_execute_o` is the AND of all three. This is purely combinatorial: state changes in
-any buffer or accelerator propagate to the readiness signals within the same cycle, without
-registering.
+`ready_to_execute_o` is the AND of all twelve slot signals plus the accelerator-free check
+(entry acc_id decoded to one-hot, ANDed with `~acc_busy_i`). This is entirely combinatorial:
+any change to buffer state or accelerator state propagates to the readiness output within the
+same cycle, so dispatch latency after a dependency clears is exactly one cycle.
 
 The table then selects the **lowest-index** ready entry for dispatch. Because entries compact
 toward slot 0 over time, this approximates FIFO ordering among tasks that become ready
@@ -137,39 +158,51 @@ Each buffer holds four registered fields:
 
 | Field | Register | Set by | Cleared by |
 |-------|----------|--------|-----------|
-| **free** | `buff_free_r` | Reset; last consumer dispatched | Task dispatch targeting this buffer; external mark-full |
-| **full** | `buff_full_r` | Accelerator completion signal; external mark-full | Last consumer dispatched |
-| **colour** | `buff_colour_r` | Task dispatch (from TASK colour field) | — (colour changes only on new dispatch) |
-| **consumer count** | `buff_usage_count_r` | Task dispatch (#Targets field); external mark-full | Decremented each time a consumer task dispatches |
+| **free** | `buff_free_r` | Reset; last consumer dispatched | TARGET/RW dispatch; external mark-full |
+| **full** | `buff_full_r` | Accelerator completion; external mark-full | RW dispatch (full→busy); last consumer dispatched |
+| **colour** | `buff_colour_r` | Task dispatch (from TASK colour field) | — (changes only on new dispatch) |
+| **consumer count** | `buff_usage_count_r` | Accelerator completion (from stored ntgt); external mark-full | Decremented each time a SOURCE consumer dispatches |
 
-The critical lifecycle is: a TASK dispatch sets the target buffer's `free` to 0 and loads the
-consumer count; on accelerator completion, `full` is set to 1; each time a downstream TASK
-consuming this buffer is dispatched, the counter decrements; when it reaches 1 and the last
-consumer dispatches, `full` clears and `free` returns to 1 in the same clock edge
-(`buff_no_longer_needed`).
+Three distinct dispatch strobes drive state transitions:
 
-Note that in the current RTL, the colour field is tracked per-buffer and broadcast via
-`buffers_colour_o`, but the `sch_entry` readiness logic does not yet filter `buffers_full_i`
-by colour: any task whose source buffer is full will see it as available regardless of colour
-match. The colour mechanism is architecturally complete in the state-tracking layer but the
-dispatch gate in `sch_entry` treats full as sufficient. This is a known gap relative to the
-spec.
+- **`buff_new_tgt_i`** (TARGET mode): clears `free`; `full` stays 0. Usage count is loaded
+  from the stored `#Targets` when the accelerator completes.
+- **`buff_rw_claim_i`** (READ-WRITE mode): clears both `free` and `full` simultaneously,
+  transitioning the buffer from full to busy. The old consumer count is discarded.
+- **`buff_content_consumed_i`** (SOURCE mode): decrements the usage counter. When the counter
+  reaches 1 and this strobe fires, `buff_no_longer_needed` asserts, clearing `full` and
+  restoring `free` in the same clock edge.
+
+On accelerator completion, `buff_now_full_i` marks the buffer full and loads `buff_now_usage_count_i`
+with the `#Targets` stored in the accelerator tracker at dispatch time. This applies to both
+TARGET and READ-WRITE output slots.
+
+The colour field is broadcast via `buffers_colour_o` and is now actively checked in `sch_entry`:
+a SOURCE or READ-WRITE slot is only considered satisfied when `buffers_full_i[id]` is set
+**and** `buffers_colour_i[id]` matches the task's colour field.
 
 ### Per-Accelerator State (`acc_hw_buffer_tracker.v`)
 
-Each accelerator tracker stores the target buffer ID and up to three source buffer IDs for its
-currently executing task. These are loaded on dispatch (`new_task_i`) and held until the
-accelerator signals completion. The tracker also maintains an `acc_free_r` busy flag, set on
-dispatch and cleared on the `task_finished_i` completion signal.
+Each accelerator tracker stores the full six-slot descriptor for its currently executing task:
+for each slot it retains the buffer ID, 2-bit mode, and (for output slots) the `#targets`
+count. These are loaded on dispatch (`new_task_i`) and held until the accelerator signals
+completion. The tracker also maintains an `acc_free_r` busy flag, set on dispatch and cleared
+on the `task_finished_i` completion signal. The stored `(id, mode, ntgt)` tuples are broadcast
+back to `sch_buffer_state` as `slot_buff_o`, `slot_mode_o`, and `slot_ntgt_o` so the
+completion logic can drive the correct per-buffer strobes without re-reading the original
+instruction.
 
 ### Completion Handling
 
 Accelerators signal completion by asserting `acc_finished_i`. Multiple accelerators may finish
 within the same cycle; to avoid a conflict when updating shared buffer state, completions are
 queued in a one-hot pending register (`acc_process_pending_r`) and serviced one per cycle.
-The priority encoder picks the lowest-index pending accelerator, looks up its buffer IDs from
-the tracker, and drives the appropriate `buff_now_full` and `buff_content_consumed` strobes
-into the buffer state entries. The pending bit is cleared the cycle after it is serviced.
+The priority encoder picks the lowest-index pending accelerator, reads its stored six-slot
+descriptor from the tracker, and iterates over all six slots: any slot whose mode is `MODE_RW`
+or `MODE_TGT` causes `buff_now_full[id]` to be asserted and the corresponding `buff_now_ntgt`
+to be loaded from the slot's stored `#targets`. SOURCE and UNUSED slots are ignored at
+completion time — SOURCE buffers were already decremented at dispatch. The pending bit is
+cleared the cycle after it is serviced.
 
 The accelerator also drives an `acc_result_i` bit on completion. This is captured into a
 per-buffer result register file (`target_status_r`) indexed by the completing task's target
@@ -210,12 +243,15 @@ the initial recurrent state.
 
 ## Implementation Notes
 
-- The FILL instruction's completion logic is stubbed (`fill_complete = 1'b0`), so FILL
-  instructions stall indefinitely in the current RTL.
-- The third source buffer field (`src3`) is wired as a duplicate of `src2` in the instruction
-  decode path (`d[ENTRY_SBUFF3] = inst_word[29:25]`) — effectively only two source buffers
-  are decoded from the instruction word, with the third slot tracking the same buffer as the
-  second.
+- The FILL instruction dispatches through the normal scheduler table mechanism: it creates a
+  table entry with the destination buffer as a TARGET slot and targets the fill-unit accelerator
+  (`FILL_ACC_ID = NUM_HW_ACCELERATORS - 1`). Completion is signalled via `acc_finished_i` like
+  any other accelerator. No fill-unit RTL exists yet; in simulation a fill-unit stub must be
+  provided or FILL entries will never complete and the table will stall.
+- TASK is a two-word (64-bit) instruction. Slots 0–2 (word 1) carry only mode and buffer ID;
+  they must therefore be UNUSED or SOURCE. Slots 3–5 (word 2) carry mode, buffer ID, and
+  `#targets`, and support all four modes. Attempting to use READ-WRITE or TARGET in slots 0–2
+  will produce incorrect behaviour because no `#targets` field is decoded for those slots.
 - The table capacity (4 entries) is below the 16-entry spec target. The shift-register
   compaction structure generalises directly to larger tables by increasing `NUM_SCH_ENTRIES`.
 - All readiness evaluation is purely combinatorial and resolves within a single clock cycle,

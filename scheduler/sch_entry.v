@@ -1,127 +1,114 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
-module sch_entry  #(parameter SCH_ENTRY_SZ        = 32,
-	            parameter NUM_HW_ACCELERATORS = 2,
-	            parameter TGT_ACC_SZ          = 2,
-		    parameter NUM_BUFFERS         = 16,
-                    parameter COL_BUFF_ID_SZ      = 16,
-                    parameter ACC_ID_BTM          = 0
-	    )
+module sch_entry  #(parameter SCH_ENTRY_SZ        = 52,
+                    parameter NUM_HW_ACCELERATORS = 2,
+                    parameter TGT_ACC_SZ          = 1,   // $clog2(NUM_HW_ACCELERATORS)
+                    parameter NUM_BUFFERS         = 16,
+                    parameter BUFF_INDX_SZ        = 4,   // $clog2(NUM_BUFFERS)
+                    parameter NUM_SLOTS           = 6,
+                    parameter MODE_SZ             = 2,
+                    parameter TGT_COUNT_SZ        = 3,
+                    parameter ACC_ID_BTM          = 0    // kept for sch_table compat
+    )
              (input  wire                      clk,
               input  wire                      reset,
               input  wire                      load_new_entry_i,
               input  wire                      shift_entry_i,
               input  wire                      delete_entry_i,
-	      input  wire                      new_entry_valid_i,
+              input  wire                      new_entry_valid_i,
               input  wire [SCH_ENTRY_SZ-1:0]   new_entry_data_i,
-	      input  wire                      shift_in_entry_valid_i,
+              input  wire                      shift_in_entry_valid_i,
               input  wire [SCH_ENTRY_SZ-1:0]   shift_in_entry_data_i,
-	      output wire                      shift_out_entry_valid_o,
-	      output reg                       entry_valid_o,
+              output wire                      shift_out_entry_valid_o,
+              output reg                       entry_valid_o,
               output reg  [SCH_ENTRY_SZ-1:0]   entry_data_o,
 
               input  wire [NUM_HW_ACCELERATORS-1:0] acc_busy_i,
-	      input  wire [COL_BUFF_ID_SZ-1:0] buffers_full_i,
-	      input  wire [COL_BUFF_ID_SZ-1:0] buffers_free_i,
-	      output wire                      ready_to_execute_o
+              input  wire [NUM_BUFFERS-1:0]    buffers_full_i,
+              input  wire [NUM_BUFFERS-1:0]    buffers_free_i,
+              input  wire [NUM_BUFFERS-1:0]    buffers_colour_i,
+              output wire                      ready_to_execute_o
               );
 
-localparam TGT_ACC_BTM = 0;
-localparam TGT_ACC_TOP = TGT_ACC_SZ   - 1;
-localparam INBUFFS_BTM = TGT_ACC_TOP  + 1;
-localparam INBUFFS_TOP = INBUFFS_BTM  + NUM_BUFFERS - 1;
-localparam OUTBUFF_BTM = INBUFFS_TOP  + 1;
-localparam OUTBUFF_TOP = OUTBUFF_BTM  + NUM_BUFFERS - 1;
-localparam BUFF_INDX_SZ         = $clog2(NUM_BUFFERS);
-localparam COLOUR_SZ            = 1;
-localparam NUM_TGTS_SZ          = 3;
-localparam ENTRY_SBUFF1_START   = 0;
-localparam ENTRY_SBUFF1_END     = ENTRY_SBUFF1_START + BUFF_INDX_SZ - 1;
-localparam ENTRY_SBUFF2_START   = ENTRY_SBUFF1_END   + 1;
-localparam ENTRY_SBUFF2_END     = ENTRY_SBUFF2_START + BUFF_INDX_SZ - 1;
-localparam ENTRY_SBUFF3_START   = ENTRY_SBUFF2_END   + 1;
-localparam ENTRY_SBUFF3_END     = ENTRY_SBUFF3_START + BUFF_INDX_SZ - 1;
-localparam ENTRY_TBUFF_START    = ENTRY_SBUFF3_END   + 1;
-localparam ENTRY_TBUFF_END      = ENTRY_TBUFF_START  + BUFF_INDX_SZ - 1;
+// Slot layout within SCH_ENTRY_SZ (lsb first):
+//   Slots 0-2 (short): [mode(2), id(BUFF_INDX_SZ)]
+//   Slots 3-5 (long):  [mode(2), id(BUFF_INDX_SZ), ntgt(TGT_COUNT_SZ)]
+//   colour(1), acc_id(TGT_ACC_SZ), cfg_id(5)
+localparam SLOT_SHORT_SZ = MODE_SZ + BUFF_INDX_SZ;
+localparam SLOT_LONG_SZ  = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ;
+localparam SLOTS_SHORT   = 3;
+localparam SLOTS_LONG    = 3;
+localparam COLOUR_START  = SLOTS_SHORT*SLOT_SHORT_SZ + SLOTS_LONG*SLOT_LONG_SZ;
+localparam ACC_ID_START  = COLOUR_START + 1;
 
+`define MODE_UNUSED 2'b00
+`define MODE_SRC    2'b01
+`define MODE_RW     2'b10
+`define MODE_TGT    2'b11
 
 wire entry_valid_nxt;
-//reg  entry_valid_o;
-//reg  [SCH_ENTRY_SZ-1:0] entry_data_o;
-wire [SCH_ENTRY_SZ-1:0] updated_entry_data;
 wire [SCH_ENTRY_SZ-1:0] entry_data_nxt;
-wire [SCH_ENTRY_SZ-1:0] inbuffers_needed;
-wire [SCH_ENTRY_SZ-1:0] waiting_for_inbuffer;
-wire [NUM_BUFFERS-1:0]  outbuffers_needed;
-wire [SCH_ENTRY_SZ-1:0] waiting_for_outbuffer;
-wire                    got_all_inbuffers;
-wire                    got_all_outbuffers;
-wire                    acc_free;
-wire [NUM_HW_ACCELERATORS-1:0] required_acc;
-wire [NUM_BUFFERS-1:0]  src1_buff_1hot;
-wire [NUM_BUFFERS-1:0]  src2_buff_1hot;
-wire [NUM_BUFFERS-1:0]   tgt_buff_1hot;
 
-assign src1_buff_1hot = 1 << entry_data_o[ENTRY_SBUFF1_END:ENTRY_SBUFF1_START];
-assign src2_buff_1hot = 1 << entry_data_o[ENTRY_SBUFF2_END:ENTRY_SBUFF2_START];
-assign  tgt_buff_1hot = 1 << entry_data_o[ENTRY_TBUFF_END:ENTRY_TBUFF_START];
-
-// The valid bit for this entry on the assumption that it is
-// being shifted forward. This is identical to the entry's valid bit,
-// except when this entry is being deleted:
 assign shift_out_entry_valid_o = delete_entry_i ? 1'b0 : entry_valid_o;
 
-assign entry_valid_nxt = load_new_entry_i ? 1'b1                   : 
-	                 delete_entry_i   ? 1'b0                   :
-	                 shift_entry_i    ? shift_in_entry_valid_i :
-		                            entry_valid_o;
+assign entry_valid_nxt = load_new_entry_i ? 1'b1
+                       : delete_entry_i   ? 1'b0
+                       : shift_entry_i    ? shift_in_entry_valid_i
+                       :                    entry_valid_o;
 
-assign entry_data_nxt = load_new_entry_i  ? new_entry_data_i       :
-	                 delete_entry_i   ? entry_data_o           :
-                         shift_entry_i    ? shift_in_entry_data_i  :
-                                            entry_data_o;
-
-assign updated_entry_data = entry_data_o;
+assign entry_data_nxt  = load_new_entry_i ? new_entry_data_i
+                       : delete_entry_i   ? entry_data_o
+                       : shift_entry_i    ? shift_in_entry_data_i
+                       :                    entry_data_o;
 
 always @ (posedge clk)
-if (reset)
-  begin
-     entry_valid_o <= 1'b0;
-     entry_data_o  <= 'b0;
-  end
-else
-  begin
-     entry_valid_o <= entry_valid_nxt;
-     entry_data_o  <= entry_data_nxt;
-  end
+   if (reset) begin
+      entry_valid_o <= 1'b0;
+      entry_data_o  <= 'b0;
+   end else begin
+      entry_valid_o <= entry_valid_nxt;
+      entry_data_o  <= entry_data_nxt;
+   end
 
-//////////////////////////////////////////////
-// Check if input buffers are all available:
+// Task colour and accelerator ID from stored entry:
+wire                       entry_colour  = entry_data_o[COLOUR_START];
+wire [TGT_ACC_SZ-1:0]      entry_acc_id  = entry_data_o[ACC_ID_START +: TGT_ACC_SZ];
+wire [NUM_HW_ACCELERATORS-1:0] required_acc = {{(NUM_HW_ACCELERATORS-1){1'b0}}, 1'b1} << entry_acc_id;
+wire acc_free = &(~required_acc | ~acc_busy_i);
 
-assign inbuffers_needed      = src1_buff_1hot | src2_buff_1hot;
-assign waiting_for_inbuffer  = inbuffers_needed & ~buffers_full_i;
-assign got_all_inbuffers     = ~|waiting_for_inbuffer;
+// Per-slot readiness signals (one bit each for source and target checks):
+wire [NUM_SLOTS-1:0] slot_src_ok;
+wire [NUM_SLOTS-1:0] slot_tgt_ok;
 
-//////////////////////////////////////////////
-// Check if output buffers are all available:
+// Short slots 0-2 (mode + id, no ntgt):
+genvar gs;
+generate
+   for (gs = 0; gs < SLOTS_SHORT; gs = gs + 1) begin : slot_short
+      localparam BASE = gs * SLOT_SHORT_SZ;
+      wire [MODE_SZ-1:0]      md  = entry_data_o[BASE           +: MODE_SZ];
+      wire [BUFF_INDX_SZ-1:0] bid = entry_data_o[BASE + MODE_SZ +: BUFF_INDX_SZ];
+      wire needs_full = (md == `MODE_SRC) | (md == `MODE_RW);
+      // RW needs no free check: full=1 already implies the buffer is not busy.
+      // Busy state (full=0, free=0) is caught by the full check failing.
+      wire needs_free = (md == `MODE_TGT);
+      assign slot_src_ok[gs] = ~needs_full
+                             | (buffers_full_i[bid] & (buffers_colour_i[bid] == entry_colour));
+      assign slot_tgt_ok[gs] = ~needs_free | buffers_free_i[bid];
+   end
 
-assign outbuffers_needed     = tgt_buff_1hot;
-assign waiting_for_outbuffer = outbuffers_needed & ~buffers_free_i;
-assign got_all_outbuffers    = ~|waiting_for_outbuffer;
+   // Long slots 3-5 (mode + id + ntgt):
+   for (gs = 0; gs < SLOTS_LONG; gs = gs + 1) begin : slot_long
+      localparam BASE = SLOTS_SHORT*SLOT_SHORT_SZ + gs * SLOT_LONG_SZ;
+      wire [MODE_SZ-1:0]      md  = entry_data_o[BASE           +: MODE_SZ];
+      wire [BUFF_INDX_SZ-1:0] bid = entry_data_o[BASE + MODE_SZ +: BUFF_INDX_SZ];
+      wire needs_full = (md == `MODE_SRC) | (md == `MODE_RW);
+      wire needs_free = (md == `MODE_TGT);
+      assign slot_src_ok[SLOTS_SHORT + gs] = ~needs_full
+                             | (buffers_full_i[bid] & (buffers_colour_i[bid] == entry_colour));
+      assign slot_tgt_ok[SLOTS_SHORT + gs] = ~needs_free | buffers_free_i[bid];
+   end
+endgenerate
 
-//////////////////////////////////////////////
-// Check if target accelerator is available:
-//
-assign required_acc = 1'b1<< entry_data_o[ACC_ID_BTM+TGT_ACC_SZ-1:ACC_ID_BTM];
-assign acc_free     = &(~required_acc | ~acc_busy_i);
+assign ready_to_execute_o = entry_valid_o & acc_free & (&slot_src_ok) & (&slot_tgt_ok);
 
-//////////////////////////////////////////////
-// Flag if this entry is ready to execute:
-//
-assign ready_to_execute_o = entry_valid_o & got_all_inbuffers & 
-	                    acc_free      & got_all_outbuffers;
-//
-//assign ready_to_execute_o = 1'b0; //entry_valid_o;
-
-endmodule	// sch_entry
-
+endmodule // sch_entry

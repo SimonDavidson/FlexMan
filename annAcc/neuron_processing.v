@@ -8,7 +8,7 @@
 
 `include "../shared/constants.v"
 
-module neuron_processing # (
+module ann_neuron_processing # (
     parameter TGT_ACC_ID            = 3'b000,
     parameter NUM_TIMESTEPS         = 32,
     parameter TIMESTEP_SZ           = 10,
@@ -248,7 +248,7 @@ assign neuron_valid = syn_curr_data_valid & (~thresh_op_i[0] | lut_data_valid);
 // 4) Apply threshold and decay
 ///////////////////////////////////////////////////////////////////////
 
-update_state_for_neuron #(
+ann_update_state_for_neuron #(
     .POT_SLICE_BITS   (SYN_CURR_SLICE_BITS),
     .THRESH_SLICE_BITS(LUT_SLICE_BITS))
 neuron_update0 (

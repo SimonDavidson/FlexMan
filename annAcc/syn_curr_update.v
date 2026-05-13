@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Simon Davidson, University of Manchester
 `include "../shared/constants.v"
 
-module syn_curr_update
+module ann_syn_curr_update
                         # (
                            parameter X_OUTPUT_SZ        = 8,
                            parameter Y_OUTPUT_SZ        = 8,

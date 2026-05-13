@@ -26,7 +26,7 @@
 `define POT_OUT_SZ_SZ 3
 `define GUARDBITS_SZ 3
 `define ACC_SHIFT_SZ 5
-`define TGT_ACC_SZ   1
+`define TGT_ACC_SZ   3
 `define SCH_ENTRY_SZ 32
 
 `define DATAWORD_SZ 32

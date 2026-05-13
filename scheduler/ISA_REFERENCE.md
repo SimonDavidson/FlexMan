@@ -21,26 +21,42 @@ of state maintained by the scheduler:
 
 | Field | Meaning |
 |-------|---------|
-| **busy** | A task is writing to this buffer but has not yet finished. No other write task may target this buffer until it clears. |
-| **full** | The writing task has completed. Consumer tasks may now read this buffer. |
+| **busy** | A task has claimed this buffer but has not yet completed. No other task may claim it until busy clears. |
+| **full** | The task that owns this buffer has completed. Consumer tasks may now read it. |
 | **colour** | A 1-bit tag. A consumer task only claims a full buffer if its colour field matches. Prevents a stale or reordered task from consuming data intended for a later task. |
-| **counter** | The number of consumers still to read this buffer (loaded from the TASK `#Targets` field). Decremented each time a consumer is dispatched. When it reaches zero, `full` clears, colour flips, and the buffer is free again. |
+| **counter** | The number of consumers still to read this buffer (loaded from the TASK `#Targets` field). Decremented each time a consumer is dispatched. When it reaches zero, `full` clears, colour flips, and the buffer becomes free again. |
+
+### Buffer Slot Modes
+
+Each buffer slot in a TASK instruction carries a 2-bit mode field:
+
+| Mode | Encoding | Dispatch condition | Action on dispatch | Action on completion |
+|------|----------|-------------------|--------------------|----------------------|
+| **UNUSED** | `2'b00` | None (slot skipped) | None | None |
+| **SOURCE** | `2'b01` | Buffer must be **full** and colour must match | Decrement usage counter | None |
+| **READ-WRITE** | `2'b10` | Buffer must be **full** and colour must match | Mark buffer **busy** (clears both full and free) | Mark buffer **full** with stored #Targets |
+| **TARGET** | `2'b11` | Buffer must be **free** | Reserve buffer (clears free) | Mark buffer **full** with stored #Targets |
+
+The READ-WRITE mode supports in-place buffers, such as the synaptic current and membrane
+potential accumulators in SNN layers. These must be fully computed before the task starts,
+go busy during execution, and are refilled with the updated values on completion. They then
+behave as ordinary full buffers, consumable by downstream tasks.
 
 ### Dispatch Conditions
 
-A TASK entry in the scheduler table fires only when **all three** conditions hold simultaneously:
+A TASK entry in the scheduler table fires only when **all** of the following hold simultaneously:
 
 1. The target accelerator is free.
-2. All source buffers are **full** and have a **colour matching** the task's colour field.
-3. The destination buffer is **free** (neither busy nor full).
+2. Every SOURCE or READ-WRITE slot has its buffer **full** with a **colour matching** the task's colour field.
+3. Every READ-WRITE or TARGET slot has its buffer **free** (not busy, not full).
 
 ---
 
 ## Instruction Encoding
 
-All instructions are 32-bit words and 32-bit aligned, **except FILL**, which occupies two
-consecutive 32-bit words (64 bits total). The opcode occupies bits `[2:0]`. When bit 2 of the
-opcode is set, the instruction is two words long (currently only FILL uses this).
+All instructions are 32-bit aligned. Most are a single 32-bit word; **TASK** and **FILL** each
+occupy two consecutive 32-bit words (64 bits total). The opcode occupies bits `[2:0]` of the
+first word. The second word of a two-word instruction always has `[1:0] = 2'b00` as a sentinel.
 
 ### Opcode Table
 
@@ -57,38 +73,83 @@ opcode is set, the instruction is two words long (currently only FILL uses this)
 
 ## Instruction Reference
 
-### TASK — `opcode 0b000`
+### TASK — `opcode 0b000` (two words)
 
-Dispatches a single layer computation to a hardware accelerator. The instruction specifies
-which accelerator to use, which configuration to load into it, which source buffers to read,
-and which destination buffer to write.
+Dispatches a single layer computation to a hardware accelerator. TASK is a **two-word
+instruction**: the scheduler fetches and decodes both words before creating a table entry.
+Up to six buffer slots are specified, each with an independent mode field.
+
+**Word 1:**
 
 ```
- 31      30      29      25    24      20    19    17   16    12   11     9    8      7     3   2    0
- ┌───────────────────────────┬──────────────┬──────────┬─────────┬────────┬────────┬──────────────┬──────┐
- │    Source buffer 2 [4:0]  │ Src buf 1[4:0]│  Acc ID  │ Cfg ID  │#Targets│ Colour │  Dst buf[4:0]│  op  │
- └───────────────────────────┴──────────────┴──────────┴─────────┴────────┴────────┴──────────────┴──────┘
+ 31  29  28   25  24  23  22   19  18  17  16   13  12  11  10   9    5   4   3   2    0
+ ┌──────┬───────┬──────┬───────┬──────┬───────┬──────┬──────┬──────┬───────┬──────┬──────┐
+ │ rsv  │slot2  │slot2 │slot1  │slot1 │slot0  │slot0 │colour│      cfg_id      │acc_id│  op  │
+ │      │buf_id │ mode │buf_id │ mode │buf_id │ mode │      │                  │      │      │
+ └──────┴───────┴──────┴───────┴──────┴───────┴──────┴──────┴──────────────────┴──────┴──────┘
 ```
 
 | Bits    | Field | Notes |
 |---------|-------|-------|
 | [2:0]   | Opcode | `3'b000` |
-| [7:3]   | Destination buffer | Buffer ID this task writes to |
-| [8]     | Colour | Must match source buffer colours; becomes the colour written to the destination |
-| [11:9]  | #Targets | Number of consumer tasks that will read the destination buffer |
-| [16:12] | Config ID | Selects a pre-loaded configuration register set for the accelerator |
-| [19:17] | Accelerator ID | Selects the target hardware accelerator |
-| [24:20] | Source buffer 1 | First input buffer |
-| [29:25] | Source buffer 2 | Second input buffer (set equal to source 1 if unused) |
-| [31:30] | Reserved | Set to zero |
+| [4:3]   | Accelerator ID | 2-bit field; selects the target hardware accelerator |
+| [9:5]   | Config ID | Selects a pre-loaded configuration register set |
+| [10]    | Colour | Applied to all SOURCE and READ-WRITE slots; written to TARGET/RW outputs |
+| [12:11] | Slot 0 mode | 2-bit mode (see table above) |
+| [16:13] | Slot 0 buffer ID | 4-bit buffer ID |
+| [18:17] | Slot 1 mode | 2-bit mode |
+| [22:19] | Slot 1 buffer ID | 4-bit buffer ID |
+| [24:23] | Slot 2 mode | 2-bit mode |
+| [28:25] | Slot 2 buffer ID | 4-bit buffer ID |
+| [31:29] | Reserved | Set to zero |
+
+**Word 2:**
+
+```
+ 31  29  28  26  25   22  21  20  19   17  16   13  12  11  10    8   7    4   3   2   1   0
+ ┌──────┬───────┬───────┬──────┬───────┬──────┬───────┬──────┬───────┬──────┬──────┬──────┐
+ │ rsv  │slot5  │slot5  │slot5 │slot4  │slot4 │slot4  │slot3 │slot3  │slot3 │slot3 │ 0b00 │
+ │      │#tgts  │buf_id │ mode │#tgts  │buf_id│ mode  │#tgts │buf_id │ mode │      │      │
+ └──────┴───────┴───────┴──────┴───────┴──────┴───────┴──────┴───────┴──────┴──────┴──────┘
+```
+
+| Bits    | Field | Notes |
+|---------|-------|-------|
+| [1:0]   | Sentinel | Must be `2'b00` |
+| [3:2]   | Slot 3 mode | 2-bit mode |
+| [7:4]   | Slot 3 buffer ID | 4-bit buffer ID |
+| [10:8]  | Slot 3 #Targets | 3-bit consumer count (used for READ-WRITE and TARGET modes) |
+| [12:11] | Slot 4 mode | 2-bit mode |
+| [16:13] | Slot 4 buffer ID | 4-bit buffer ID |
+| [19:17] | Slot 4 #Targets | 3-bit consumer count |
+| [21:20] | Slot 5 mode | 2-bit mode |
+| [25:22] | Slot 5 buffer ID | 4-bit buffer ID |
+| [28:26] | Slot 5 #Targets | 3-bit consumer count |
+| [31:29] | Reserved | Set to zero |
 
 **Notes:**
-- Configuration for the accelerator (weights, dimensions, etc.) must be written to the config
-  register bank **before** the TASK instruction is fetched. See the AXI map section.
-- The destination buffer's `busy` flag is set immediately on dispatch; `full` is set when the
-  accelerator signals completion.
-- #Targets controls how many times the destination buffer can be consumed before it is freed.
-  Set to 1 for a buffer read by exactly one downstream task.
+
+- Slots 0–2 are **short slots**: they carry only mode and buffer ID, with no #Targets field.
+  They must only use mode `00` (UNUSED) or `01` (SOURCE). Using READ-WRITE or TARGET mode on
+  a short slot will result in a zero #Targets count at completion, corrupting buffer state.
+- Slots 3–5 are **long slots**: they carry mode, buffer ID, and #Targets, and support all four
+  modes.
+- Configuration for the accelerator must be written to the config register bank **before** the
+  TASK instruction is fetched. See the AXI map section.
+- The `#Targets` field of each output slot (READ-WRITE or TARGET) controls how many times that
+  buffer can be consumed before it is freed. Set to 1 for a buffer read by exactly one
+  downstream task.
+
+**Typical SNN layer mapping:**
+
+| Slot | Mode | Buffer |
+|------|------|--------|
+| 0 | SOURCE (`01`) | Input activations / spikes |
+| 1 | SOURCE (`01`) | Weights |
+| 2 | SOURCE (`01`) or UNUSED (`00`) | Bias currents |
+| 3 | READ-WRITE (`10`) | Synaptic currents (in-place accumulator) |
+| 4 | READ-WRITE (`10`) | Membrane potentials (in-place accumulator) |
+| 5 | TARGET (`11`) | Output spikes |
 
 ---
 
@@ -188,9 +249,10 @@ Both bits 4 and 5 may be set simultaneously to advance input and output in the s
 
 ### FILL — `opcode 0b101` (two words)
 
-Pre-loads a buffer from a block of external memory. Used to seed recurrent network state
-(e.g. GRU hidden state). This is the only two-word instruction; the low two bits of word 2
-must be `0b00` (the hardware uses these as a sentinel).
+Fills a buffer with a 32-bit constant value. Used to seed recurrent network state
+(e.g. GRU hidden state h₀). Like TASK, this is a two-word instruction. The fill_unit
+accelerator (acc_id = 4) performs the fill; the scheduler dispatches it as a normal
+accelerator task so instruction fetch continues while the fill runs.
 
 **Word 1:**
 
@@ -212,16 +274,19 @@ must be `0b00` (the hardware uses these as a sentinel).
 **Word 2:**
 
 ```
- 31                              2   1    0
- ┌──────────────────────────────────┬──────┐
- │   Block start address [31:2]     │ 0b00 │
- └──────────────────────────────────┴──────┘
+ 31                                          0
+ ┌────────────────────────────────────────────┐
+ │              fill_value [31:0]             │
+ └────────────────────────────────────────────┘
 ```
 
 | Bits   | Field | Notes |
 |--------|-------|-------|
-| [1:0]  | Must be `0b00` | Alignment sentinel; also ensures the address is 32-bit aligned |
-| [31:2] | Start address | Word-aligned byte address in external memory |
+| [31:0] | fill_value | 32-bit constant written to every word of the target buffer |
+
+The base address of the target buffer is read by fill_unit from bba_mem using the
+buffer ID in word 1. No alignment sentinel is needed: `task_w2_pending_r` in the
+scheduler already guarantees this is word 2 of a FILL instruction.
 
 ---
 
@@ -287,28 +352,33 @@ and dispatched. The values are pushed into the accelerator at dispatch time.
 
 ## Programming Notes
 
-1. **Buffer lifecycle.** Write a TASK whose destination buffer is B with `#Targets = N`. That
-   buffer becomes busy on dispatch and full on completion. Each of the N downstream TASKs that
-   lists B as a source decrements the counter; after the Nth consumer is dispatched, B is
-   automatically freed and its colour flipped.
+1. **Buffer lifecycle (TARGET mode).** Assign a slot mode of TARGET (`11`) and set `#Targets = N`.
+   The buffer becomes busy on dispatch and full on completion. Each of the N downstream TASKs
+   that lists it as a SOURCE decrements the counter; after the Nth consumer is dispatched, the
+   buffer is automatically freed and its colour flipped.
 
-2. **Colour usage.** Colour is a 1-bit field. Use it to distinguish two generations of data in
+2. **Read-Write buffer lifecycle.** Assign a slot mode of READ-WRITE (`10`) with `#Targets = N`.
+   On dispatch the buffer transitions from full to busy (old data consumed); on completion it
+   becomes full again with the updated data. The `#Targets` count is reset to N at completion,
+   so downstream tasks can consume the new data exactly N times before the buffer is freed.
+
+3. **Colour usage.** Colour is a 1-bit field. Use it to distinguish two generations of data in
    the same buffer. Alternate 0 and 1 in successive passes through a recurrent loop; the
    consumer tasks will only fire when the colour matches, preventing a slow pass from consuming
    data produced for a later pass.
 
-3. **Configuration must precede TASK.** The config register bank has no ordering guarantee
+4. **Configuration must precede TASK.** The config register bank has no ordering guarantee
    relative to in-flight tasks. Write all accelerator configuration via the AXI interface
    before the program starts, or before the TASK that needs it is reached.
 
-4. **FILL seeding.** Use FILL to pre-populate a recurrent buffer (e.g. initial hidden state h₀)
+5. **FILL seeding.** Use FILL to pre-populate a recurrent buffer (e.g. initial hidden state h₀)
    before the first iteration. Its `#Targets` and colour work identically to a TASK's
    destination buffer, so downstream TASKs can treat it like any other full buffer.
 
-5. **NXT as a synchronisation barrier.** NXT stalls the fetch pipeline until the task table
+6. **NXT as a synchronisation barrier.** NXT stalls the fetch pipeline until the task table
    drains. Use it at the end of each timestep in a temporal SNN to ensure all layers have
    completed before advancing the input window.
 
-6. **STOP and restart.** After STOP, the host writes START (with a new LOAD_PC if needed) to
+7. **STOP and restart.** After STOP, the host writes START (with a new LOAD_PC if needed) to
    begin a new program. START resets all buffer and accelerator state; any data in buffers
    from the previous run is no longer tracked.

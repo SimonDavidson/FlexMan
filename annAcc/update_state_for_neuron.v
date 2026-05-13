@@ -17,7 +17,7 @@
 
 `timescale 1ns / 1ps
 
-module update_state_for_neuron # (
+module ann_update_state_for_neuron # (
     parameter POT_SLICE_BITS    = 32,   // pre-activation and output width
     parameter THRESH_SLICE_BITS = 8     // LUT output element width
 )(

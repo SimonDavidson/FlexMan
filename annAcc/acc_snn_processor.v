@@ -6,7 +6,7 @@
 
 `include "../shared/constants.v"
 
-module acc_snn_processor # (
+module ann_processor # (
 
     parameter TGT_ACC_ID              = 'h0,
     parameter TGT_CONFIG_BASE_ADDR    = 32'hFFFFFFFF,
@@ -376,7 +376,7 @@ module acc_snn_processor # (
     //================================================================
     // spike_processing instantiation
     //================================================================
-    spike_processing # (
+    ann_spike_processing # (
         .NUM_TIMESTEPS        (SP_NUM_TIMESTEPS),
         .X_INPUT_SZ           (SP_X_INPUT_SZ),
         .Y_INPUT_SZ           (SP_Y_INPUT_SZ),
@@ -476,7 +476,7 @@ module acc_snn_processor # (
     //================================================================
     // neuron_processing instantiation
     //================================================================
-    neuron_processing # (
+    ann_neuron_processing # (
         .TGT_ACC_ID           (TGT_ACC_ID),
         .NUM_TIMESTEPS        (NP_NUM_TIMESTEPS),
         .TIMESTEP_SZ          (NP_TIMESTEP_SZ),
