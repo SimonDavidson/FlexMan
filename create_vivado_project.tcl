@@ -11,11 +11,12 @@
 
 # ── Configuration — edit these to suit your board ─────────────────────────────
 set project_name "flexman"
-set fpga_part    "xc7a100tcsg324-1"   ;# Artix-7 100T (Nexys A7-100T / Arty A7-100T)
+set fpga_part    "xc7s50fgga484-1"    ;# Spartan-7 50T (FGGA484 package)
 # Other common 7-series parts:
-#   xc7a35tcpg236-1   Artix-7 35T (Arty A7-35T, Basys 3)
+#   xc7a100tcsg324-1  Artix-7 100T (Nexys A7-100T / Arty A7-100T)
+#   xc7a35tcpg236-1   Artix-7 35T  (Arty A7-35T, Basys 3)
 #   xc7k325tffg900-2  Kintex-7 325T
-#   xc7z020clg484-1   Zynq-7020 (Zedboard, PYNQ-Z2)
+#   xc7z020clg484-1   Zynq-7020    (Zedboard, PYNQ-Z2)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 set root_dir    [file dirname [file normalize [info script]]]
@@ -76,6 +77,10 @@ set_property include_dirs [list $root_dir/shared] [current_fileset]
 # ── Top module ────────────────────────────────────────────────────────────────
 set_property top flexman_fpga_wrap [current_fileset]
 update_compile_order -fileset sources_1
+
+# ── Constraints file ─────────────────────────────────────────────────────────
+add_files -fileset constrs_1 -norecurse \
+    $root_dir/top_module/flexman_fpga_wrap.xdc
 
 # ── Synthesis run ─────────────────────────────────────────────────────────────
 # Flatten hierarchy to "rebuilt" so Vivado can optimise across module boundaries
