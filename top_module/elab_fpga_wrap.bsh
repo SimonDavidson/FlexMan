@@ -1,0 +1,37 @@
+#!/bin/bash
+# Elaborate flexman_fpga_wrap — compile/link check for FPGA synthesis wrapper.
+# Run from this directory (top_module/).
+xrun -sv -elaborate -timescale 10ps/1ps -top flexman_fpga_wrap \
+  flexman_fpga_wrap.v \
+  flexman.v \
+  ../shared/bram_sp.v \
+  ../shared/bram_sdp.v \
+  ../shared/bram_tdp.v \
+  ../scheduler/scheduler.v \
+  ../scheduler/sch_table.v \
+  ../scheduler/sch_entry.v \
+  ../scheduler/sch_buffer_state.v \
+  ../scheduler/buffer_state_entry.v \
+  ../scheduler/acc_hw_buffer_tracker.v \
+  ../scheduler/prog_cache.v \
+  ../config_manager/config_manager.v \
+  ../snnAcc/acc_snn_processor.v \
+  ../snnAcc/spike_processing.v \
+  ../snnAcc/neuron_processing.v \
+  ../snnAcc/act_index_generator.v \
+  ../snnAcc/weight_generator.v \
+  ../snnAcc/syn_curr_update.v \
+  ../snnAcc/update_state_for_neuron.v \
+  ../snnAcc/dataline_cache_with_xy.v \
+  ../snnAcc/slice_and_align.v \
+  ../snnAcc/packer.v \
+  ../annAcc/acc_snn_processor.v \
+  ../annAcc/spike_processing.v \
+  ../annAcc/neuron_processing.v \
+  ../annAcc/syn_curr_update.v \
+  ../annAcc/update_state_for_neuron.v \
+  ../Hadamard/hadamard_unit.v \
+  ../Hadamard/hu_compute.v \
+  ../Hadamard/hu_config_regs.v \
+  ../Hadamard/stream_generator.v \
+  ../fillUnit/fill_unit.v

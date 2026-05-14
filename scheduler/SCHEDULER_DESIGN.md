@@ -11,8 +11,11 @@ management and enabling multiple layers to be in-flight simultaneously across di
 accelerators.
 
 The design is implemented in synthesisable SystemVerilog and is currently parameterised for
-16 buffers and 2 hardware accelerators, with the scheduler table holding up to 4 concurrent
-pending tasks.
+16 buffers and up to 4 compute accelerators plus one fill-unit slot (`NUM_HW_ACCELERATORS = 5`,
+`TGT_ACC_SZ = 3`), with the scheduler table holding up to 4 concurrent pending tasks. TASK
+instructions encode a 2-bit accelerator ID in bits [4:3] of word 1, so they can address compute
+accelerators 0–3; the fill unit occupies the highest slot (`NUM_HW_ACCELERATORS - 1 = 4`) and
+is only reachable via FILL instructions.
 
 ---
 
