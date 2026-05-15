@@ -14,6 +14,10 @@ hardware accelerators (e.g. SNN, Hadamard). Tasks are held in a scheduler table 
 out-of-order, subject to buffer dependency constraints. The program controls ordering through
 the buffer system; direct sequencing is not otherwise enforced between TASK instructions.
 
+Hardware loop counters (LOOP / LOOPEND) allow compact programs with repeated structure
+(e.g. iterating over timesteps in a spiking network). Eight independent counters are
+available, enabling up to 8 levels of nesting provided each level uses a distinct loop ID.
+
 ### Buffers
 
 There are 16 hardware buffers (buffer IDs 0–15). Each buffer is associated with four pieces
@@ -68,6 +72,8 @@ first word. The second word of a two-word instruction always has `[1:0] = 2'b00`
 | `011` | CHECK | Conditional branch (dynamic neural networks) |
 | `100` | NXT | Advance input/output data window (barrier) |
 | `101` | FILL | Pre-load a buffer from external memory (2 words) |
+| `110` | LOOP | Initialise a hardware loop counter |
+| `111` | LOOPEND | Close a hardware loop |
 
 ---
 
@@ -197,24 +203,30 @@ Conditional branch for dynamic neural networks (DyNN). Checks a success/fail sig
 nominated unit and either terminates early or skips a block of instructions.
 
 ```
- 31              12   11    10       4   3         2    0
- ┌────────────────────┬──────┬────────┬───┬──────────────┐
- │   Skip address     │colour│unit ID │mode│      op      │
- └────────────────────┴──────┴────────┴───┴──────────────┘
+ 31          22   21           12   11    8   7     4   3   2    0
+ ┌──────────────┬────────────────┬──────────┬──────────┬───┬──────┐
+ │  (reserved)  │  skip address  │(reserved)│ buff ID  │mod│  op  │
+ └──────────────┴────────────────┴──────────┴──────────┴───┴──────┘
 ```
 
 | Bits    | Field | Notes |
 |---------|-------|-------|
 | [2:0]   | Opcode | `3'b011` |
 | [3]     | Mode | `1` = finish on success; `0` = skip on success |
-| [10:4]  | Check unit ID | Selects which unit's result to inspect |
-| [11]    | Colour | Identifies which task-colour group to cancel on early exit |
-| [31:12] | Skip address | Word address to jump to in skip-on-success mode |
+| [7:4]   | Check buffer ID | Selects the buffer whose result determines success or fail |
+| [11:8]  | Reserved | Set to zero |
+| [21:12] | Skip address | Word address to jump to in skip-on-success mode |
+| [31:22] | Reserved | Set to zero |
+
+The scheduler stalls on a CHECK until the nominated buffer is **full** (i.e. the task that
+writes it has completed). Success is indicated by a zero result from the accelerator; fail by
+a non-zero result.
 
 **Behaviour:**
 
-- **Finish on success (`mode=1`):** Terminates execution. All tasks of the matching colour are
-  cancelled. Scheduler halts and waits for a CONTINUE command from the host before resuming.
+- **Finish on success (`mode=1`):** Stops instruction fetch and waits for all outstanding tasks
+  to complete, then signals *finished* to the host (identical to STOP). The host must issue
+  a CONTINUE command before execution can resume.
 - **Skip on success (`mode=0`):** Jumps to the skip address, bypassing subsequent instructions
   (e.g. skipping layers in a conditional branch of a DyNN).
 - **On fail (either mode):** Continues with the next instruction in sequence.
@@ -257,16 +269,17 @@ accelerator task so instruction fetch continues while the fill runs.
 **Word 1:**
 
 ```
- 31              12   11     9   8      7     3   2    0
- ┌────────────────────┬────────┬──────────────────┬──────┐
- │   Block size[19:0] │#Targets│ colour │ dst buf  │  op  │
- └────────────────────┴────────┴──────────────────┴──────┘
+ 31              12   11     9   8   7   6    3   2    0
+ ┌────────────────────┬────────┬───┬───┬──────┬──────────┐
+ │   Block size[19:0] │#Targets│clr│rsv│buf_id│   op    │
+ └────────────────────┴────────┴───┴───┴──────┴──────────┘
 ```
 
 | Bits    | Field | Notes |
 |---------|-------|-------|
 | [2:0]   | Opcode | `3'b101` |
-| [7:3]   | Destination buffer | Buffer ID to fill |
+| [6:3]   | Destination buffer | 4-bit buffer ID (0–15) |
+| [7]     | Reserved | Set to zero |
 | [8]     | Colour | Colour to apply to the destination buffer |
 | [11:9]  | #Targets | Consumer count for this buffer |
 | [31:12] | Block size | Number of 32-bit words to load |
@@ -287,6 +300,59 @@ accelerator task so instruction fetch continues while the fill runs.
 The base address of the target buffer is read by fill_unit from bba_mem using the
 buffer ID in word 1. No alignment sentinel is needed: `task_w2_pending_r` in the
 scheduler already guarantees this is word 2 of a FILL instruction.
+
+---
+
+### LOOP — `opcode 0b110`
+
+Initialises a hardware loop counter. There are 8 independent counters (IDs 0–7); each stores
+a 26-bit down-count and a restart address.
+
+```
+ 31                         6   5    3   2    0
+ ┌─────────────────────────────┬──────┬──────┐
+ │         Count [25:0]        │ loop │  op  │
+ │                             │  ID  │      │
+ └─────────────────────────────┴──────┴──────┘
+```
+
+| Bits    | Field | Notes |
+|---------|-------|-------|
+| [2:0]   | Opcode | `3'b110` |
+| [5:3]   | Loop ID | Selects one of 8 independent loop counters (0–7) |
+| [31:6]  | Count | Number of times LOOPEND will jump back (total iterations = Count + 1) |
+
+The LOOP instruction records `PC + 1` as the restart address for this loop ID, loads the
+counter with `Count`, and continues fetching at `PC + 1` without stalling.
+
+---
+
+### LOOPEND — `opcode 0b111`
+
+Closes a hardware loop. The loop ID must match the enclosing LOOP.
+
+```
+ 31                         6   5    3   2    0
+ ┌─────────────────────────────┬──────┬──────┐
+ │          (reserved)         │ loop │  op  │
+ │                             │  ID  │      │
+ └─────────────────────────────┴──────┴──────┘
+```
+
+| Bits    | Field | Notes |
+|---------|-------|-------|
+| [2:0]   | Opcode | `3'b111` |
+| [5:3]   | Loop ID | Must match the loop ID of the enclosing LOOP |
+| [31:6]  | Reserved | Set to zero |
+
+**Behaviour:**
+
+- **Counter > 0:** Decrement the counter and jump to the saved restart address (the instruction
+  immediately after the matching LOOP). The body executes one more time.
+- **Counter = 0:** Fall through to the next instruction in sequence.
+
+Loops may be nested up to 8 levels deep provided each level uses a distinct loop ID. There is
+no hardware enforcement of proper nesting; mis-matched IDs produce undefined behaviour.
 
 ---
 
@@ -382,3 +448,10 @@ and dispatched. The values are pushed into the accelerator at dispatch time.
 7. **STOP and restart.** After STOP, the host writes START (with a new LOAD_PC if needed) to
    begin a new program. START resets all buffer and accelerator state; any data in buffers
    from the previous run is no longer tracked.
+
+8. **Hardware loops.** Use LOOP / LOOPEND to repeat a block of instructions without the
+   overhead of a JUMP. A LOOP with `Count = N` causes the body to execute `N + 1` times in
+   total (the counter is decremented on each backward edge; the body falls through when the
+   counter reaches zero). Each of the 8 loop counters is independent; assign a distinct loop
+   ID to each nesting level. A typical SNN timestep loop places LOOP at the start of the
+   timestep body and LOOPEND just before the NXT instruction that advances the time window.
