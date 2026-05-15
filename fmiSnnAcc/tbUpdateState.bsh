@@ -1,0 +1,5 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+xrun -sv -gui -timescale 1ns/1ps -access wrc -top tb_update_state_for_neuron \
+  update_state_for_neuron.v tb_update_state_for_neuron.v

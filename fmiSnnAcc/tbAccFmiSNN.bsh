@@ -1,0 +1,9 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+
+xrun -sv -gui -timescale 1ns/1ps -access wrc -top tb_acc_fmiSnn_processor \
+  acc_fmiSnn_processor.v spike_processing.v act_index_generator.v \
+  weight_generator.v syn_curr_update.v update_state_for_neuron.v \
+  neuron_processing.v dataline_cache_with_xy.v slice_and_align.v \
+  packer.v sram_bram.v tb_acc_fmiSnn_processor.v
