@@ -372,28 +372,62 @@ control and configuration; the lower 32 MB provides direct access to buffer cont
 
 ### Control Commands (write-only)
 
-Address qualifier: bits `[31:29] = 3'b111`, bits `[28:25] = 4'b0000`.
+Address qualifier: bits `[31:29] = 3'b111`, bits `[28:25] = 4'b0000`.  
+Reg ID is carried in bits `[24:20]`; bits `[19:0]` are ignored.  
+Canonical addresses (bits `[19:0]` = 0):
 
-| Reg ID `[24:20]` | Name | Action |
-|------------------|------|--------|
-| `5'b00000` | LOAD_PC | Set program start address (written as word index) |
-| `5'b00001` | START | Begin execution at the loaded address; resets all state |
-| `5'b00010` | CONTINUE | Resume after a finish-on-success halt |
-| `5'b00011` | PAUSE | Halt instruction fetch (in-flight tasks complete normally) |
-| `5'b00100` | UNPAUSE | Resume after PAUSE |
+| Reg ID `[24:20]` | Canonical address | Name | Action |
+|------------------|-------------------|------|--------|
+| `5'b00000` | `0xE000_0000` | LOAD_PC | Set program start address; write value is a word index |
+| `5'b00001` | `0xE010_0000` | START | Begin execution at the loaded address; resets all buffer and accelerator state |
+| `5'b00010` | `0xE020_0000` | CONTINUE | Resume after a finish-on-success halt |
+| `5'b00011` | `0xE030_0000` | PAUSE | Halt instruction fetch; in-flight tasks complete normally |
+| `5'b00100` | `0xE040_0000` | UNPAUSE | Resume after PAUSE |
+| `5'b00101` | `0xE050_0000` | MARK_BUFF_FULL | Mark a buffer as pre-filled (see below) |
+
+**MARK_BUFF_FULL data word:**
+
+| Bits   | Field |
+|--------|-------|
+| [3:0]  | Buffer ID (0–15) |
+| [6:4]  | Usage count (#consumers) |
+| [31:7] | Reserved (set to zero) |
+
+Marks the specified buffer as full without going through the task dispatch path. Used to
+pre-seed buffers that the host has loaded directly via the buffer data port before issuing
+START. The buffer transitions to the full state with the given usage count; downstream tasks
+may then consume it exactly that many times before it is freed. The buffer colour is left at
+its reset default (0); write a separate MARK_BUFF_FULL with the same buffer ID if you need to
+re-seed with a different colour in a later pass.
 
 ### Status Registers (read-only)
 
-Address qualifier: bits `[31:30] = 2'b11`, bits `[29:26] = 4'b0001`.
+Address qualifier: bits `[31:30] = 2'b11`, bits `[29:26] = 4'b0001`.  
+Reg ID is carried in bits `[25:20]`.  
+Canonical addresses (bits `[19:0]` = 0):
 
-| Reg ID `[25:20]` | Name | Contents |
-|------------------|------|----------|
-| `6'b00_0000` | CURRENT_PC | Current fetch word address |
-| `6'b00_0001` | ACTIVE | `[2:0]` = per-accelerator busy; `[30]` = paused on early exit; `[31]` = system busy |
-| `6'b00_0001` | BUFF_FULL | Per-buffer full flags (one bit per buffer) |
-| `6'b00_0010` | BUFF_BUSY | Per-buffer busy flags |
-| `6'b00_0011` | BUFF_COLOUR | Per-buffer colour flags |
-| `6'b10_0000`–`6'b11_1111` | Per-buffer status (buffers 0–31) | `[0]`=colour, `[1]`=busy, `[2]`=full, `[5:3]`=remaining consumer count |
+| Reg ID `[25:20]` | Canonical address | Name | Contents |
+|------------------|-------------------|------|----------|
+| `6'b00_0000` | `0xC400_0000` | CURRENT_PC | Current fetch word address |
+| `6'b00_0001` | `0xC410_0000` | ACTIVE | `[NUM_HW_ACCELERATORS-1:0]` = per-accelerator busy; `[30]` = paused on early exit; `[31]` = stopping (STOP seen, draining) |
+| `6'b00_0010` | `0xC420_0000` | BUFF_FULL | Per-buffer full flags, one bit per buffer (bit N = buffer N) |
+| `6'b00_0011` | `0xC430_0000` | BUFF_BUSY | Per-buffer busy flags (busy = task dispatched, not yet complete) |
+| `6'b00_0100` | `0xC440_0000` | BUFF_COLOUR | Per-buffer colour flags |
+
+### Program Memory (write-only) — addresses `0xD000_0000`–`0xD0FF_FFFF`
+
+Address qualifier: bits `[31:24] = 8'hD0` (i.e. `(addr & 0xFF00_0000) == 0xD000_0000`).
+
+The host loads the program by writing 32-bit words sequentially into this range. The word
+index within program memory is derived from the byte address as:
+
+```
+word_index = (addr & 0x00FF_FFFF) >> 2
+```
+
+No alignment sentinel is required; simply write consecutive 32-bit-aligned addresses starting
+at `0xD000_0000`. The scheduler fetches from the same memory, so all writes must complete
+before START is issued.
 
 ### Buffer Memory Map (write-only)
 
@@ -441,15 +475,22 @@ and dispatched. The values are pushed into the accelerator at dispatch time.
    before the first iteration. Its `#Targets` and colour work identically to a TASK's
    destination buffer, so downstream TASKs can treat it like any other full buffer.
 
-6. **NXT as a synchronisation barrier.** NXT stalls the fetch pipeline until the task table
+6. **Host pre-seeding with MARK_BUFF_FULL.** If the host has already placed data directly into
+   a buffer via the buffer data port (addresses `0x0000_0000`–`0x01FF_FFFF`), issue
+   MARK_BUFF_FULL (`0xE050_0000`) with the buffer ID and consumer count before START. The
+   scheduler will then treat that buffer as full when the program runs, allowing the first
+   wave of TASKs to dispatch immediately. This differs from FILL, which performs a DMA
+   transfer at runtime; MARK_BUFF_FULL simply updates the scheduler's state machine.
+
+7. **NXT as a synchronisation barrier.** NXT stalls the fetch pipeline until the task table
    drains. Use it at the end of each timestep in a temporal SNN to ensure all layers have
    completed before advancing the input window.
 
-7. **STOP and restart.** After STOP, the host writes START (with a new LOAD_PC if needed) to
+8. **STOP and restart.** After STOP, the host writes START (with a new LOAD_PC if needed) to
    begin a new program. START resets all buffer and accelerator state; any data in buffers
    from the previous run is no longer tracked.
 
-8. **Hardware loops.** Use LOOP / LOOPEND to repeat a block of instructions without the
+9. **Hardware loops.** Use LOOP / LOOPEND to repeat a block of instructions without the
    overhead of a JUMP. A LOOP with `Count = N` causes the body to execute `N + 1` times in
    total (the counter is decremented on each backward edge; the body falls through when the
    counter reaches zero). Each of the 8 loop counters is independent; assign a distinct loop
