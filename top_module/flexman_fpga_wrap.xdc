@@ -146,15 +146,7 @@ set_false_path -from [get_ports reset]
 #set_property -dict {PACKAGE_PIN <PIN> IOSTANDARD LVCMOS33} [get_ports {sys_data_o[1]}]
 #set_property -dict {PACKAGE_PIN <PIN> IOSTANDARD LVCMOS33} [get_ports {sys_data_o[0]}]
 
-# ── Buffer pre-fill and NXT pulses (9 pins) ───────────────────────────────────
-#set_property -dict {PACKAGE_PIN <PIN> IOSTANDARD LVCMOS33} [get_ports mark_buff_as_full_i]
-#set_property -dict {PACKAGE_PIN <PIN> IOSTANDARD LVCMOS33} [get_ports {full_buff_id_i[3]}]
-#set_property -dict {PACKAGE_PIN <PIN> IOSTANDARD LVCMOS33} [get_ports {full_buff_id_i[2]}]
-#set_property -dict {PACKAGE_PIN <PIN> IOSTANDARD LVCMOS33} [get_ports {full_buff_id_i[1]}]
-#set_property -dict {PACKAGE_PIN <PIN> IOSTANDARD LVCMOS33} [get_ports {full_buff_id_i[0]}]
-#set_property -dict {PACKAGE_PIN <PIN> IOSTANDARD LVCMOS33} [get_ports {full_buff_usage_i[2]}]
-#set_property -dict {PACKAGE_PIN <PIN> IOSTANDARD LVCMOS33} [get_ports {full_buff_usage_i[1]}]
-#set_property -dict {PACKAGE_PIN <PIN> IOSTANDARD LVCMOS33} [get_ports {full_buff_usage_i[0]}]
+# ── NXT pulses ────────────────────────────────────────────────────────────────
 #set_property -dict {PACKAGE_PIN <PIN> IOSTANDARD LVCMOS33} [get_ports nxt_input_pulse_o]
 #set_property -dict {PACKAGE_PIN <PIN> IOSTANDARD LVCMOS33} [get_ports nxt_output_pulse_o]
 

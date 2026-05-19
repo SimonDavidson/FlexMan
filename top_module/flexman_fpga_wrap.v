@@ -72,10 +72,7 @@ module flexman_fpga_wrap #(
     input  wire  [31:0] sys_data_i,
     output wire  [31:0] sys_data_o,
 
-    // ── Buffer pre-fill / NXT pulses ─────────────────────────────────────────
-    input  wire                    mark_buff_as_full_i,
-    input  wire [BUFF_INDX_SZ-1:0] full_buff_id_i,
-    input  wire [TGT_COUNT_SZ-1:0] full_buff_usage_i,
+    // ── NXT pulses ───────────────────────────────────────────────────────────
     output wire                    nxt_input_pulse_o,
     output wire                    nxt_output_pulse_o,
 
@@ -370,10 +367,7 @@ flexman #(
     .fu_bba_mem_addr_o          (fu_bba_mem_addr_o),
     .fu_bba_mem_data_i          (fu_bba_mem_data_i),
 
-    // Buffer / NXT
-    .mark_buff_as_full_i        (mark_buff_as_full_i),
-    .full_buff_id_i             (full_buff_id_i),
-    .full_buff_usage_i          (full_buff_usage_i),
+    // NXT
     .nxt_input_pulse_o          (nxt_input_pulse_int),
     .nxt_output_pulse_o         (nxt_output_pulse_int),
     .cm_config_finished_o       (cm_config_finished_int),

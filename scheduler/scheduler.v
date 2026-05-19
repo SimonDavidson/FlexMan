@@ -70,12 +70,7 @@ module scheduler
      output wire                          nxt_output_pulse_o,
      // fill_unit dispatch parameters (valid cycle of start_new_block_o for FILL):
      output wire [31:0]                   fill_value_o,
-     output wire [19:0]                   fill_block_size_o,
-
-     // External buffer pre-fill:
-     input wire                            mark_buff_as_full_i,
-     input wire [BUFF_INDX_SZ-1:0]        full_buff_id_i,
-     input wire [TGT_COUNT_SZ-1:0]        full_buff_usage_i
+     output wire [19:0]                   fill_block_size_o
     );
 
 // ------------------------------------------------------------
@@ -92,6 +87,10 @@ wire sch_prog_wr = sys_req_i
 
 wire do_start    = sch_ctrl_wr & (sys_addr_i[24:20] == 5'd1);
 wire do_continue = sch_ctrl_wr & (sys_addr_i[24:20] == 5'd2);
+// MARK_BUFF_FULL (reg 5): data[BUFF_INDX_SZ-1:0]=buf_id, data[BUFF_INDX_SZ+:TGT_COUNT_SZ]=usage
+wire do_mark_full       = sch_ctrl_wr & (sys_addr_i[24:20] == 5'd5);
+wire [BUFF_INDX_SZ-1:0] mark_full_id  = sys_data_i[BUFF_INDX_SZ-1:0];
+wire [TGT_COUNT_SZ-1:0] mark_full_cnt = sys_data_i[BUFF_INDX_SZ +: TGT_COUNT_SZ];
 
 // ------------------------------------------------------------
 // Entry data field offsets (lsb first, matching sch_entry):
@@ -581,9 +580,9 @@ sch_buffer_state #(
    .acc_busy_i(acc_busy_i),
    .acc_finished_i(acc_finished_i),
    .acc_result_i(acc_result_i),
-   .mark_buff_as_full_i(mark_buff_as_full_i),
-   .full_buff_id_i(full_buff_id_i),
-   .full_buff_usage_i(full_buff_usage_i),
+   .mark_buff_as_full_i(do_mark_full),
+   .full_buff_id_i(mark_full_id),
+   .full_buff_usage_i(mark_full_cnt),
    .start_new_task_i(start_new_task),
    .tgt_acc_id_i(to_launch_acc_hw_id),
    .slot_buff_i(to_launch_slot_buff),

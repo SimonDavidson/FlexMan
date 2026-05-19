@@ -184,9 +184,6 @@ reg  [31:0]                    sys_addr_tb;
 reg                            sys_req_tb;
 reg  [31:0]                    sys_data_tb;
 wire                           sys_ack_tb;
-reg                            mark_buff_as_full;
-reg  [BUFF_INDX_SZ-1:0]        full_buff_id;
-reg  [2:0]                     full_buff_usage;
 
 // ---- Program memory (64-word ROM, combinatorial read) ---------------------
 reg [31:0] prog_mem [0:63];
@@ -251,10 +248,7 @@ scheduler #(
     .nxt_input_pulse_o(nxt_in_pulse),
     .nxt_output_pulse_o(nxt_out_pulse),
     .fill_value_o(),
-    .fill_block_size_o(),
-    .mark_buff_as_full_i(mark_buff_as_full),
-    .full_buff_id_i(full_buff_id),
-    .full_buff_usage_i(full_buff_usage)
+    .fill_block_size_o()
 );
 
 // ---- Event monitors -------------------------------------------------------
@@ -387,9 +381,6 @@ initial begin
     sys_req_tb        = 1'b0;
     sys_addr_tb       = 32'b0;
     sys_data_tb       = 32'b0;
-    mark_buff_as_full = 1'b0;
-    full_buff_id      = 4'd0;
-    full_buff_usage   = 3'd0;
 
     // ---- Populate program memory ------------------------------------------
     // simple_w1(acc, cfg, src0, src1) + simple_w2(tgt, ntgt)
@@ -440,14 +431,10 @@ initial begin
     reset = 1'b0;
 
     // ---- Pre-fill seed buffers 0, 1, 2 (2 consumers each) ---------------
-    @(posedge clk); #1;
-    mark_buff_as_full = 1'b1; full_buff_id = 4'd0; full_buff_usage = 3'd2;
-    @(posedge clk); #1;
-    full_buff_id = 4'd1;
-    @(posedge clk); #1;
-    full_buff_id = 4'd2;
-    @(posedge clk); #1;
-    mark_buff_as_full = 1'b0;
+    // MARK_BUFF_FULL: addr=0xE050_0000, data[3:0]=buf_id, data[6:4]=usage
+    axi_write(32'hE050_0000, {25'b0, 3'd2, 4'd0});  // buf 0, ntgt=2
+    axi_write(32'hE050_0000, {25'b0, 3'd2, 4'd1});  // buf 1, ntgt=2
+    axi_write(32'hE050_0000, {25'b0, 3'd2, 4'd2});  // buf 2, ntgt=2
 
     // ---- Start program 1 ------------------------------------------------
     axi_write(32'hE000_0000, 32'd0);            // LOAD_PC: start at word 0
@@ -464,14 +451,9 @@ initial begin
     // ---- Pre-fill program 2 seed buffers (colour=0 by reset default) ----
     // buf0 = source for T30 (ntgt=1); buf1 = source for T31 (ntgt=1)
     // buf2 = shared RW buffer (ntgt value overwritten on first RW completion)
-    @(posedge clk); #1;
-    mark_buff_as_full = 1'b1; full_buff_id = 4'd0; full_buff_usage = 3'd1;
-    @(posedge clk); #1;
-    full_buff_id = 4'd1;
-    @(posedge clk); #1;
-    full_buff_id = 4'd2;
-    @(posedge clk); #1;
-    mark_buff_as_full = 1'b0;
+    axi_write(32'hE050_0000, {25'b0, 3'd1, 4'd0});  // buf 0, ntgt=1
+    axi_write(32'hE050_0000, {25'b0, 3'd1, 4'd1});  // buf 1, ntgt=1
+    axi_write(32'hE050_0000, {25'b0, 3'd1, 4'd2});  // buf 2, ntgt=1
 
     // ---- Start program 2 ------------------------------------------------
     axi_write(32'hE000_0000, 32'd32);           // LOAD_PC: start at word 32

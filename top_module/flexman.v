@@ -108,10 +108,7 @@ module flexman #(
     output wire  [31:0] fu_bba_mem_addr_o,
     input  wire  [31:0] fu_bba_mem_data_i,
 
-    // ── Scheduler buffer pre-fill / NXT pulses ───────────────────────────────
-    input  wire                   mark_buff_as_full_i,
-    input  wire [BUFF_INDX_SZ-1:0] full_buff_id_i,
-    input  wire [TGT_COUNT_SZ-1:0] full_buff_usage_i,
+    // ── Scheduler NXT pulses ─────────────────────────────────────────────────
     output wire                   nxt_input_pulse_o,
     output wire                   nxt_output_pulse_o,
 
@@ -795,10 +792,7 @@ scheduler #(
     .fill_value_o        (sch_fill_value),
     .fill_block_size_o   (sch_fill_block_size),
     .nxt_input_pulse_o   (nxt_input_pulse_o),
-    .nxt_output_pulse_o  (nxt_output_pulse_o),
-    .mark_buff_as_full_i (mark_buff_as_full_i),
-    .full_buff_id_i      (full_buff_id_i),
-    .full_buff_usage_i   (full_buff_usage_i)
+    .nxt_output_pulse_o  (nxt_output_pulse_o)
 );
 
 // ─── Config manager ───────────────────────────────────────────────────────────
