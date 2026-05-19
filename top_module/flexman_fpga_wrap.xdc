@@ -27,7 +27,7 @@
 # ── Clock ─────────────────────────────────────────────────────────────────────
 # Replace <CLK_PIN> with your board oscillator's package pin.
 # Adjust -period to match your clock frequency (10.000 ns = 100 MHz).
-set_property -dict {PACKAGE_PIN <CLK_PIN> IOSTANDARD LVCMOS33} [get_ports clk]
+set_property -dict {PACKAGE_PIN IO_L12N_T1_MRCC_13 IOSTANDARD LVCMOS33} [get_ports clk]
 create_clock -period 10.000 -name sys_clk -waveform {0.000 5.000} [get_ports clk]
 
 # ── Resets and test control ───────────────────────────────────────────────────
@@ -242,6 +242,12 @@ set_input_delay  -clock sys_clk -min 0.500 \
     [get_ports -filter {DIRECTION == IN && NAME !~ "clk"}]
 
 # Output delay budget.
+# All outputs are IOB-registered in the RTL via (* IOB = "TRUE" *).
+# These constraints now cover only the IOB-FF → output-buffer path (~1 ns),
+# which easily meets the 2.0 ns max budget.  The fabric-to-IOB-FF path is a
+# register-to-register path analysed against the full clock period.
+# External consumers should expect +1 cycle latency on all outputs;
+# spike readback data is 2 cycles after address presentation.
 set_output_delay -clock sys_clk -max 2.000 \
     [get_ports -filter {DIRECTION == OUT}]
 set_output_delay -clock sys_clk -min 0.500 \

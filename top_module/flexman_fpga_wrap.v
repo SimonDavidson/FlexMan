@@ -291,6 +291,17 @@ wire                   hd_src_r_mem_wr_o;
 wire [`ADDR_SIZE-1:0]  hd_src_r_mem_wr_addr_o;
 wire [31:0]            hd_src_r_mem_data_o;
 
+// ─── IOB output register intermediates ───────────────────────────────────────
+// Internal wires carry flexman/BRAM outputs to the IOB register stage below.
+wire        sys_ack_int;
+wire [31:0] sys_data_int;
+wire        nxt_input_pulse_int;
+wire        nxt_output_pulse_int;
+wire        cm_config_finished_int;
+wire [`ACT_BITS-1:0] s0_spike_rd_data_int;
+wire [`ACT_BITS-1:0] s1_spike_rd_data_int;
+wire [`ACT_BITS-1:0] a0_spike_rd_data_int;
+
 // ─── flexman instantiation ────────────────────────────────────────────────────
 flexman #(
     .SNN0_CFG_BASE        (SNN0_CFG_BASE),
@@ -321,10 +332,10 @@ flexman #(
 
     // AXI
     .sys_req_i                  (sys_req_i),
-    .sys_ack_o                  (sys_ack_o),
+    .sys_ack_o                  (sys_ack_int),
     .sys_addr_i                 (sys_addr_i),
     .sys_data_i                 (sys_data_i),
-    .sys_data_o                 (sys_data_o),
+    .sys_data_o                 (sys_data_int),
 
     // Program memory
     .start_program_i            (start_program_i),
@@ -362,9 +373,9 @@ flexman #(
     .mark_buff_as_full_i        (mark_buff_as_full_i),
     .full_buff_id_i             (full_buff_id_i),
     .full_buff_usage_i          (full_buff_usage_i),
-    .nxt_input_pulse_o          (nxt_input_pulse_o),
-    .nxt_output_pulse_o         (nxt_output_pulse_o),
-    .cm_config_finished_o       (cm_config_finished_o),
+    .nxt_input_pulse_o          (nxt_input_pulse_int),
+    .nxt_output_pulse_o         (nxt_output_pulse_int),
+    .cm_config_finished_o       (cm_config_finished_int),
 
     // snnAcc0
     .s0_weight_mem_rd_o         (s0_weight_mem_rd_o),
@@ -670,7 +681,7 @@ bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`ACT_BITS)) u_s0_spike_mem (
     .waddr (s0_spike_mem_addr_o[ACC_ABITS-1:0]),
     .din   (s0_spike_mem_data_o),
     .raddr (s0_spike_rd_addr_i),
-    .dout  (s0_spike_rd_data_o)
+    .dout  (s0_spike_rd_data_int)
 );
 
 // ─── snnAcc1 memories ─────────────────────────────────────────────────────────
@@ -733,7 +744,7 @@ bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`ACT_BITS)) u_s1_spike_mem (
     .waddr (s1_spike_mem_addr_o[ACC_ABITS-1:0]),
     .din   (s1_spike_mem_data_o),
     .raddr (s1_spike_rd_addr_i),
-    .dout  (s1_spike_rd_data_o)
+    .dout  (s1_spike_rd_data_int)
 );
 
 // ─── annAcc memories ──────────────────────────────────────────────────────────
@@ -796,7 +807,7 @@ bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`ACT_BITS)) u_a0_spike_mem (
     .waddr (a0_spike_mem_addr_o[ACC_ABITS-1:0]),
     .din   (a0_spike_mem_data_o),
     .raddr (a0_spike_rd_addr_i),
-    .dout  (a0_spike_rd_data_o)
+    .dout  (a0_spike_rd_data_int)
 );
 
 // ─── Hadamard memories ────────────────────────────────────────────────────────
@@ -838,5 +849,40 @@ bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(32)) u_hd_src_r_mem (
     .raddr (hd_src_r_mem_addr_o[ACC_ABITS-1:0]),
     .dout  (hd_src_r_mem_data_i)
 );
+
+// ─── IOB output registers ─────────────────────────────────────────────────────
+// (* IOB = "TRUE" *) places each FF in the physical I/O block so that
+// set_output_delay constrains only the IOB-FF → output-buffer path (~1 ns).
+// The fabric-to-IOB-FF path is analysed as a register-to-register path against
+// the full clock period.  All outputs have +1 cycle latency at the pin.
+// Spike readback data has 2 cycles total (BRAM registered read + this stage).
+(* IOB = "TRUE" *) reg        sys_ack_r;
+(* IOB = "TRUE" *) reg [31:0] sys_data_r;
+(* IOB = "TRUE" *) reg        nxt_input_pulse_r;
+(* IOB = "TRUE" *) reg        nxt_output_pulse_r;
+(* IOB = "TRUE" *) reg        cm_config_finished_r;
+(* IOB = "TRUE" *) reg [`ACT_BITS-1:0] s0_spike_rd_data_r;
+(* IOB = "TRUE" *) reg [`ACT_BITS-1:0] s1_spike_rd_data_r;
+(* IOB = "TRUE" *) reg [`ACT_BITS-1:0] a0_spike_rd_data_r;
+
+always @(posedge clk) begin
+    sys_ack_r            <= sys_ack_int;
+    sys_data_r           <= sys_data_int;
+    nxt_input_pulse_r    <= nxt_input_pulse_int;
+    nxt_output_pulse_r   <= nxt_output_pulse_int;
+    cm_config_finished_r <= cm_config_finished_int;
+    s0_spike_rd_data_r   <= s0_spike_rd_data_int;
+    s1_spike_rd_data_r   <= s1_spike_rd_data_int;
+    a0_spike_rd_data_r   <= a0_spike_rd_data_int;
+end
+
+assign sys_ack_o            = sys_ack_r;
+assign sys_data_o           = sys_data_r;
+assign nxt_input_pulse_o    = nxt_input_pulse_r;
+assign nxt_output_pulse_o   = nxt_output_pulse_r;
+assign cm_config_finished_o = cm_config_finished_r;
+assign s0_spike_rd_data_o   = s0_spike_rd_data_r;
+assign s1_spike_rd_data_o   = s1_spike_rd_data_r;
+assign a0_spike_rd_data_o   = a0_spike_rd_data_r;
 
 endmodule
