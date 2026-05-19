@@ -180,8 +180,10 @@ wire [ENTRY_DATA_SZ-1:0]       buffer_info;
 wire                           nxt_in_pulse;
 wire                           nxt_out_pulse;
 
-reg                            start_program;
-reg  [PROG_ADDR_BITS-1:0]      program_addr;
+reg  [31:0]                    sys_addr_tb;
+reg                            sys_req_tb;
+reg  [31:0]                    sys_data_tb;
+wire                           sys_ack_tb;
 reg                            mark_buff_as_full;
 reg  [BUFF_INDX_SZ-1:0]        full_buff_id;
 reg  [2:0]                     full_buff_usage;
@@ -227,16 +229,19 @@ scheduler #(
     .clk(clk),
     .reset(reset),
     .test_stall_pipe(1'b0),
-    .sys_req_i(1'b0),
-    .sys_ack_o(),
-    .sys_data_i(32'b0),
+    .sys_req_i(sys_req_tb),
+    .sys_ack_o(sys_ack_tb),
+    .sys_addr_i(sys_addr_tb),
+    .sys_data_i(sys_data_tb),
     .sys_data_o(),
-    .start_program_i(start_program),
-    .program_addr_i(program_addr),
     .prog_mem_addr_o(prog_mem_addr),
     .prog_mem_data_i(prog_mem_data),
     .prog_mem_req_o(prog_mem_req),
     .prog_mem_wait_i(prog_mem_wait),
+    .prog_mem_wr_o(),
+    .prog_mem_wr_addr_o(),
+    .prog_mem_wr_data_o(),
+    .prog_mem_wr_wait_i(1'b0),
     .acc_busy_i(acc_busy_w),
     .acc_finished_i(acc_finished_w),
     .acc_result_i(acc_result_w),
@@ -359,13 +364,29 @@ initial begin
     $dumpvars(0, top);
 end
 
+// ---- AXI write task --------------------------------------------------------
+// ack is combinatorial, so req need only be held for one clock cycle.
+task axi_write;
+    input [31:0] addr;
+    input [31:0] data;
+    begin
+        @(posedge clk); #1;
+        sys_addr_tb = addr;
+        sys_data_tb = data;
+        sys_req_tb  = 1'b1;
+        @(posedge clk); #1;
+        sys_req_tb  = 1'b0;
+    end
+endtask
+
 // ---- Main stimulus ---------------------------------------------------------
 integer k;
 initial begin
     reset             = 1'b1;
     prog_mem_wait     = 1'b0;
-    start_program     = 1'b0;
-    program_addr      = {PROG_ADDR_BITS{1'b0}};
+    sys_req_tb        = 1'b0;
+    sys_addr_tb       = 32'b0;
+    sys_data_tb       = 32'b0;
     mark_buff_as_full = 1'b0;
     full_buff_id      = 4'd0;
     full_buff_usage   = 3'd0;
@@ -429,11 +450,8 @@ initial begin
     mark_buff_as_full = 1'b0;
 
     // ---- Start program 1 ------------------------------------------------
-    @(posedge clk); #1;
-    start_program = 1'b1;
-    program_addr  = {PROG_ADDR_BITS{1'b0}};
-    @(posedge clk); #1;
-    start_program = 1'b0;
+    axi_write(32'hE000_0000, 32'd0);            // LOAD_PC: start at word 0
+    axi_write(32'hE010_0000, 32'b0);            // START
 
     // ---- Wait for program 1 to finish (monitor sets phase=1) -------------
     wait(phase == 1);
@@ -456,11 +474,8 @@ initial begin
     mark_buff_as_full = 1'b0;
 
     // ---- Start program 2 ------------------------------------------------
-    @(posedge clk); #1;
-    start_program = 1'b1;
-    program_addr  = {{(PROG_ADDR_BITS-6){1'b0}}, 6'd32};
-    @(posedge clk); #1;
-    start_program = 1'b0;
+    axi_write(32'hE000_0000, 32'd32);           // LOAD_PC: start at word 32
+    axi_write(32'hE010_0000, 32'b0);            // START
 end
 
 endmodule

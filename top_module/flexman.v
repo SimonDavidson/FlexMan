@@ -47,6 +47,9 @@ module flexman #(
     // fill_unit AXI slave address range for mem_sel table.
     parameter [31:0] FU_TABLE_ADDR           = 32'hC000_0000,
     parameter [31:0] FU_TABLE_ADDR_MASK      = 32'hFF00_0000,
+    // scheduler AXI address range for program memory writes.
+    parameter [31:0] SCH_PROG_MEM_ADDR       = 32'hD000_0000,
+    parameter [31:0] SCH_PROG_MEM_MASK       = 32'hFF00_0000,
     // System sizing — must be consistent across all sub-modules.
     parameter NUM_BUFFERS         = 16,
     parameter NUM_HW_ACCELERATORS = 5,    // 4 computation + 1 fill_unit
@@ -71,13 +74,15 @@ module flexman #(
     input  wire  [31:0] sys_data_i,
     output wire  [31:0] sys_data_o,
 
-    // ── Program memory (scheduler) ───────────────────────────────────────────
-    input  wire                      start_program_i,
-    input  wire [PROG_ADDR_BITS-1:0] program_addr_i,
+    // ── Program memory (scheduler read + AXI write) ─────────────────────────
     output wire [`ADDR_SIZE-1:0]     prog_mem_addr_o,
     input  wire [PROG_DATA_BITS-1:0] prog_mem_data_i,
     output wire                      prog_mem_req_o,
     input  wire                      prog_mem_wait_i,
+    output wire                      prog_mem_wr_o,
+    output wire [PROG_ADDR_BITS-1:0] prog_mem_wr_addr_o,
+    output wire [PROG_DATA_BITS-1:0] prog_mem_wr_data_o,
+    input  wire                      prog_mem_wr_wait_i,
 
     // ── Config memory (config_manager read/write) ────────────────────────────
     output wire         cfg_mem_rd_o,
@@ -761,34 +766,39 @@ scheduler #(
     .CFG_ID_SZ           (CFG_ID_SZ),
     .TGT_COUNT_SZ        (TGT_COUNT_SZ),
     .PROG_ADDR_BITS      (PROG_ADDR_BITS),
-    .PROG_DATA_BITS      (PROG_DATA_BITS)
+    .PROG_DATA_BITS      (PROG_DATA_BITS),
+    .SCH_PROG_MEM_ADDR   (SCH_PROG_MEM_ADDR),
+    .SCH_PROG_MEM_MASK   (SCH_PROG_MEM_MASK)
 ) u_scheduler (
-    .clk                (clk),
-    .reset              (reset),
-    .test_stall_pipe    (test_stall_pipe),
-    .sys_req_i          (sys_req_i),
-    .sys_ack_o          (sch_ack),
-    .sys_data_i         (sys_data_i),
-    .sys_data_o         (sch_data_o),
-    .start_program_i    (start_program_i),
-    .program_addr_i     (program_addr_i),
-    .prog_mem_addr_o    (prog_mem_addr_o),
-    .prog_mem_data_i    (prog_mem_data_i),
-    .prog_mem_req_o     (prog_mem_req_o),
-    .prog_mem_wait_i    (prog_mem_wait_i),
-    .acc_busy_i         ({fu_busy,   had_busy,     ann_busy,     snn1_busy,     snn0_busy}),
-    .acc_finished_i     ({fu_finished, had_finished, ann_finished, snn1_finished, snn0_finished}),
-    .acc_result_i       ({1'b0,      1'b0,         ann_result,   snn1_result,   snn0_result}),
-    .start_new_block_o  (sch_start_new_block),
-    .target_acc_o       (sch_target_acc),
-    .buffer_info_o      (sch_buffer_info),
-    .fill_value_o       (sch_fill_value),
-    .fill_block_size_o  (sch_fill_block_size),
-    .nxt_input_pulse_o  (nxt_input_pulse_o),
-    .nxt_output_pulse_o (nxt_output_pulse_o),
-    .mark_buff_as_full_i(mark_buff_as_full_i),
-    .full_buff_id_i     (full_buff_id_i),
-    .full_buff_usage_i  (full_buff_usage_i)
+    .clk                 (clk),
+    .reset               (reset),
+    .test_stall_pipe     (test_stall_pipe),
+    .sys_req_i           (sys_req_i),
+    .sys_ack_o           (sch_ack),
+    .sys_addr_i          (sys_addr_i),
+    .sys_data_i          (sys_data_i),
+    .sys_data_o          (sch_data_o),
+    .prog_mem_addr_o     (prog_mem_addr_o),
+    .prog_mem_data_i     (prog_mem_data_i),
+    .prog_mem_req_o      (prog_mem_req_o),
+    .prog_mem_wait_i     (prog_mem_wait_i),
+    .prog_mem_wr_o       (prog_mem_wr_o),
+    .prog_mem_wr_addr_o  (prog_mem_wr_addr_o),
+    .prog_mem_wr_data_o  (prog_mem_wr_data_o),
+    .prog_mem_wr_wait_i  (prog_mem_wr_wait_i),
+    .acc_busy_i          ({fu_busy,   had_busy,     ann_busy,     snn1_busy,     snn0_busy}),
+    .acc_finished_i      ({fu_finished, had_finished, ann_finished, snn1_finished, snn0_finished}),
+    .acc_result_i        ({1'b0,      1'b0,         ann_result,   snn1_result,   snn0_result}),
+    .start_new_block_o   (sch_start_new_block),
+    .target_acc_o        (sch_target_acc),
+    .buffer_info_o       (sch_buffer_info),
+    .fill_value_o        (sch_fill_value),
+    .fill_block_size_o   (sch_fill_block_size),
+    .nxt_input_pulse_o   (nxt_input_pulse_o),
+    .nxt_output_pulse_o  (nxt_output_pulse_o),
+    .mark_buff_as_full_i (mark_buff_as_full_i),
+    .full_buff_id_i      (full_buff_id_i),
+    .full_buff_usage_i   (full_buff_usage_i)
 );
 
 // ─── Config manager ───────────────────────────────────────────────────────────

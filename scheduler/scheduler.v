@@ -20,6 +20,9 @@ module scheduler
      parameter PROG_ADDR_BITS      = 10,
      parameter PROG_DATA_BITS      = 32,
      parameter BUFF_INDX_SZ        = $clog2(NUM_BUFFERS),
+     // AXI address range for program memory writes (host loads instructions here)
+     parameter [31:0] SCH_PROG_MEM_ADDR = 32'hD000_0000,
+     parameter [31:0] SCH_PROG_MEM_MASK = 32'hFF00_0000,
      // Six buffer slots: 3 short (mode+id) + 3 long (mode+id+ntgt)
      parameter NUM_SLOTS           = 6,
      parameter MODE_SZ             = 2,
@@ -40,17 +43,21 @@ module scheduler
      // AXI bus interface:
      input  wire                       sys_req_i,
      output wire                       sys_ack_o,
+     input  wire   [31:0]              sys_addr_i,
      input  wire   [31:0]              sys_data_i,
      output wire   [31:0]              sys_data_o,
 
-     input wire                        start_program_i,
-     input wire [PROG_ADDR_BITS-1:0]   program_addr_i,
-
-     // Program memory interface:
+     // Program memory read interface (scheduler fetches instructions):
      output wire [`ADDR_SIZE-1:0]      prog_mem_addr_o,
      input  wire [PROG_DATA_BITS-1:0]  prog_mem_data_i,
      output wire                       prog_mem_req_o,
      input  wire                       prog_mem_wait_i,
+
+     // Program memory write interface (host loads program via AXI):
+     output wire                       prog_mem_wr_o,
+     output wire [PROG_ADDR_BITS-1:0]  prog_mem_wr_addr_o,
+     output wire [PROG_DATA_BITS-1:0]  prog_mem_wr_data_o,
+     input  wire                       prog_mem_wr_wait_i,
 
      // Accelerator interface:
      input wire [NUM_HW_ACCELERATORS-1:0] acc_busy_i,
@@ -70,6 +77,21 @@ module scheduler
      input wire [BUFF_INDX_SZ-1:0]        full_buff_id_i,
      input wire [TGT_COUNT_SZ-1:0]        full_buff_usage_i
     );
+
+// ------------------------------------------------------------
+// AXI address decode
+
+wire sch_ctrl_wr = sys_req_i & (sys_addr_i[31:29] == 3'b111)
+                             & (sys_addr_i[28:25] == 4'b0000);
+wire sch_stat_rd = sys_req_i & (sys_addr_i[31:30] == 2'b11)
+                             & (sys_addr_i[29:26] == 4'b0001);
+wire sch_prog_wr = sys_req_i
+                 & ((sys_addr_i & SCH_PROG_MEM_MASK) ==
+                    (SCH_PROG_MEM_ADDR & SCH_PROG_MEM_MASK))
+                 & ~prog_mem_wr_wait_i;
+
+wire do_start    = sch_ctrl_wr & (sys_addr_i[24:20] == 5'd1);
+wire do_continue = sch_ctrl_wr & (sys_addr_i[24:20] == 5'd2);
 
 // ------------------------------------------------------------
 // Entry data field offsets (lsb first, matching sch_entry):
@@ -122,6 +144,8 @@ reg  prog_running_r;
 wire prog_running_nxt;
 wire keep_fetching;
 reg  [PROG_ADDR_BITS-1:0] prog_counter_r;
+reg  [PROG_ADDR_BITS-1:0] prog_start_addr_r;   // latched by LOAD_PC write
+reg                        prog_paused_r;        // set/cleared by PAUSE/UNPAUSE
 wire [PROG_ADDR_BITS-1:0] prog_counter_nxt;
 reg  prog_stopping_r;
 wire prog_stopping_nxt;
@@ -235,12 +259,13 @@ assign do_jump  = (inst_is_jump    & inst_consumed)
 
 assign goto_nxt = inst_consumed;
 
-assign prog_counter_nxt = start_program_i ? program_addr_i
-                        : do_jump         ? jump_target
-                        : goto_nxt        ? prog_counter_r + 1
-                        :                   prog_counter_r;
+assign prog_counter_nxt = do_start    ? prog_start_addr_r
+                        : do_continue ? prog_counter_r + 1'b1
+                        : do_jump     ? jump_target
+                        : goto_nxt    ? prog_counter_r + 1
+                        :               prog_counter_r;
 
-assign prog_running_nxt = start_program_i ? 1'b1 : prog_running_r;
+assign prog_running_nxt = (do_start | do_continue) ? 1'b1 : prog_running_r;
 
 assign prog_stopping_nxt =
     (prog_running_r & inst_valid_for_decode & inst_is_stop) ? 1'b1 :
@@ -250,7 +275,8 @@ assign prog_stopping_nxt =
 // ------------------------------------------------------------
 // Instruction word hold register
 
-assign inst_word_valid_nxt = (word_ready_r      & ~inst_consumed) ? 1'b1
+assign inst_word_valid_nxt = (do_start | do_continue) ? 1'b0
+                           : (word_ready_r      & ~inst_consumed) ? 1'b1
                            : (inst_word_valid_r & ~inst_consumed) ? 1'b1
                            : (~word_ready_r     &  inst_consumed) ? 1'b0
                            : inst_word_valid_r;
@@ -261,6 +287,8 @@ begin
    begin
       prog_running_r    <= 1'b0;
       prog_counter_r    <= 'b0;
+      prog_start_addr_r <= 'b0;
+      prog_paused_r     <= 1'b0;
       prog_stopping_r   <= 1'b0;
       inst_word_valid_r <= 1'b0;
       held_inst_word_r  <= 'b0;
@@ -274,6 +302,11 @@ begin
          prog_counter_r <= prog_counter_nxt;
       if (word_ready_r & ~inst_consumed)
          held_inst_word_r <= prog_mem_data_i;
+      // AXI control register writes
+      if (sch_ctrl_wr && sys_addr_i[24:20] == 5'd0)
+         prog_start_addr_r <= sys_data_i[PROG_ADDR_BITS-1:0];   // LOAD_PC
+      if (sch_ctrl_wr && sys_addr_i[24:20] == 5'd3) prog_paused_r <= 1'b1;  // PAUSE
+      if (sch_ctrl_wr && sys_addr_i[24:20] == 5'd4) prog_paused_r <= 1'b0;  // UNPAUSE
    end
 end
 
@@ -328,6 +361,12 @@ begin
          if (pending_is_fill_r)
             fill_value_r <= inst_word;  // full 32-bit constant, no sentinel check
       end
+      // Flush in-flight two-word instruction on START or CONTINUE
+      if (do_start | do_continue)
+      begin
+         task_w2_pending_r <= 1'b0;
+         pending_is_fill_r <= 1'b0;
+      end
    end
 end
 
@@ -363,7 +402,8 @@ end
 // ------------------------------------------------------------
 // Fetch control
 
-assign keep_fetching  = prog_running_r & ~prog_stopping_r & ~inst_is_stop;
+assign keep_fetching  = prog_running_r & ~prog_stopping_r & ~inst_is_stop
+                      & ~prog_paused_r;
 assign prog_mem_addr_o = prog_counter_r;
 assign prog_mem_req_o  = keep_fetching & (~inst_valid | ~inst_word_valid_nxt);
 
@@ -556,5 +596,29 @@ sch_buffer_state #(
    .buffers_colour_o(buff_colour),
    .target_status_o(target_status)
 );
+
+// ------------------------------------------------------------
+// AXI response
+
+assign sys_ack_o = sch_ctrl_wr | sch_stat_rd | sch_prog_wr;
+
+wire [5:0] stat_reg = sys_addr_i[25:20];
+assign sys_data_o =
+    ~sch_stat_rd                  ? 32'b0
+    : (stat_reg == 6'd0)          ? {{(32-PROG_ADDR_BITS){1'b0}}, prog_counter_r}
+    : (stat_reg == 6'd1)          ? {prog_paused_r, prog_stopping_r,
+                                     {(30-NUM_HW_ACCELERATORS){1'b0}},
+                                     acc_busy_i}
+    : (stat_reg == 6'd2)          ? {{(32-NUM_BUFFERS){1'b0}}, buff_full}
+    : (stat_reg == 6'd3)          ? {{(32-NUM_BUFFERS){1'b0}}, ~buff_free & ~buff_full}
+    : (stat_reg == 6'd4)          ? {{(32-NUM_BUFFERS){1'b0}}, buff_colour}
+    :                               32'b0;
+
+// ------------------------------------------------------------
+// Program memory write side (host loads instructions via AXI)
+
+assign prog_mem_wr_o      = sch_prog_wr;
+assign prog_mem_wr_addr_o = (sys_addr_i & ~SCH_PROG_MEM_MASK) >> 2;
+assign prog_mem_wr_data_o = sys_data_i;
 
 endmodule

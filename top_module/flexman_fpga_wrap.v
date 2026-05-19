@@ -47,6 +47,8 @@ module flexman_fpga_wrap #(
     parameter [31:0] CM_BBA_MEM_MASK         = 32'hFF00_0000,
     parameter [31:0] FU_TABLE_ADDR           = 32'hC000_0000,
     parameter [31:0] FU_TABLE_ADDR_MASK      = 32'hFF00_0000,
+    parameter [31:0] SCH_PROG_MEM_ADDR       = 32'hD000_0000,
+    parameter [31:0] SCH_PROG_MEM_MASK       = 32'hFF00_0000,
     parameter NUM_BUFFERS         = 16,
     parameter NUM_HW_ACCELERATORS = 5,
     parameter WORDS_PER_CONFIG    = 4,
@@ -69,15 +71,6 @@ module flexman_fpga_wrap #(
     input  wire  [31:0] sys_addr_i,
     input  wire  [31:0] sys_data_i,
     output wire  [31:0] sys_data_o,
-
-    // ── Program control ──────────────────────────────────────────────────────
-    input  wire                      start_program_i,
-    input  wire [PROG_ADDR_BITS-1:0] program_addr_i,
-
-    // ── Program memory write port (load before start_program_i) ─────────────
-    input  wire                      prog_wr_en_i,
-    input  wire [PROG_ADDR_BITS-1:0] prog_wr_addr_i,
-    input  wire [PROG_DATA_BITS-1:0] prog_wr_data_i,
 
     // ── Buffer pre-fill / NXT pulses ─────────────────────────────────────────
     input  wire                    mark_buff_as_full_i,
@@ -112,6 +105,10 @@ localparam BBA_ABITS  = $clog2(BBA_MEM_DEPTH);
 wire [`ADDR_SIZE-1:0]      prog_mem_addr_o;
 wire                       prog_mem_req_o;
 wire [PROG_DATA_BITS-1:0]  prog_mem_data_i;
+// Program memory write bus (scheduler ← AXI → BRAM)
+wire                       prog_mem_wr_o;
+wire [PROG_ABITS-1:0]      prog_mem_wr_addr;
+wire [PROG_DATA_BITS-1:0]  prog_mem_wr_data;
 
 // Config memory
 wire                  cfg_mem_rd_o,  cfg_mem_wr_o;
@@ -314,6 +311,8 @@ flexman #(
     .CM_BBA_MEM_MASK      (CM_BBA_MEM_MASK),
     .FU_TABLE_ADDR        (FU_TABLE_ADDR),
     .FU_TABLE_ADDR_MASK   (FU_TABLE_ADDR_MASK),
+    .SCH_PROG_MEM_ADDR    (SCH_PROG_MEM_ADDR),
+    .SCH_PROG_MEM_MASK    (SCH_PROG_MEM_MASK),
     .NUM_BUFFERS          (NUM_BUFFERS),
     .NUM_HW_ACCELERATORS  (NUM_HW_ACCELERATORS),
     .WORDS_PER_CONFIG     (WORDS_PER_CONFIG),
@@ -338,12 +337,14 @@ flexman #(
     .sys_data_o                 (sys_data_int),
 
     // Program memory
-    .start_program_i            (start_program_i),
-    .program_addr_i             (program_addr_i),
     .prog_mem_addr_o            (prog_mem_addr_o),
     .prog_mem_data_i            (prog_mem_data_i),
     .prog_mem_req_o             (prog_mem_req_o),
     .prog_mem_wait_i            (1'b0),
+    .prog_mem_wr_o              (prog_mem_wr_o),
+    .prog_mem_wr_addr_o         (prog_mem_wr_addr),
+    .prog_mem_wr_data_o         (prog_mem_wr_data),
+    .prog_mem_wr_wait_i         (1'b0),
 
     // Config memory
     .cfg_mem_rd_o               (cfg_mem_rd_o),
@@ -585,12 +586,12 @@ flexman #(
 
 // ─── System memories ──────────────────────────────────────────────────────────
 
-// Program memory: host writes instructions, scheduler reads them.
+// Program memory: scheduler loads via AXI (prog_mem_wr_*), reads instructions.
 bram_sdp #(.DEPTH(PROG_MEM_DEPTH), .DATA_W(PROG_DATA_BITS)) u_prog_mem (
     .clk   (clk),
-    .we    (prog_wr_en_i),
-    .waddr (prog_wr_addr_i),
-    .din   (prog_wr_data_i),
+    .we    (prog_mem_wr_o),
+    .waddr (prog_mem_wr_addr),
+    .din   (prog_mem_wr_data),
     .raddr (prog_mem_addr_o[PROG_ABITS-1:0]),
     .dout  (prog_mem_data_i)
 );
