@@ -5,14 +5,16 @@
 // ================================================================
 // tb_update_state_for_neuron (annAcc variant)
 //
-// 2-cycle pipeline:
-//   Cycle 1 (neuron_valid_i=1, state_cycle2_r=0):
+// 3-cycle pipeline:
+//   ST_IDLE (neuron_valid_i=1):
 //     thresh_op=00 (RELU): act_out = potential_i < 0 ? 0 : potential_i
 //     thresh_op=01 (LUT):  act_out = zero_extend(lut_result_i)
 //     thresh_op=10 (ABS):  act_out = |potential_i|, sat at 0x7FFFFFFF
-//     act_out_r registered.
-//   Cycle 2 (state_cycle2_r=1, result_valid_o=1):
-//     decayed_act = act_out_r * pot_decay_mult >> 32  (Q0.32)
+//     act_out_r registered on IDLE->C1 edge.
+//   ST_C1:
+//     act_out_r * pot_decay_mult >> 32 -> decayed_act_r  (registered on C1->C2)
+//   ST_C2 (result_valid_o=1):
+//     decayed_act_o = decayed_act_r
 //     act_out_o = act_out_r
 //
 // Decay factor 0x80000000 = 0.5 in Q0.32 → floor(value / 2).
@@ -49,7 +51,7 @@ wire                     result_valid;
 wire [POT_W-1:0]         act_out;
 wire [POT_W-1:0]         decayed_act;
 
-update_state_for_neuron #(
+ann_update_state_for_neuron #(
     .POT_SLICE_BITS   (POT_W),
     .THRESH_SLICE_BITS(THRESH_W))
 dut (
@@ -72,7 +74,8 @@ always  #5 clk = ~clk;
 
 integer errors;
 
-// Run one neuron: present inputs for one cycle, capture outputs in cycle 2.
+// Run one neuron: present inputs for one cycle, poll result_valid_o so
+// the task works regardless of pipeline depth.
 task run_neuron;
     input signed [POT_W-1:0]   pot_in;
     input        [THRESH_W-1:0] lut_in;
@@ -86,15 +89,18 @@ task run_neuron;
         thresh_op    = thr_op;
         neuron_valid = 1;
         result_taken = 0;
-        @(posedge clk); #1;   // Cycle 1: act_out_r latched
+        @(posedge clk); #1;   // IDLE->C1: act_out_r latched
 
         neuron_valid = 0;
-        // Cycle 2 is already in progress: sample outputs
+        // Wait for result (handles any pipeline depth)
+        while (!result_valid) @(posedge clk); #1;
+
+        // result_valid_o=1: sample outputs
         act_out_r = act_out;
         decayed_r = decayed_act;
 
         result_taken = 1;
-        @(posedge clk); #1;   // consume result
+        @(posedge clk); #1;   // consume result, C2->IDLE
         result_taken = 0;
         @(posedge clk); #1;   // idle
     end

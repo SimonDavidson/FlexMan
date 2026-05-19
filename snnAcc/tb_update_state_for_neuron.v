@@ -10,16 +10,17 @@
 // saturation literals (32'h7FFFFFFF / 32'h80000000) work
 // correctly.
 //
-// The module is a 2-cycle pipeline:
-//   Cycle 1 (neuron_valid_i=1, state_cycle2_r=0):
-//     - new_potential  = potential_i + bias_curr_i + syn_curr_i
-//     - saturated_potential registered → potential_r
-//     - decayed_syn_curr = syn_curr_i * syn_curr_decay_mult >> 32
-//       registered → decayed_syn_curr_r
-//   Cycle 2 (state_cycle2_r=1, result_valid_o=1):
-//     - decayed_potential = potential_r * pot_decay_mult >> 32
-//     - spike = (potential_r >= threshold_i)
-//     - potential_o  = spike ? 0 : decayed_potential
+// The module is a 3-cycle pipeline:
+//   ST_IDLE (neuron_valid_i=1):
+//     - new_potential  = potential_i + bias_curr_i + syn_curr_i  (combinatorial)
+//     - saturated_potential → potential_r  (registered on IDLE→C1)
+//     - threshold_i → threshold_r          (registered on IDLE→C1)
+//     - syn_curr_i * syn_curr_decay_mult >> 32 → decayed_syn_curr_r (registered on IDLE→C1)
+//   ST_C1:
+//     - potential_r * pot_decay_mult >> 32 → decayed_potential_r  (registered on C1→C2)
+//     - potential_r >= threshold_r → spike_r                      (registered on C1→C2)
+//   ST_C2 (result_valid_o=1):
+//     - potential_o  = spike_r ? 0 : decayed_potential_r
 //     - syn_curr_o   = decayed_syn_curr_r
 //
 // Decay factor 32'h80000000 = 0.5 in Q0.32:
@@ -84,8 +85,8 @@ always  #5 clk = ~clk;
 integer errors;
 
 // Apply one neuron input and capture output.
-// Presents neuron_valid for one cycle, then checks result after one
-// more clock edge (when state_cycle2_r=1 and result_valid_o=1).
+// Presents neuron_valid for one cycle, then polls result_valid_o so
+// the task works regardless of pipeline depth.
 task run_neuron;
     input signed [W-1:0] sc, pot, bias, thresh;
     input        [W-1:0] sc_dec, pot_dec;
@@ -101,16 +102,19 @@ task run_neuron;
 
         neuron_valid = 1;
         result_taken = 0;
-        @(posedge clk); #1;   // Cycle 1: inputs captured, state_cycle2_r→1
+        @(posedge clk); #1;   // IDLE→C1: syn multiply + potential captured
 
         neuron_valid = 0;
-        // Cycle 2: result_valid_o=1, sample outputs
+        // Wait for result (handles any pipeline depth)
+        while (!result_valid) @(posedge clk); #1;
+
+        // result_valid_o=1: sample outputs
         pot_out = potential_o;
         sc_out  = syn_curr_o;
         spk_out = spike;
 
         result_taken = 1;
-        @(posedge clk); #1;   // Consume result, state_cycle2_r→0
+        @(posedge clk); #1;   // Consume result, C2→IDLE
         result_taken = 0;
         @(posedge clk); #1;   // One idle cycle
     end
