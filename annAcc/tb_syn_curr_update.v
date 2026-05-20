@@ -67,7 +67,7 @@ wire                         weight_index_taken;
 wire                         weight_value_taken;
 reg  [IN_DATA_BITS-1:0]      act_value;
 
-syn_curr_update #(
+ann_syn_curr_update #(
     .X_OUTPUT_SZ       (X_OUTPUT_SZ),
     .Y_OUTPUT_SZ       (Y_OUTPUT_SZ),
     .IN_DATA_BITS      (IN_DATA_BITS),
@@ -348,6 +348,122 @@ initial begin
     weight_value_valid = 0;
     @(posedge clk); #1;
     check_eq(sram[5], 32'd8, "T6 sram[5] MAC act=4 weight=-3");
+
+    // ----------------------------------------------------------
+    // Test 7: 4 back-to-back beats, act_value held stable.
+    // Verifies the multi-beat invariant: when spike_processing
+    // holds act_value_i stable across a whole weight pass, every
+    // beat MACs against the same activation.  Valids stay high
+    // across all 4 beats; only (idx, x, y, weight) changes between
+    // beats.  act = 3 throughout.
+    //
+    //   sram init [10]=40 [11]=44 [12]=48 [13]=52
+    //   beat 0: (x=2,y=2)→addr 10, w=+2  → 40 + 3*2  = 46
+    //   beat 1: (x=3,y=2)→addr 11, w=+4  → 44 + 3*4  = 56
+    //   beat 2: (x=0,y=3)→addr 12, w=+5  → 48 + 3*5  = 63
+    //   beat 3: (x=1,y=3)→addr 13, w=-1  → 52 + 3*-1 = 49  (last)
+    // ----------------------------------------------------------
+    $display("Test 7: 4 back-to-back beats, act stable");
+    running = 0;
+    @(posedge clk); #1;
+    running   = 1;
+    act_value = 32'd3;
+    @(posedge clk); #1;
+
+    weight_mode        = 2'b00;
+    weight_index_valid = 1;
+    weight_value_valid = 1;
+
+    // beat 0
+    weight_index_x    = 4'd2;
+    weight_index_y    = 4'd2;
+    weight_index      = 5'd10;
+    weight_index_last = 0;
+    weight_value      = 32'd2;
+    wait_wr_done;
+
+    // beat 1 -- keep valids high, just update payload
+    weight_index_x    = 4'd3;
+    weight_index_y    = 4'd2;
+    weight_index      = 5'd11;
+    weight_value      = 32'd4;
+    wait_wr_done;
+
+    // beat 2
+    weight_index_x    = 4'd0;
+    weight_index_y    = 4'd3;
+    weight_index      = 5'd12;
+    weight_value      = 32'd5;
+    wait_wr_done;
+
+    // beat 3 (last)
+    weight_index_x    = 4'd1;
+    weight_index_y    = 4'd3;
+    weight_index      = 5'd13;
+    weight_index_last = 1;
+    weight_value      = 32'hFFFF_FFFF;   // -1 signed
+    wait_wr_done;
+
+    weight_index_valid = 0;
+    weight_value_valid = 0;
+    weight_index_last  = 0;
+    @(posedge clk); #1;
+    check_eq(sram[10], 32'd46, "T7 sram[10] beat 0 act=3 w=+2");
+    check_eq(sram[11], 32'd56, "T7 sram[11] beat 1 act=3 w=+4");
+    check_eq(sram[12], 32'd63, "T7 sram[12] beat 2 act=3 w=+5");
+    check_eq(sram[13], 32'd49, "T7 sram[13] beat 3 act=3 w=-1");
+
+    // ----------------------------------------------------------
+    // Test 8: act_value deliberately changes between back-to-back
+    // beats.  syn_curr_update samples act_value_i combinationally
+    // on the write cycle (mac_product = weight_value_r * act_value_i,
+    // weight registered, act not).  So changing act in the gap
+    // between beats means beat 0 sees the old act and beat 1 sees
+    // the new act.  Locks down that the upstream contract
+    // (spike_processing holds act stable across a pass) is what
+    // makes the MAC correct, and that this DUT does *not* latch
+    // act on accept.
+    //
+    //   sram init [20]=80 [21]=84
+    //   beat 0: act=2, w=+10 → 80 + 2*10 = 100
+    //   beat 1: act=7, w=+3  → 84 + 7*3  = 105  (last)
+    // ----------------------------------------------------------
+    $display("Test 8: act changes between beats");
+    running = 0;
+    @(posedge clk); #1;
+    running   = 1;
+    act_value = 32'd2;
+    @(posedge clk); #1;
+
+    weight_mode        = 2'b00;
+    weight_index_valid = 1;
+    weight_value_valid = 1;
+
+    // beat 0 (act=2)
+    weight_index_x    = 4'd0;
+    weight_index_y    = 4'd5;
+    weight_index      = 5'd20;
+    weight_index_last = 0;
+    weight_value      = 32'd10;
+    wait_wr_done;
+
+    // beat 1 (act=7) -- change act in the gap between beat 0's
+    // write and beat 1's accept; beat 1's write cycle samples the
+    // new act.
+    act_value         = 32'd7;
+    weight_index_x    = 4'd1;
+    weight_index_y    = 4'd5;
+    weight_index      = 5'd21;
+    weight_index_last = 1;
+    weight_value      = 32'd3;
+    wait_wr_done;
+
+    weight_index_valid = 0;
+    weight_value_valid = 0;
+    weight_index_last  = 0;
+    @(posedge clk); #1;
+    check_eq(sram[20], 32'd100, "T8 sram[20] beat 0 act=2 w=+10");
+    check_eq(sram[21], 32'd105, "T8 sram[21] beat 1 act=7 w=+3");
 
     $display("=== tb_syn_curr_update: %0d failure(s) ===", errors);
     if (errors == 0) $display("PASS"); else $display("FAIL");
