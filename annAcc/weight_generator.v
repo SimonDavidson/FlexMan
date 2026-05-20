@@ -327,7 +327,7 @@ always @ (posedge clk)
 assign running_weight_pass_o = doing_weight_pass_r;
 
 assign weight_index_valid_full   = is_fullConn   & running_i & doing_weight_pass_r
-                                 & ~weight_pass_done_r;
+                                 & ~weight_pass_done_r & act_data_valid_i;
 assign weight_index_valid_conv   = is_convolution & running_i & doing_weight_pass_r
                                  & ~weight_pass_done_r & act_data_valid_i & ~oob_skip;
 assign weight_index_valid_sparse = is_sparseConn & running_i & doing_weight_pass_r
