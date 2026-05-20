@@ -228,6 +228,7 @@ module acc_snn_processor # (
     reg                   [31:0] np_pot_decay_mult_r;
     // [0]=sub_on_fire  [1]=clear_syn_curr  [2]=clear_pot
     reg                    [2:0] np_mode_r;
+    reg                          sp_skip_neuron_r;  // 1 = skip neuron_processing after spike_processing
 
     //================================================================
     // AXI config register decode
@@ -274,6 +275,8 @@ module acc_snn_processor # (
     //   8'h40  bin_point_syn_curr_r
     //   8'h68  np_syn_curr_decay_mult_r
     //   8'h6C  np_pot_decay_mult_r
+    //   8'h98  np_mode_r              [2:0]  sub_on_fire / clear_syn_curr / clear_pot
+    //   8'h9C  sp_skip_neuron_r       [0]    1 = skip neuron_processing after spike_processing
     //================================================================
     wire addr_match = (sys_addr_i[31:16] == TGT_CONFIG_BASE_ADDR[31:16]);
 
@@ -315,6 +318,7 @@ module acc_snn_processor # (
             np_syn_curr_decay_mult_r <= 32'b0;
             np_pot_decay_mult_r      <= 32'b0;
             np_mode_r               <= 3'b0;
+            sp_skip_neuron_r        <= 1'b0;
         end else if (sys_req_i & addr_match) begin
             case (sys_addr_i[7:0])
                 8'h00: sp_act_base_addr_r      <= sys_data_i[MEM_ADDR_BITS-1:0];
@@ -351,6 +355,7 @@ module acc_snn_processor # (
                 8'h68: np_syn_curr_decay_mult_r  <= sys_data_i[31:0];
                 8'h6C: np_pot_decay_mult_r        <= sys_data_i[31:0];
                 8'h98: np_mode_r                 <= sys_data_i[2:0];
+                8'h9C: sp_skip_neuron_r          <= sys_data_i[0];
                 default: ; // ignore unrecognised addresses
             endcase
         end
@@ -414,8 +419,10 @@ module acc_snn_processor # (
     wire sp_acc_finished;     // triggers neuron_processing
     wire np_neuron_proc_finished;
     wire np_acc_busy;
+    wire np_acc_finished;
 
-    assign acc_busy_o = sp_acc_busy | np_acc_busy;
+    assign acc_busy_o     = sp_acc_busy | np_acc_busy;
+    assign acc_finished_o = sp_skip_neuron_r ? sp_acc_finished : np_acc_finished;
 
     //================================================================
     // spike_processing instantiation
@@ -563,13 +570,13 @@ module acc_snn_processor # (
         .sub_on_fire_i          (np_mode_r[0]),
         .clear_pot_i            (np_mode_r[2]),
 
-        // Scheduler – triggered by spike_processing completion
-        .start_new_block_i      (sp_acc_finished),
+        // Scheduler – triggered by spike_processing completion (gated by sp_skip_neuron_r)
+        .start_new_block_i      (sp_acc_finished & ~sp_skip_neuron_r),
         .target_acc_i           (target_acc_i),
         .buffer_info_i          (buffer_info_i),
         .neuron_proc_finished_o (np_neuron_proc_finished),
         .acc_busy_o             (np_acc_busy),
-        .acc_finished_o         (acc_finished_o),
+        .acc_finished_o         (np_acc_finished),
 
         // Buffer addresses
         .src1_buff_addr_i       (np_src1_buff_addr_i),
