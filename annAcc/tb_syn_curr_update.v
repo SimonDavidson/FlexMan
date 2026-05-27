@@ -415,14 +415,13 @@ initial begin
 
     // ----------------------------------------------------------
     // Test 8: act_value deliberately changes between back-to-back
-    // beats.  syn_curr_update samples act_value_i combinationally
-    // on the write cycle (mac_product = weight_value_r * act_value_i,
-    // weight registered, act not).  So changing act in the gap
-    // between beats means beat 0 sees the old act and beat 1 sees
-    // the new act.  Locks down that the upstream contract
-    // (spike_processing holds act stable across a pass) is what
-    // makes the MAC correct, and that this DUT does *not* latch
-    // act on accept.
+    // beats.  syn_curr_update latches both weight_value_i and
+    // act_value_i on the accept cycle and uses the registered
+    // copies for the MAC.  Changing act in the gap between beats —
+    // i.e. before the next accept fires — means beat 0 captured
+    // the old act and beat 1 captures the new act.  See T9 for the
+    // stricter regression that pins down act-latched-on-accept
+    // (changing act between accept and write of the same beat).
     //
     //   sram init [20]=80 [21]=84
     //   beat 0: act=2, w=+10 → 80 + 2*10 = 100
@@ -464,6 +463,53 @@ initial begin
     @(posedge clk); #1;
     check_eq(sram[20], 32'd100, "T8 sram[20] beat 0 act=2 w=+10");
     check_eq(sram[21], 32'd105, "T8 sram[21] beat 1 act=7 w=+3");
+
+    // ----------------------------------------------------------
+    // Test 9: poison act_value AFTER capture, BEFORE write.
+    // Regression check that act_value is latched at the same time
+    // as weight_value (both captured on the accept cycle).  If act
+    // were sampled live on the write cycle (the pre-fix behaviour),
+    // this test would write 88 + 99*4 = 484 into sram[22] instead
+    // of the correct 88 + 5*4 = 108.
+    //
+    //   addr = y*out_x_len + x = 5*4 + 2 = 22
+    //   sram[22] init = 88
+    //   capture: act=5, w=+4   → MAC = 5*4 = 20
+    //   then act poisoned to 99 before the write cycle
+    //   expected: 88 + 20 = 108  (would be 484 with live-act bug)
+    // ----------------------------------------------------------
+    $display("Test 9: poison act after capture, before write");
+    running = 0;
+    @(posedge clk); #1;
+    running   = 1;
+    act_value = 32'd5;
+    @(posedge clk); #1;
+
+    weight_mode        = 2'b00;
+    weight_index_valid = 1;
+    weight_value_valid = 1;
+    weight_index_x     = 4'd2;
+    weight_index_y     = 4'd5;
+    weight_index       = 5'd22;
+    weight_index_last  = 1;
+    weight_value       = 32'd4;
+
+    @(posedge clk); #1;        // CAPTURE cycle: weight_value_r=4, act_value_r=5
+
+    // Poison act_value AFTER capture, BEFORE the write commits.
+    act_value = 32'd99;
+
+    @(posedge clk); #1;        // WRITE cycle: sram[22] gets sampled here
+    // Drop valids to prevent any further captures
+    weight_index_valid = 0;
+    weight_value_valid = 0;
+    weight_index_last  = 0;
+
+    @(posedge clk); #1;        // req_pending clears
+    check_eq(sram[22], 32'd108, "T9 sram[22] act latched (not live)");
+
+    // Restore act_value for any future tests
+    act_value = 32'd1;
 
     $display("=== tb_syn_curr_update: %0d failure(s) ===", errors);
     if (errors == 0) $display("PASS"); else $display("FAIL");

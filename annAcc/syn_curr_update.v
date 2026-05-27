@@ -60,6 +60,8 @@ reg                                      req_pending_r;
 reg                     [`ADDR_SIZE-1:0] syn_curr_addr_r;
 wire                  [IN_DATA_BITS-1:0] aligned_weight_value;
 reg                                      syn_curr_update_running_r;
+reg              [WEIGHT_BITS-1:0] weight_value_r;
+reg             [IN_DATA_BITS-1:0] act_value_r;
 wire                                     syn_curr_update_running_nxt;
 
 always @ (posedge clk)
@@ -106,6 +108,8 @@ begin
       syn_curr_addr_r <=  'hABABAB;
       syn_curr_flat_index_r <= 'h0;
       req_pending_r   <= 1'b0;
+      weight_value_r  <= 'h0;
+      act_value_r     <= 'h0;
    end
    else if (weight_index_valid_i & weight_value_valid_i & ~req_pending_r & ~syn_curr_mem_wait_i)
    begin
@@ -113,6 +117,8 @@ begin
 	   req_pending_r   <= 1'b1;
            syn_curr_addr_r <= weight_index_i;
            syn_curr_flat_index_r <= syn_curr_flat_index;
+           weight_value_r  <= weight_value_i;
+           act_value_r     <= act_value_i;
    end
    else if (req_pending_r & ~syn_curr_mem_wait_i)
 	   req_pending_r  <= 1'b0;
@@ -136,11 +142,11 @@ assign syn_curr_mem_rd_o = (syn_curr_mem_wr_o)    ? 1'b0 :
 // Update syn_curr value using given weight
 //
 
-assign aligned_weight_value = {{(IN_DATA_BITS-WEIGHT_BITS){weight_value_i[WEIGHT_BITS-1]}}, weight_value_i[WEIGHT_BITS-1:0]};
+assign aligned_weight_value = {{(IN_DATA_BITS-WEIGHT_BITS){weight_value_r[WEIGHT_BITS-1]}}, weight_value_r[WEIGHT_BITS-1:0]};
 
 // MAC: accumulate act_value (unsigned) * weight (signed) into syn_curr
 wire signed [IN_DATA_BITS*2:0] mac_product;
-assign mac_product = $signed(aligned_weight_value) * $signed({1'b0, act_value_i});
+assign mac_product = $signed(aligned_weight_value) * $signed({1'b0, act_value_r});
 assign syn_curr_mem_data_o = syn_curr_mem_data_i + mac_product[IN_DATA_BITS-1:0];
 
 //////////////////////////////////////////////////////////////////////////////
