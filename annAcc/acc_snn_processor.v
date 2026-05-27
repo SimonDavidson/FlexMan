@@ -178,7 +178,7 @@ module ann_processor # (
     reg   [SP_ELEMS_PER_ROW-1:0] sp_weights_per_word_r;
     reg [SP_ROWS_PER_NEURON-1:0] sp_rows_per_neuron_r;
     reg   [SP_WEIGHT_IDX_SZ-1:0] sp_weight_idx_sz_r;
-    reg                    [1:0] sp_weight_mode_r;
+    (* MAX_FANOUT = "20" *) reg [1:0] sp_weight_mode_r;
     reg    [SP_X_KERNEL_SZ-1:0]  sp_x_kernel_len_r;
     reg    [SP_Y_KERNEL_SZ-1:0]  sp_y_kernel_len_r;
     reg [SP_X_KERNEL_OFF_SZ-1:0] sp_x_kernel_offset_r;
@@ -208,6 +208,7 @@ module ann_processor # (
     //----------------------------------------------------------------
     reg                    [4:0] bin_point_syn_curr_r;
     reg                   [31:0] np_pot_decay_mult_r;
+    reg                          sp_skip_neuron_r;     // 1 = skip neuron_processing after spike_processing
 
     //================================================================
     // AXI config register decode
@@ -238,6 +239,7 @@ module ann_processor # (
     //   shared:
     //   8'h40  bin_point_syn_curr_r
     //   8'h6C  np_pot_decay_mult_r
+    //   8'h9C  sp_skip_neuron_r       [0]    1 = skip neuron_processing after spike_processing
     //================================================================
     wire addr_match = (sys_addr_i[31:16] == TGT_CONFIG_BASE_ADDR[31:16]);
 
@@ -277,6 +279,7 @@ module ann_processor # (
             np_bias_curr_sz_r       <= 3'b0;
             np_pot_sz_r             <= {NP_POT_SLICE_SZ{1'b0}};
             np_thresh_op_r          <= 2'b0;
+            sp_skip_neuron_r        <= 1'b0;
             bin_point_syn_curr_r    <= 5'b0;
             np_pot_decay_mult_r     <= 32'b0;
         end else if (sys_req_i & addr_match) begin
@@ -315,6 +318,7 @@ module ann_processor # (
                 8'h40: bin_point_syn_curr_r    <= sys_data_i[4:0];
                 8'h6C: np_pot_decay_mult_r     <= sys_data_i[31:0];
                 8'hA0: np_thresh_op_r          <= sys_data_i[1:0];
+                8'h9C: sp_skip_neuron_r        <= sys_data_i[0];
                 default: ;
             endcase
         end
@@ -370,8 +374,10 @@ module ann_processor # (
     wire sp_acc_finished;
     wire np_neuron_proc_finished;
     wire np_acc_busy;
+    wire np_acc_finished;
 
-    assign acc_busy_o = sp_acc_busy | np_acc_busy;
+    assign acc_busy_o     = sp_acc_busy | np_acc_busy;
+    assign acc_finished_o = sp_skip_neuron_r ? sp_acc_finished : np_acc_finished;
 
     //================================================================
     // spike_processing instantiation
@@ -511,12 +517,12 @@ module ann_processor # (
         .pot_decay_mult_i       (np_pot_decay_mult_r),
 
         // Scheduler – triggered by spike_processing completion
-        .start_new_block_i      (sp_acc_finished),
+        .start_new_block_i      (sp_acc_finished & ~sp_skip_neuron_r),
         .target_acc_i           (target_acc_i),
         .buffer_info_i          (buffer_info_i),
         .neuron_proc_finished_o (np_neuron_proc_finished),
         .acc_busy_o             (np_acc_busy),
-        .acc_finished_o         (acc_finished_o),
+        .acc_finished_o         (np_acc_finished),
 
         // Buffer addresses
         .src1_buff_addr_i       (np_src1_buff_addr_i),

@@ -230,6 +230,7 @@ module acc_fmiSnn_processor # (
     // Shared config registers
     reg                    [4:0] bin_point_syn_curr_r;
     reg                    [2:0] np_mode_r;   // [0]=sub_on_fire [1]=clear_syn_curr [2]=clear_pot
+    reg                          sp_skip_neuron_r;  // 1 = skip neuron_processing after spike_processing
 
     // =========================================================================
     // AXI config register decode
@@ -263,6 +264,7 @@ module acc_fmiSnn_processor # (
     //   0x40  bin_point_syn_curr_r
     //   0x64  np_spike_base_addr_r
     //   0x98  np_mode_r
+    //   0x9C  sp_skip_neuron_r       [0]    1 = skip neuron_processing after spike_processing
     //   0xA0  np_dcy_syn_base_addr_r   (new)
     //   0xA4  np_dcy_mem_base_addr_r   (new)
     //   0xA8  np_has_ada_r             (new)
@@ -301,6 +303,7 @@ module acc_fmiSnn_processor # (
             np_pot_sz_r              <= {NP_POT_SLICE_SZ{1'b0}};
             bin_point_syn_curr_r     <= 5'b0;
             np_mode_r                <= 3'b0;
+            sp_skip_neuron_r         <= 1'b0;
             np_dcy_syn_base_addr_r   <= {MEM_ADDR_BITS{1'b0}};
             np_dcy_mem_base_addr_r   <= {MEM_ADDR_BITS{1'b0}};
             np_has_ada_r             <= 1'b0;
@@ -335,6 +338,7 @@ module acc_fmiSnn_processor # (
                 8'h3C: np_pot_sz_r             <= sys_data_i[NP_POT_SLICE_SZ-1:0];
                 8'h40: bin_point_syn_curr_r    <= sys_data_i[4:0];
                 8'h98: np_mode_r               <= sys_data_i[2:0];
+                8'h9C: sp_skip_neuron_r        <= sys_data_i[0];
                 8'hA0: np_dcy_syn_base_addr_r  <= sys_data_i[MEM_ADDR_BITS-1:0];
                 8'hA4: np_dcy_mem_base_addr_r  <= sys_data_i[MEM_ADDR_BITS-1:0];
                 8'hA8: np_has_ada_r            <= sys_data_i[0];
@@ -380,8 +384,10 @@ module acc_fmiSnn_processor # (
     // =========================================================================
     wire sp_acc_busy, sp_acc_finished;
     wire np_neuron_proc_finished, np_acc_busy;
+    wire np_acc_finished;
 
-    assign acc_busy_o = sp_acc_busy | np_acc_busy;
+    assign acc_busy_o     = sp_acc_busy | np_acc_busy;
+    assign acc_finished_o = sp_skip_neuron_r ? sp_acc_finished : np_acc_finished;
 
     // =========================================================================
     // spike_processing instantiation
@@ -514,12 +520,12 @@ module acc_fmiSnn_processor # (
         .b_eff_base_addr_i      (np_b_eff_base_addr_r),
         .dcy_ada_base_addr_i    (np_dcy_ada_base_addr_r),
         .scl_ada_base_addr_i    (np_scl_ada_base_addr_r),
-        .start_new_block_i      (sp_acc_finished),
+        .start_new_block_i      (sp_acc_finished & ~sp_skip_neuron_r),
         .target_acc_i           (target_acc_i),
         .buffer_info_i          (buffer_info_i),
         .neuron_proc_finished_o (np_neuron_proc_finished),
         .acc_busy_o             (np_acc_busy),
-        .acc_finished_o         (acc_finished_o),
+        .acc_finished_o         (np_acc_finished),
         .src1_buff_addr_i       (np_src1_buff_addr_i),
         .src2_buff_addr_i       (np_src2_buff_addr_i),
         .src3_buff_addr_i       (np_src3_buff_addr_i),
