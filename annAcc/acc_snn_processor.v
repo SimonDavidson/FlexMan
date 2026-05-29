@@ -61,6 +61,7 @@ module ann_processor # (
     parameter NP_LUT_SLICE_BITS       = 8,
     parameter NP_POT_SLICE_SZ         = 3,
     parameter NP_POT_SLICE_BITS       = 32,
+    parameter NP_POT_DECAY_BITS       = 32,
     parameter MEM_ADDR_BITS           = `ADDR_SIZE
 )(
     input  wire clk,
@@ -498,6 +499,7 @@ module ann_processor # (
         .LUT_SLICE_BITS       (NP_LUT_SLICE_BITS),
         .POT_SLICE_SZ         (NP_POT_SLICE_SZ),
         .POT_SLICE_BITS       (NP_POT_SLICE_BITS),
+        .POT_DECAY_BITS       (NP_POT_DECAY_BITS),
         .MEM_ADDR_BITS        (MEM_ADDR_BITS)
     ) u_neuron_processing (
         .clk                    (clk),
@@ -514,7 +516,7 @@ module ann_processor # (
         .lut_out_sz_i           (np_bias_curr_sz_r),  // np_bias_curr_sz_r reused
         .act_out_sz_i           (np_pot_sz_r),        // same config reg for act width
         .thresh_op_i            (np_thresh_op_r),
-        .pot_decay_mult_i       (np_pot_decay_mult_r),
+        .pot_decay_mult_i       (np_pot_decay_mult_r[NP_POT_DECAY_BITS-1:0]),
 
         // Scheduler – triggered by spike_processing completion
         .start_new_block_i      (sp_acc_finished & ~sp_skip_neuron_r),

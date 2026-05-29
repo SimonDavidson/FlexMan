@@ -80,6 +80,8 @@ module acc_snn_processor # (
     parameter NP_SPIKE_DATA_IDX_SZ    = 5,
     parameter NP_SPIKE_SLICE_SZ       = 3,
     parameter NP_SPIKE_SLICE_BITS     = 8,
+    parameter NP_SYN_DECAY_BITS       = 32,
+    parameter NP_POT_DECAY_BITS       = 32,
     parameter MEM_ADDR_BITS           = `ADDR_SIZE
 )(
     input  wire clk,
@@ -549,6 +551,8 @@ module acc_snn_processor # (
         .SPIKE_DATA_IDX_SZ    (NP_SPIKE_DATA_IDX_SZ),
         .SPIKE_SLICE_SZ       (NP_SPIKE_SLICE_SZ),
         .SPIKE_SLICE_BITS     (NP_SPIKE_SLICE_BITS),
+        .SYN_DECAY_BITS       (NP_SYN_DECAY_BITS),
+        .POT_DECAY_BITS       (NP_POT_DECAY_BITS),
         .MEM_ADDR_BITS        (MEM_ADDR_BITS)
     ) u_neuron_processing (
         .clk                    (clk),
@@ -565,8 +569,8 @@ module acc_snn_processor # (
         .bias_curr_sz_i         (np_bias_curr_sz_r),
         .pot_sz_i               (np_pot_sz_r),
         .bin_point_syn_curr_i   (bin_point_syn_curr_r),
-        .syn_curr_decay_mult_i  (np_syn_curr_decay_mult_r),
-        .pot_decay_mult_i       (np_pot_decay_mult_r),
+        .syn_curr_decay_mult_i  (np_syn_curr_decay_mult_r[NP_SYN_DECAY_BITS-1:0]),
+        .pot_decay_mult_i       (np_pot_decay_mult_r[NP_POT_DECAY_BITS-1:0]),
         .sub_on_fire_i          (np_mode_r[0]),
         .clear_pot_i            (np_mode_r[2]),
 
