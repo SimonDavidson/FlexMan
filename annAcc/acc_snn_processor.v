@@ -241,6 +241,15 @@ module ann_processor # (
     //   8'h40  bin_point_syn_curr_r
     //   8'h6C  np_pot_decay_mult_r
     //   8'h9C  sp_skip_neuron_r       [0]    1 = skip neuron_processing after spike_processing
+    //
+    //   per-task control word (lives inside the cfg_mem push window):
+    //   8'h10  task_ctrl              [0]    sp_skip_neuron
+    //                                 [3:1]  reserved (np_mode on LIF accelerators)
+    //                                 [6:4]  reserved (sp_act_sz, future)
+    //                                 [8:7]  reserved (np_thresh_op, future)
+    //          Writes here drive the same flop as 0x9C — last write wins.
+    //          config_manager pushes cfg_mem word 4 here on every TASK
+    //          dispatch, so per-cfg_id rotation works automatically.
     //================================================================
     wire addr_match = (sys_addr_i[31:16] == TGT_CONFIG_BASE_ADDR[31:16]);
 
@@ -320,6 +329,7 @@ module ann_processor # (
                 8'h6C: np_pot_decay_mult_r     <= sys_data_i[31:0];
                 8'hA0: np_thresh_op_r          <= sys_data_i[1:0];
                 8'h9C: sp_skip_neuron_r        <= sys_data_i[0];
+                8'h10: sp_skip_neuron_r        <= sys_data_i[0];
                 default: ;
             endcase
         end
@@ -456,7 +466,7 @@ module ann_processor # (
         .sparse_count_i         (sp_sparse_count_r),
         .act_slice_sz_i         (sp_act_sz_r),
 
-        // Scheduler — gated dispatch (see latch above)
+        // Scheduler — gated dispatch
         .start_new_block_i      (my_dispatch),
         .target_acc_i           (dispatched_target_acc_r),
         .buffer_info_i          (buffer_info_i),

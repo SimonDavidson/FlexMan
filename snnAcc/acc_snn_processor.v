@@ -279,6 +279,15 @@ module acc_snn_processor # (
     //   8'h6C  np_pot_decay_mult_r
     //   8'h98  np_mode_r              [2:0]  sub_on_fire / clear_syn_curr / clear_pot
     //   8'h9C  sp_skip_neuron_r       [0]    1 = skip neuron_processing after spike_processing
+    //
+    // per-task control word (lives inside the cfg_mem push window):
+    //   8'h10  task_ctrl              [0]    sp_skip_neuron
+    //                                 [3:1]  np_mode
+    //                                 [6:4]  reserved (sp_act_sz on annAcc/ipSnnAcc, future)
+    //                                 [8:7]  reserved (np_thresh_op on annAcc, future)
+    //          Writes here drive the same flops as 0x98/0x9C — last write
+    //          wins. config_manager pushes cfg_mem word 4 here on every
+    //          TASK dispatch, so per-cfg_id rotation works automatically.
     //================================================================
     wire addr_match = (sys_addr_i[31:16] == TGT_CONFIG_BASE_ADDR[31:16]);
 
@@ -358,6 +367,10 @@ module acc_snn_processor # (
                 8'h6C: np_pot_decay_mult_r        <= sys_data_i[31:0];
                 8'h98: np_mode_r                 <= sys_data_i[2:0];
                 8'h9C: sp_skip_neuron_r          <= sys_data_i[0];
+                8'h10: begin
+                    sp_skip_neuron_r             <= sys_data_i[0];
+                    np_mode_r                    <= sys_data_i[3:1];
+                end
                 default: ; // ignore unrecognised addresses
             endcase
         end

@@ -265,6 +265,14 @@ module acc_fmiSnn_processor # (
     //   0x64  np_spike_base_addr_r
     //   0x98  np_mode_r
     //   0x9C  sp_skip_neuron_r       [0]    1 = skip neuron_processing after spike_processing
+    //
+    //   per-task control word (lives inside the cfg_mem push window):
+    //   0x10  task_ctrl              [0]    sp_skip_neuron
+    //                                [3:1]  np_mode
+    //         Writes here drive the same flops as 0x98/0x9C — last write
+    //         wins. config_manager pushes cfg_mem word 4 here on every
+    //         TASK dispatch, so per-cfg_id rotation works automatically.
+    //
     //   0xA0  np_dcy_syn_base_addr_r   (new)
     //   0xA4  np_dcy_mem_base_addr_r   (new)
     //   0xA8  np_has_ada_r             (new)
@@ -339,6 +347,10 @@ module acc_fmiSnn_processor # (
                 8'h40: bin_point_syn_curr_r    <= sys_data_i[4:0];
                 8'h98: np_mode_r               <= sys_data_i[2:0];
                 8'h9C: sp_skip_neuron_r        <= sys_data_i[0];
+                8'h10: begin
+                    sp_skip_neuron_r           <= sys_data_i[0];
+                    np_mode_r                  <= sys_data_i[3:1];
+                end
                 8'hA0: np_dcy_syn_base_addr_r  <= sys_data_i[MEM_ADDR_BITS-1:0];
                 8'hA4: np_dcy_mem_base_addr_r  <= sys_data_i[MEM_ADDR_BITS-1:0];
                 8'hA8: np_has_ada_r            <= sys_data_i[0];
@@ -391,6 +403,8 @@ module acc_fmiSnn_processor # (
 
     //----------------------------------------------------------------
     // Latched dispatch target_acc
+    // (See acc_snn_processor.v for rationale; same shape applied here
+    // so fmiSnnAcc is ready for multi-acc top integration.)
     //----------------------------------------------------------------
     reg [`TGT_ACC_SZ-1:0] dispatched_target_acc_r;
     always @(posedge clk) begin
