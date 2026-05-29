@@ -24,6 +24,7 @@ module ann_neuron_processing # (
     parameter LUT_SLICE_BITS        = 8,
     parameter POT_SLICE_SZ          = 3,
     parameter POT_SLICE_BITS        = 32,
+    parameter POT_DECAY_BITS        = 32,
     parameter MEM_ADDR_BITS         = `ADDR_SIZE
 )(
     input  wire                    clk,
@@ -40,7 +41,7 @@ module ann_neuron_processing # (
     input wire                    [2:0] lut_out_sz_i,          // LUT element width
     input wire                    [2:0] act_out_sz_i,          // output activation width
     input wire                    [1:0] thresh_op_i,           // 00=RELU 01=LUT 10=ABS
-    input wire                   [31:0] pot_decay_mult_i,
+    input wire    [POT_DECAY_BITS-1:0] pot_decay_mult_i,
 
     // Scheduler interface
     input  wire                     start_new_block_i,
@@ -250,7 +251,8 @@ assign neuron_valid = syn_curr_data_valid & (~thresh_op_i[0] | lut_data_valid);
 
 ann_update_state_for_neuron #(
     .POT_SLICE_BITS   (SYN_CURR_SLICE_BITS),
-    .THRESH_SLICE_BITS(LUT_SLICE_BITS))
+    .THRESH_SLICE_BITS(LUT_SLICE_BITS),
+    .POT_DECAY_BITS   (POT_DECAY_BITS))
 neuron_update0 (
     .clk                    (clk),
     .reset                  (reset),

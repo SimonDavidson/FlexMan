@@ -43,6 +43,8 @@ module neuron_processing # (parameter TGT_ACC_ID            = 3'b000,
                             parameter SPIKE_DATA_IDX_SZ     = 5,
 	  		    parameter SPIKE_SLICE_SZ        = 3,
 	 		    parameter SPIKE_SLICE_BITS      = 8,
+                            parameter SYN_DECAY_BITS        = 32,
+                            parameter POT_DECAY_BITS        = 32,
 	 	            parameter MEM_ADDR_BITS         = `ADDR_SIZE)(
 
     input  wire                    clk,
@@ -59,8 +61,8 @@ module neuron_processing # (parameter TGT_ACC_ID            = 3'b000,
     input wire [BIAS_CURR_SLICE_SZ-1:0] bias_curr_sz_i,
     input wire       [POT_SLICE_SZ-1:0] pot_sz_i,
     input wire                    [4:0] bin_point_syn_curr_i,
-    input wire                   [31:0] syn_curr_decay_mult_i,
-    input wire                   [31:0] pot_decay_mult_i,
+    input wire    [SYN_DECAY_BITS-1:0] syn_curr_decay_mult_i,
+    input wire    [POT_DECAY_BITS-1:0] pot_decay_mult_i,
     input wire                          sub_on_fire_i,
     input wire                          clear_pot_i,
 
@@ -182,8 +184,15 @@ wire                             pot_wb_full;
 reg                       [31:0] syn_curr_wb_lj;
 reg                       [31:0] pot_wb_lj;
 wire                             neuron_taken;
-wire                      [31:0] updated_potential;
-wire                      [31:0] updated_syn_curr;
+// Raw outputs from update_state_for_neuron at the parameterised widths.
+// Sign-extended to 32 bits below so the (32-bit-wide) left-justify case
+// blocks below see them as signed quantities.
+wire signed [POT_SLICE_BITS-1:0]      updated_potential_raw;
+wire signed [SYN_CURR_SLICE_BITS-1:0] updated_syn_curr_raw;
+wire signed              [31:0]       updated_potential =
+    {{(32-POT_SLICE_BITS){updated_potential_raw[POT_SLICE_BITS-1]}}, updated_potential_raw};
+wire signed              [31:0]       updated_syn_curr =
+    {{(32-SYN_CURR_SLICE_BITS){updated_syn_curr_raw[SYN_CURR_SLICE_BITS-1]}}, updated_syn_curr_raw};
 
 assign spike_base_addr_r = spike_base_addr_i;
 
@@ -422,7 +431,9 @@ update_state_for_neuron #(
     .SYN_CURR_SLICE_BITS(SYN_CURR_SLICE_BITS),
     .POT_SLICE_BITS(POT_SLICE_BITS),
     .BIAS_CURR_SLICE_BITS(BIAS_CURR_SLICE_BITS),
-    .THRESH_SLICE_BITS(BIAS_CURR_SLICE_BITS)
+    .THRESH_SLICE_BITS(BIAS_CURR_SLICE_BITS),
+    .SYN_DECAY_BITS(SYN_DECAY_BITS),
+    .POT_DECAY_BITS(POT_DECAY_BITS)
       )
       neuron_update0 (
      .clk(clk),
@@ -437,8 +448,8 @@ update_state_for_neuron #(
      .sub_on_fire_i(sub_on_fire_i),
      .neuron_taken_o(neuron_taken),
      .result_valid_o(result_valid),
-     .potential_o(updated_potential),
-     .syn_curr_o(updated_syn_curr),
+     .potential_o(updated_potential_raw),
+     .syn_curr_o(updated_syn_curr_raw),
      .spike_o(spike),
      .result_taken_i(result_taken)
 );

@@ -32,7 +32,8 @@
 
 module ann_update_state_for_neuron # (
     parameter POT_SLICE_BITS    = 32,
-    parameter THRESH_SLICE_BITS = 8
+    parameter THRESH_SLICE_BITS = 8,
+    parameter POT_DECAY_BITS    = 32    // D_pot (unsigned Q0.D_pot)
 )(
     input  wire                                clk,
     input  wire                                reset,
@@ -43,7 +44,7 @@ module ann_update_state_for_neuron # (
     input  wire                                neuron_valid_i,
     input  wire signed [POT_SLICE_BITS-1:0]    potential_i,
     input  wire        [THRESH_SLICE_BITS-1:0] lut_result_i,
-    input  wire        [31:0]                  potential_decay_mult_i,
+    input  wire        [POT_DECAY_BITS-1:0]    potential_decay_mult_i,
     output wire                                neuron_taken_o,
 
     // Output handshake
@@ -95,13 +96,19 @@ module ann_update_state_for_neuron # (
     end
 
     // =========================================================================
-    // ST_C1: decay multiply — act_out_r x decay_mult (Q0.32)
+    // ST_C1: decay multiply — act_out_r x decay_mult (Q0.D_pot)
     // Registered into decayed_act_r on C1->C2 edge.
     // (Signed/unsigned mixing on mul_b is intentional — same as original.)
+    //
+    // Full S+D product internally; extract the high POT_SLICE_BITS bits
+    // above the POT_DECAY_BITS fractional bits. Synthesis trims any bits
+    // we never consume.
     // =========================================================================
-    wire signed [31:0] mul_a;
-    wire        [31:0] mul_b;
-    wire signed [63:0] mul_result;
+    localparam MUL_R_BITS = POT_SLICE_BITS + POT_DECAY_BITS;
+
+    wire signed [POT_SLICE_BITS-1:0] mul_a;
+    wire        [POT_DECAY_BITS-1:0] mul_b;
+    wire signed [MUL_R_BITS-1:0]     mul_result;
 
     assign mul_a      = act_out_r;
     assign mul_b      = potential_decay_mult_i;
@@ -113,7 +120,8 @@ module ann_update_state_for_neuron # (
         if (reset)
             decayed_act_r <= {POT_SLICE_BITS{1'b0}};
         else if (state_r == ST_C1)
-            decayed_act_r <= mul_result[63:32];
+            decayed_act_r <= mul_result[POT_DECAY_BITS + POT_SLICE_BITS - 1
+                                         : POT_DECAY_BITS];
     end
 
     // =========================================================================

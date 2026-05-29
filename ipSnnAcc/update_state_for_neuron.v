@@ -8,10 +8,12 @@
 `timescale 1ns / 1ps
 
 module update_state_for_neuron # (
-	parameter SYN_CURR_SLICE_BITS  = 8,
-	parameter POT_SLICE_BITS       = 8,
-	parameter BIAS_CURR_SLICE_BITS = 8,
-	parameter THRESH_SLICE_BITS    = 8
+	parameter SYN_CURR_SLICE_BITS  = 32,   // S_syn  (signed)
+	parameter POT_SLICE_BITS       = 32,   // S_pot  (signed)
+	parameter BIAS_CURR_SLICE_BITS = 32,
+	parameter THRESH_SLICE_BITS    = 32,
+	parameter SYN_DECAY_BITS       = 32,   // D_syn  (unsigned Q0.D_syn)
+	parameter POT_DECAY_BITS       = 32    // D_pot  (unsigned Q0.D_pot)
      )
     (
     // Clock and reset
@@ -25,8 +27,8 @@ module update_state_for_neuron # (
     input  wire signed [BIAS_CURR_SLICE_BITS-1:0] bias_curr_i,
     input  wire signed [THRESH_SLICE_BITS-1:0]    threshold_i,
     input  wire                                   sub_on_fire_i,
-    input  wire        [SYN_CURR_SLICE_BITS-1:0]  syn_curr_decay_mult_i,   // Q0.32 unsigned fractional
-    input  wire        [POT_SLICE_BITS-1:0]       potential_decay_mult_i,  // Q0.32 unsigned fractional
+    input  wire        [SYN_DECAY_BITS-1:0]       syn_curr_decay_mult_i,   // Q0.D_syn unsigned
+    input  wire        [POT_DECAY_BITS-1:0]       potential_decay_mult_i,  // Q0.D_pot unsigned
     output wire                                   neuron_taken_o,  // Acknowledge to upstream
 
     // Output interface (valid/taken handshake)
@@ -46,9 +48,16 @@ module update_state_for_neuron # (
     wire                                          pot_overflow;
     wire                                          spike;
 
-    wire                    signed [31:0] mul_a;            // signed operand
-    wire                           [31:0] mul_b;            // unsigned Q0.32 decay
-    wire                    signed [63:0] mul_result;
+    // Shared multiplier sized to the wider of the two pipeline stages.
+    localparam MUL_A_BITS = (POT_SLICE_BITS > SYN_CURR_SLICE_BITS)
+                          ? POT_SLICE_BITS : SYN_CURR_SLICE_BITS;
+    localparam MUL_B_BITS = (POT_DECAY_BITS > SYN_DECAY_BITS)
+                          ? POT_DECAY_BITS : SYN_DECAY_BITS;
+    localparam MUL_R_BITS = MUL_A_BITS + MUL_B_BITS;
+
+    wire signed [MUL_A_BITS-1:0] mul_a;            // signed operand
+    wire        [MUL_B_BITS-1:0] mul_b;            // unsigned Q0.D decay
+    wire signed [MUL_R_BITS-1:0] mul_result;
 
 /////////////////////////////////////////////////////////////////////////////
 // Update potential
@@ -72,8 +81,8 @@ assign pot_underflow = (
 ////////////////////////////////////////
 // Perform saturation on new potential
 //
-assign saturated_potential = ( pot_overflow)? 32'h7FFFFFFF :
-	                     (pot_underflow)? 32'h80000000 :
+assign saturated_potential = ( pot_overflow)? {1'b0, {(POT_SLICE_BITS-1){1'b1}}} :
+	                     (pot_underflow)? {1'b1, {(POT_SLICE_BITS-1){1'b0}}} :
 			                      new_potential[POT_SLICE_BITS-1:0];
 
 //////////////////////////////////////////////////////////////////////////////
@@ -116,22 +125,28 @@ assign spike = (potential_r >=threshold_i) ? 1'b1 : 1'b0;
 // Cycle 1) a = synaptic current; b = syn_curr decay factor
 // Cycle 2) a = new potential; b = potential decay factor
 //
-assign mul_a = (state_cycle2_r) ? potential_r : syn_curr_i;
-assign mul_b = (state_cycle2_r) ? potential_decay_mult_i : syn_curr_decay_mult_i;
+assign mul_a = (state_cycle2_r)
+    ? {{(MUL_A_BITS-POT_SLICE_BITS){potential_r[POT_SLICE_BITS-1]}},      potential_r}
+    : {{(MUL_A_BITS-SYN_CURR_SLICE_BITS){syn_curr_i[SYN_CURR_SLICE_BITS-1]}}, syn_curr_i};
+assign mul_b = (state_cycle2_r)
+    ? {{(MUL_B_BITS-POT_DECAY_BITS){1'b0}}, potential_decay_mult_i}
+    : {{(MUL_B_BITS-SYN_DECAY_BITS){1'b0}}, syn_curr_decay_mult_i};
 
 assign mul_result = mul_a * mul_b;
 
 // This is only valid on second cycle:
-assign decayed_potential = mul_result[63:32];
+// Extract high POT_SLICE_BITS bits above the POT_DECAY_BITS fraction.
+assign decayed_potential = mul_result[POT_DECAY_BITS + POT_SLICE_BITS - 1 : POT_DECAY_BITS];
 
 // Register output of multiplier on cycle 1, as this is th decayed syn_current
+// Extract high SYN_CURR_SLICE_BITS bits above the SYN_DECAY_BITS fraction.
 
 always @ (posedge clk)
 begin
    if (reset)
       decayed_syn_curr_r <= 'b0;
    else if (neuron_valid_i & ~state_cycle2_r)
-      decayed_syn_curr_r <= mul_result[63:32];
+      decayed_syn_curr_r <= mul_result[SYN_DECAY_BITS + SYN_CURR_SLICE_BITS - 1 : SYN_DECAY_BITS];
 end
 
 
