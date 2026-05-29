@@ -248,7 +248,8 @@ scheduler #(
     .nxt_input_pulse_o(nxt_in_pulse),
     .nxt_output_pulse_o(nxt_out_pulse),
     .fill_value_o(),
-    .fill_block_size_o()
+    .fill_block_size_o(),
+    .cm_busy_i(1'b0)    // no config_manager in this tb — never back-pressure
 );
 
 // ---- Event monitors -------------------------------------------------------

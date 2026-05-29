@@ -70,7 +70,11 @@ module scheduler
      output wire                          nxt_output_pulse_o,
      // fill_unit dispatch parameters (valid cycle of start_new_block_o for FILL):
      output wire [31:0]                   fill_value_o,
-     output wire [19:0]                   fill_block_size_o
+     output wire [19:0]                   fill_block_size_o,
+
+     // Back-pressure from config_manager — see sch_table.v. Tie to 1'b0
+     // in tops that don't instantiate a config_manager.
+     input  wire                          cm_busy_i
     );
 
 // ------------------------------------------------------------
@@ -558,7 +562,8 @@ sch_table #(
    .acc_busy_i(~acc_available),
    .buffers_full_i(buff_full),
    .buffers_free_i(buff_free),
-   .buffers_colour_i(buff_colour)
+   .buffers_colour_i(buff_colour),
+   .cm_busy_i(cm_busy_i)
 );
 
 assign start_new_block_o = start_new_task;

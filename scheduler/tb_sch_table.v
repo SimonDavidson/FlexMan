@@ -135,6 +135,7 @@ sch_table #(
     .buffers_full_i(buffers_full_i),
     .buffers_free_i(buffers_free_i),
     .buffers_colour_i(buffers_colour_i),
+    .cm_busy_i(1'b0),     // standalone tb: no config_manager — never back-pressure
     .dispatch_to_acc_o(dispatch_to_acc_o),
     .entry_data_o(entry_data_o)
 );

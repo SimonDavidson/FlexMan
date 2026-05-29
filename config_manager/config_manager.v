@@ -55,6 +55,11 @@ module config_manager #(
     // One-cycle pulse when both FSMs have finished for this block
     output wire                        cm_config_finished_o,
 
+    // High while either FSM is mid-push. Scheduler back-pressures dispatch
+    // against this so a second start_new_block_i pulse can't be silently
+    // dropped during an in-flight push.
+    output wire                        cm_busy_o,
+
     // Config memory — read port
     output wire                        cfg_mem_rd_o,
     input  wire                        cfg_mem_wait_i,
@@ -283,6 +288,11 @@ always @(posedge clk or posedge reset) begin
 end
 
 assign cm_config_finished_o = both_done & ~both_done_prev_r;
+
+// Busy while either FSM is not in IDLE. Used by the scheduler as
+// back-pressure on `dispatch_to_acc_o` — a second start_new_block_i
+// pulse must not arrive while we're still pushing the previous one.
+assign cm_busy_o = (cfg_state_r != FSM_IDLE) | (bba_state_r != FSM_IDLE);
 
 // ─── Static output assignments ────────────────────────────────────────────────
 assign cm_tgt_acc_o        = tgt_acc_r;

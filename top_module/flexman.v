@@ -367,7 +367,15 @@ wire               [19:0] sch_fill_block_size;
 
 // FILL dispatch gating — separates fill_unit dispatch from computation acc dispatch
 wire is_fill_dispatch    = sch_start_new_block & (sch_target_acc == FILL_ACC_ID);
-wire acc_start_new_block = sch_start_new_block & ~is_fill_dispatch;
+// Compute accelerators start AFTER config_manager has finished pushing their
+// per-task configs. cm_config_finished_o only fires for non-FILL dispatches
+// so no extra FILL gate is needed. cm_tgt_acc carries the latched target_acc
+// from config_manager (stable through the whole dispatch lifecycle).
+wire                       acc_start_new_block;       // assigned after cm_tgt_acc declared
+localparam CM_TGT_ACC_SZ = 2;                         // = $clog2(NUM_COMP_ACC=4); config_manager's port width
+wire [CM_TGT_ACC_SZ-1:0]   cm_tgt_acc_narrow;         // raw output from config_manager
+wire [TGT_ACC_SZ-1:0]      cm_tgt_acc =
+    {{(TGT_ACC_SZ - CM_TGT_ACC_SZ){1'b0}}, cm_tgt_acc_narrow};   // zero-extend to TGT_ACC_SZ
 
 // Target buffer ID for fill_unit (long slot 0 id = bits [LONG_BASE+MODE_SZ +: BUFF_INDX_SZ])
 wire [BUFF_INDX_SZ-1:0] fu_buff_id = sch_buffer_info[LONG_BASE + MODE_SZ +: BUFF_INDX_SZ];
@@ -378,9 +386,17 @@ wire [NUM_COMP_ACC-1:0]      cm_config_wr;
 wire [NUM_COMP_ACC-1:0]      cm_buff_base_wr;
 wire [31:0]                  cm_config_data;
 wire [31:0]                  cm_buff_base_data;
+// Back-pressure: high while config_manager is mid-push. Scheduler stalls
+// dispatch on this so a second start_new_block_i pulse isn't lost.
+wire                         cm_busy;
 
 // config_manager start is suppressed for FILL dispatches
 wire cm_start_new_block = sch_start_new_block & ~is_fill_dispatch;
+
+// Compute-acc dispatch fires when config_manager finishes pushing the
+// cfg + bba streams. cm_tgt_acc was latched at the scheduler's dispatch
+// pulse; it remains stable through this run until the next dispatch.
+assign acc_start_new_block = cm_config_finished_o;
 
 // ─── Accelerator AXI (config write mux outputs) ───────────────────────────────
 wire  snn0_sys_req, snn0_sys_ack;
@@ -792,7 +808,8 @@ scheduler #(
     .fill_value_o        (sch_fill_value),
     .fill_block_size_o   (sch_fill_block_size),
     .nxt_input_pulse_o   (nxt_input_pulse_o),
-    .nxt_output_pulse_o  (nxt_output_pulse_o)
+    .nxt_output_pulse_o  (nxt_output_pulse_o),
+    .cm_busy_i           (cm_busy)
 );
 
 // ─── Config manager ───────────────────────────────────────────────────────────
@@ -821,6 +838,7 @@ config_manager #(
     .config_id_i          (cm_config_id),
     .buffer_info_i        (cm_buffer_info),
     .cm_config_finished_o (cm_config_finished_o),
+    .cm_busy_o            (cm_busy),
     .cfg_mem_rd_o         (cfg_mem_rd_o),
     .cfg_mem_wait_i       (cfg_mem_wait_i),
     .cfg_mem_addr_o       (cfg_mem_addr_o),
@@ -835,7 +853,7 @@ config_manager #(
     .bba_mem_wr_o         (bba_mem_wr_o),
     .bba_mem_wr_addr_o    (bba_mem_wr_addr_o),
     .bba_mem_wr_data_o    (bba_mem_wr_data_o),
-    .cm_tgt_acc_o         (),
+    .cm_tgt_acc_o         (cm_tgt_acc_narrow),
     .cm_config_wr_o       (cm_config_wr),
     .cm_config_wait_i     (cm_config_wait),
     .cm_config_data_o     (cm_config_data),
@@ -856,7 +874,7 @@ acc_snn_processor #(
     .sys_addr_i            (snn0_sys_addr),
     .sys_data_i            (snn0_sys_data_in),
     .start_new_block_i     (acc_start_new_block),
-    .target_acc_i          (sch_target_acc),
+    .target_acc_i          (cm_tgt_acc),
     .buffer_info_i         (sch_buffer_info[`SCH_ENTRY_SZ-1:0]),
     .spike_proc_finished_o (snn0_result),
     .acc_busy_o            (snn0_busy),
@@ -917,7 +935,7 @@ acc_snn_processor #(
     .sys_addr_i            (snn1_sys_addr),
     .sys_data_i            (snn1_sys_data_in),
     .start_new_block_i     (acc_start_new_block),
-    .target_acc_i          (sch_target_acc),
+    .target_acc_i          (cm_tgt_acc),
     .buffer_info_i         (sch_buffer_info[`SCH_ENTRY_SZ-1:0]),
     .spike_proc_finished_o (snn1_result),
     .acc_busy_o            (snn1_busy),
@@ -978,7 +996,7 @@ ann_processor #(
     .sys_addr_i            (ann_sys_addr),
     .sys_data_i            (ann_sys_data_in),
     .start_new_block_i     (acc_start_new_block),
-    .target_acc_i          (sch_target_acc),
+    .target_acc_i          (cm_tgt_acc),
     .buffer_info_i         (sch_buffer_info[`SCH_ENTRY_SZ-1:0]),
     .spike_proc_finished_o (ann_result),
     .acc_busy_o            (ann_busy),
@@ -1040,7 +1058,7 @@ hadamard_unit #(
     .hu_sys_addr_i        (had_sys_addr),
     .hu_sys_data_i        (had_sys_data_in),
     .hu_start_new_block_i (acc_start_new_block),
-    .hu_target_acc_i      (sch_target_acc),
+    .hu_target_acc_i      (cm_tgt_acc),
     .hu_buffer_info_i     (sch_buffer_info[`SCH_ENTRY_SZ-1:0]),
     .hu_acc_busy_o        (had_busy),
     .hu_acc_finished_o    (had_finished),

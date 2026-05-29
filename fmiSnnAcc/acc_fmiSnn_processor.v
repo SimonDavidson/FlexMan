@@ -389,6 +389,18 @@ module acc_fmiSnn_processor # (
     assign acc_busy_o     = sp_acc_busy | np_acc_busy;
     assign acc_finished_o = sp_skip_neuron_r ? sp_acc_finished : np_acc_finished;
 
+    //----------------------------------------------------------------
+    // Latched dispatch target_acc
+    //----------------------------------------------------------------
+    reg [`TGT_ACC_SZ-1:0] dispatched_target_acc_r;
+    always @(posedge clk) begin
+        if (reset)
+            dispatched_target_acc_r <= TGT_ACC_ID;
+        else if (start_new_block_i && (target_acc_i == TGT_ACC_ID))
+            dispatched_target_acc_r <= target_acc_i;
+    end
+    wire my_dispatch = start_new_block_i & (target_acc_i == TGT_ACC_ID);
+
     // =========================================================================
     // spike_processing instantiation
     // Y-dimension parameters are hardwired to 1 (FMI model uses 1D only).
@@ -451,8 +463,8 @@ module acc_fmiSnn_processor # (
         .index_sz_i             (sp_index_sz_r),
         .tuple_sz_i             (sp_tuple_sz_r),
         .sparse_count_i         (sp_sparse_count_r),
-        .start_new_block_i      (start_new_block_i),
-        .target_acc_i           (target_acc_i),
+        .start_new_block_i      (my_dispatch),
+        .target_acc_i           (dispatched_target_acc_r),
         .buffer_info_i          (buffer_info_i),
         .spike_proc_finished_o  (spike_proc_finished_o),
         .acc_busy_o             (sp_acc_busy),
@@ -521,7 +533,7 @@ module acc_fmiSnn_processor # (
         .dcy_ada_base_addr_i    (np_dcy_ada_base_addr_r),
         .scl_ada_base_addr_i    (np_scl_ada_base_addr_r),
         .start_new_block_i      (sp_acc_finished & ~sp_skip_neuron_r),
-        .target_acc_i           (target_acc_i),
+        .target_acc_i           (dispatched_target_acc_r),
         .buffer_info_i          (buffer_info_i),
         .neuron_proc_finished_o (np_neuron_proc_finished),
         .acc_busy_o             (np_acc_busy),

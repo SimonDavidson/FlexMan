@@ -24,6 +24,13 @@ module sch_table  #(parameter SCH_ENTRY_SZ        = 52,
               input  wire [COL_BUFF_ID_SZ-1:0] buffers_free_i,
               input  wire [COL_BUFF_ID_SZ-1:0] buffers_colour_i,
 
+              // Back-pressure from config_manager. High while it is mid-push;
+              // we must not dispatch (or delete the launched entry) until it
+              // returns to IDLE — otherwise the start_new_block_i pulse is
+              // silently swallowed and the task is lost. Tie to 1'b0 in any
+              // top that doesn't have a config_manager.
+              input  wire                      cm_busy_i,
+
               // Dispatch:
               output wire                      dispatch_to_acc_o,
               output wire [SCH_ENTRY_SZ-1:0]   entry_data_o
@@ -98,9 +105,14 @@ always @(*) begin
 end
 assign entry_data_o = entry_data_mux;
 
-assign delete_launched_entry = select_to_go[NUM_SCH_ENTRIES-1:0];
+// Back-pressure: when config_manager is mid-push, hold the ready entry in
+// the table instead of pulsing dispatch / deleting it. `select_to_go` and
+// `entry_data_o` still update so the candidate entry is visible, but
+// nothing actually launches until cm clears.
+wire dispatch_ok             = ~cm_busy_i;
+assign delete_launched_entry = select_to_go[NUM_SCH_ENTRIES-1:0] & {NUM_SCH_ENTRIES{dispatch_ok}};
 assign delete_entry          = delete_launched_entry | delete_shifted_entry;
-assign launching             = |ready_to_go;
+assign launching             = (|ready_to_go) & dispatch_ok;
 assign dispatch_to_acc_o     = launching;
 
 assign entry_valid_r[NUM_SCH_ENTRIES]   = 1'b0;
