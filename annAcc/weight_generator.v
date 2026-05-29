@@ -254,8 +254,13 @@ assign next_step = is_convolution ? next_kernel_pos : next_out_neuron;
 assign sparse_last_tuple = is_sparseConn & doing_weight_pass_r &
                            (out_elem_count_r == (sparse_count_i - 1'b1));
 
-assign out_elem_count_nxt = (((is_convolution | is_sparseConn) & finished_for_this_ip_neuron) |
-                             (is_fullConn & finished_pass_o))? 1'b0 :
+// Reset the flat slice counter per input neuron in ALL connectivity modes.
+// (Previously full mode reset only on finished_pass_o = end of the entire
+//  pass.  That caused the weight cache to keep producing slices from the
+//  same word across input-neuron boundaries when
+//  weights_per_word * rows_per_neuron > out_x_len * out_y_len, leaking
+//  unused slices into outputs 0..out_x_len-1 via the out_x_index wrap.)
+assign out_elem_count_nxt = (finished_for_this_ip_neuron)? 1'b0 :
                             (next_step)? out_elem_count_r + 1'b1 :
                                          out_elem_count_r;
 

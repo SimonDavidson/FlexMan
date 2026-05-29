@@ -562,6 +562,49 @@ module tb_acc_snn_processor;
             check_eq(u_pot_mem.mem[51],   32'd10, "T3 pot[1] decayed=10");
         end
 
+        // ============================================================
+        // Test 4: non-uniform column-major weights, RELU
+        //   Distinct weights per output neuron — uniform-weight tests
+        //   T1-T3 pass even with the pre-2026-05-29 out_elem_count_r
+        //   bug; this one fails without the fix.
+        //   W[0][0]=W[0][1]=+10, W[1][0]=W[1][1]=+5, x=1 each:
+        //     syn_curr[0] = 10 + 10 = 20
+        //     syn_curr[1] =  5 +  5 = 10
+        //   RELU pass-through: act_out[0] = 20, act_out[1] = 10
+        //   Decay × 0.5:        pot[0] = 10,    pot[1] = 5
+        // Expected:
+        //   spike_sram[60] = 32'd20, spike_sram[61] = 32'd10
+        //   pot_sram[50]   = 32'd10, pot_sram[51]   = 32'd5
+        // ============================================================
+        $display("Test 4: non-uniform column-major weights, RELU");
+
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_weight_mem.mem[i_init]   = 32'h0A0A_0A0A;  // restore default
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
+        end
+
+        // Column-major weights at a NEW base (14) to force a weight-cache miss
+        //   weight_sram[14] = column 0 = {W[0][0]=10, W[1][0]=5, slice2=0, slice3=0}
+        //   weight_sram[15] = column 1 = {W[0][1]=10, W[1][1]=5, slice2=0, slice3=0}
+        u_weight_mem.mem[14] = 32'h0000_050A;
+        u_weight_mem.mem[15] = 32'h0000_050A;
+        cfg_write(32'hFFFF_0004, 32'd14);   // weight_base_addr = 14
+
+        cfg_write(32'hFFFF_00A0, 32'd0);    // thresh_op = 0 (RELU)
+
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
+
+        wait_pipeline(timed_out);
+        if (!timed_out) begin
+            check_eq(u_spike_mem.mem[60], 32'd20, "T4 act_out[0] RELU(20)=20");
+            check_eq(u_spike_mem.mem[61], 32'd10, "T4 act_out[1] RELU(10)=10");
+            check_eq(u_pot_mem.mem[50],   32'd10, "T4 pot[0] decayed=10");
+            check_eq(u_pot_mem.mem[51],   32'd5,  "T4 pot[1] decayed=5");
+        end
+
         $display("=== tb_acc_snn_processor: %0d failure(s) ===", errors);
         if (errors == 0) $display("PASS"); else $display("FAIL");
         $finish;

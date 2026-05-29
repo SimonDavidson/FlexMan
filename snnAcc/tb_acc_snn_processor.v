@@ -548,6 +548,53 @@ module tb_acc_snn_processor;
             check_eq(u_pot_mem.mem[51],      32'd0,         "T2 pot_sram[51] (spike reset)");
         end
 
+        // ============================================================
+        // Test 3: non-uniform column-major weights, no spike
+        //   Distinct weights per output neuron — uniform weight tests
+        //   pass even with the pre-2026-05-29 out_elem_count_r bug; this
+        //   one fails without the fix.
+        //   W[0][0]=W[0][1]=+10, W[1][0]=W[1][1]=+5 → syn_curr[20]=20,
+        //   syn_curr[21]=10 after SP; decayed by 0.5 → 10, 5.
+        //   Threshold high (=50) → no spike → pot decayed = 10, 5.
+        // Expected after full pipeline:
+        //   spike_sram[60]      = 0x00000000
+        //   syn_curr_sram[20]   = 32'd10   (= 0.5 * 20)
+        //   syn_curr_sram[21]   = 32'd5    (= 0.5 * 10)
+        //   pot_sram[50]        = 32'd10   (= 0.5 * 20)
+        //   pot_sram[51]        = 32'd5    (= 0.5 * 10)
+        // ============================================================
+        $display("Test 3: non-uniform column-major weights, no spike");
+
+        // Reset syn_curr/pot/spike so SP starts from zero
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
+        end
+
+        // Column-major weights at a NEW base (12) to force a weight-cache miss
+        //   weight_sram[12] = column 0 = {W[0][0]=10, W[1][0]=5, slice2=0, slice3=0}
+        //   weight_sram[13] = column 1 = {W[0][1]=10, W[1][1]=5, slice2=0, slice3=0}
+        u_weight_mem.mem[12] = 32'h0000_050A;
+        u_weight_mem.mem[13] = 32'h0000_050A;
+        cfg_write(32'hFFFF_0004, 32'd12);        // weight_base_addr = 12
+
+        // High threshold at a fresh address (48) → no spike → thresh-cache miss
+        u_thresh_mem.mem[48] = 32'h0000_3232;    // thresh=50 for both neurons
+        cfg_write(32'hFFFF_002C, 32'd48);        // thresh_base = 48
+
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
+
+        wait_pipeline(timed_out);
+        if (!timed_out) begin
+            check_eq(u_spike_mem.mem[60],    32'h0000_0000, "T3 spike_sram[60]");
+            check_eq(u_syn_curr_mem.mem[20], 32'd10,        "T3 syn_curr_sram[20]");
+            check_eq(u_syn_curr_mem.mem[21], 32'd5,         "T3 syn_curr_sram[21]");
+            check_eq(u_pot_mem.mem[50],      32'd10,        "T3 pot_sram[50]");
+            check_eq(u_pot_mem.mem[51],      32'd5,         "T3 pot_sram[51]");
+        end
+
         $display("=== tb_acc_snn_processor: %0d failure(s) ===", errors);
         if (errors == 0) $display("PASS"); else $display("FAIL");
         $finish;
