@@ -10,6 +10,6 @@ act_cache="./act_cache"
 weight_gen="./weight_gen"
 pot_ss="./pot_subsystem"
 
-xrun -sv -gui -timescale 1ns/1ps -access wrc -linedebug -top top \
+xrun -sv -timescale 1ns/1ps -access wrc -linedebug -top top \
     sch_entry.v sch_table.v tb_sch_table.v
 

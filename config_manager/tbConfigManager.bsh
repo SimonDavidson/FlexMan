@@ -1,5 +1,5 @@
 #! /usr/bin/env bash
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Simon Davidson, University of Manchester
-xrun -sv -gui -timescale 10ps/1ps -access wrc -top tb_config_manager \
+xrun -sv -timescale 10ps/1ps -access wrc -top tb_config_manager \
   config_manager.v tb_config_manager.v
