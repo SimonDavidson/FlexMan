@@ -41,11 +41,13 @@
 //    syn_curr_sram[20/21] = 32'd10
 //    pot_sram[50/51]      = 32'd5
 //
-//  Test 4 — clear_syn_curr (np_mode[1]=1, thresh=50, syn_curr stale=10)
-//    SP clears stale syn_curr: accumulates 20 fresh (not 10+20=30)
+//  Test 4 — pre-zeroed syn_curr buffer (clear_syn_curr HW removed; the buffer
+//           is zeroed in the TB, exactly as a FILL(value=0) task does in the
+//           full system before a fresh-accumulation snnAcc task)
+//    SP accumulates 20 into the zeroed buffer, decayed=10; thresh=50, no spike.
 //    spike_sram[60]       = 0x00000000
 //    syn_curr_sram[20/21] = 32'd10   (20 × 0.5)
-//    pot_sram[50/51]      = 32'd10   (20 × 0.5; without clear would be 15)
+//    pot_sram[50/51]      = 32'd10   (20 × 0.5)
 //
 //  Test 5 — clear_pot (np_mode[2]=1, thresh=50, pot history=25)
 //    NP zeroes pot before integration: new_pot = 20+0 = 20 (not 20+25=45)
@@ -594,21 +596,22 @@ module tb_acc_snn_processor;
         end
 
         // ============================================================
-        // Test 4: clear_syn_curr (np_mode[1]=1)
-        // syn_curr_mem left at 10 (stale from T3 decay).
-        // With clear_syn_curr: SP accumulates from 0 → 20, decayed=10.
-        // Without it would be 10+20=30, decayed=15.
+        // Test 4: pre-zeroed syn_curr buffer (clear_syn_curr HW removed)
+        // The buffer is zeroed here in the TB — exactly what a FILL(value=0)
+        // task does in the full system before a snnAcc task that needs a fresh
+        // accumulation. SP then accumulates 20, decayed=10.
         // thresh=50 (base=40): no spike.
         // ============================================================
-        $display("Test 4: clear_syn_curr, stale syn_curr overridden -> syn_curr=20 not 30");
+        $display("Test 4: pre-zeroed syn_curr buffer (FILL-style) -> syn_curr=20 decayed 10");
 
-        // Leave syn_curr_mem as-is (=10); reset pot and spike
+        // Zero syn_curr (FILL-style), pot and spike before the task
         for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_syn_curr_mem.mem[i_init] = 32'd0;
             u_pot_mem.mem[i_init]      = 32'd0;
             u_spike_mem.mem[i_init]    = 32'd0;
         end
         cfg_write(32'hFFFF_002C, 32'd40);   // thresh_base = 40 (thresh=50, no spike)
-        cfg_write(32'hFFFF_0098, 32'd2);    // np_mode = 2 (clear_syn_curr)
+        cfg_write(32'hFFFF_0098, 32'd0);    // np_mode = 0 (clear sub_on_fire left from T3)
 
         @(negedge clk); start_new_block_i = 1'b1;
         @(negedge clk); start_new_block_i = 1'b0;

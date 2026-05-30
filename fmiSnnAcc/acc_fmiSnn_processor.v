@@ -229,7 +229,7 @@ module acc_fmiSnn_processor # (
 
     // Shared config registers
     reg                    [4:0] bin_point_syn_curr_r;
-    reg                    [2:0] np_mode_r;   // [0]=sub_on_fire [1]=clear_syn_curr [2]=clear_pot
+    reg                    [2:0] np_mode_r;   // [0]=sub_on_fire [1]=reserved (was clear_syn_curr; clear via FILL) [2]=clear_pot
     reg                          sp_skip_neuron_r;  // 1 = skip neuron_processing after spike_processing
 
     // =========================================================================
@@ -467,7 +467,6 @@ module acc_fmiSnn_processor # (
         .rows_per_neuron_i      (sp_rows_per_neuron_r),
         .weight_idx_sz_i        (sp_weight_idx_sz_r),
         .weight_mode_i          (sp_weight_mode_r),
-        .clear_syn_curr_i       (np_mode_r[1]),
         .x_kernel_len_i         (sp_x_kernel_len_r),
         .y_kernel_len_i         (1'b1),
         .x_kernel_offset_i      (sp_x_kernel_offset_r),

@@ -43,7 +43,6 @@ reg                          clk, reset;
 reg                          start_new_block;
 reg                          running;
 reg                          finished_pass_weight;
-reg                          clear_syn_curr;
 reg [1:0]                    weight_mode;
 reg [SPARSE_IDX_SZ-1:0]     sparse_index;
 reg [`ADDR_SIZE-1:0]         syn_curr_base;
@@ -78,13 +77,11 @@ syn_curr_update #(
 dut (
     .clk                     (clk),
     .reset                   (reset),
-    .start_new_block_i       (start_new_block),
     .running_i               (running),
     .finished_pass_weight_i  (finished_pass_weight),
     .finished_pass_o         (finished_pass),
     .syn_curr_update_running_o(syn_curr_update_running),
     .weight_mode_i           (weight_mode),
-    .clear_syn_curr_i        (clear_syn_curr),
     .sparse_index_i          (sparse_index),
     .syn_curr_base_addr_i    (syn_curr_base),
     .out_x_len_i             (out_x_len),
@@ -161,7 +158,6 @@ initial begin
     start_new_block     = 0;
     running             = 0;
     finished_pass_weight = 0;
-    clear_syn_curr      = 0;
     weight_mode         = 2'b00;
     sparse_index        = 0;
     syn_curr_base       = 0;
@@ -296,21 +292,20 @@ initial begin
     check_eq(sram[3], 32'd13, "T4 sram[3] after stalled write");
 
     // ----------------------------------------------------------
-    // Test 5: clear_syn_curr=1 — first write to an address ignores
-    //         the stale memory value (uses 0 as the base).
-    //         Second write to the same address accumulates from the
-    //         value written on the first pass.
+    // Test 5: pre-zeroed buffer — the in-accelerator clear_syn_curr
+    //         feature was removed; a fresh accumulation is obtained by
+    //         zeroing the buffer first (as a FILL(value=0) task does in
+    //         the full system). sram[4] is zeroed here before the writes.
     // neuron at (x=0, y=1) → flat index = 4 (out_x_len=4)
-    // sram[4] = 16 initially.
     // First  weight = 10 → expect sram[4] = 0  + 10 = 10
     // Second weight =  5 → expect sram[4] = 10 +  5 = 15
     // ----------------------------------------------------------
-    $display("Test 5: clear_syn_curr=1");
+    $display("Test 5: pre-zeroed buffer (FILL-style)");
+    sram[4] = 32'd0;            // FILL(value=0) on this word before the task
     running = 0;
     @(posedge clk); #1;
-    clear_syn_curr = 1;
     running = 1;
-    @(posedge clk); #1;   // running_i & ~running_r → clears syn_curr_first_wr_r
+    @(posedge clk); #1;
 
     weight_mode        = 2'b00;
     weight_index_valid = 1;
@@ -325,7 +320,7 @@ initial begin
     weight_index_valid = 0;
     weight_value_valid = 0;
     @(posedge clk); #1;
-    check_eq(sram[4], 32'd10, "T5a sram[4] first write: 0+10 (stale 16 discarded)");
+    check_eq(sram[4], 32'd10, "T5a sram[4] first write: 0+10 (buffer pre-zeroed)");
 
     // Second weight to the same address — should accumulate from real value now
     weight_index_valid = 1;
@@ -338,15 +333,14 @@ initial begin
     weight_value_valid = 0;
     @(posedge clk); #1;
     check_eq(sram[4], 32'd15, "T5b sram[4] second write: 10+5 (accumulates normally)");
-    clear_syn_curr = 0;
 
     // ----------------------------------------------------------
-    // Test 6: clear_syn_curr=0 (normal mode) — first write uses
-    //         the actual memory value, not zero.
+    // Test 6: normal accumulation — first write uses the actual memory
+    //         value, not zero.
     // sram[5] = 20 initially (untouched by Tests 1-5).
     // weight = 7 → expect sram[5] = 20 + 7 = 27
     // ----------------------------------------------------------
-    $display("Test 6: clear_syn_curr=0 (baseline unchanged)");
+    $display("Test 6: normal accumulation from memory (baseline unchanged)");
     running = 0;
     @(posedge clk); #1;
     running = 1;

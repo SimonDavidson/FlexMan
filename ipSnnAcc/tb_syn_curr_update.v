@@ -78,7 +78,6 @@ syn_curr_update #(
 dut (
     .clk                     (clk),
     .reset                   (reset),
-    .start_new_block_i       (start_new_block),
     .running_i               (running),
     .finished_pass_weight_i  (finished_pass_weight),
     .finished_pass_o         (finished_pass),

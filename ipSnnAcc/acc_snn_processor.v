@@ -221,7 +221,7 @@ module acc_snn_processor # (
     reg [NP_SYN_CURR_SLICE_SZ-1:0] np_syn_curr_sz_r;
     reg [NP_BIAS_CURR_SLICE_SZ-1:0] np_bias_curr_sz_r;
     reg    [NP_POT_SLICE_SZ-1:0] np_pot_sz_r;
-    reg                    [2:0] np_mode_r;             // [0]=sub_on_fire  [1]=clear_syn_curr  [2]=clear_pot
+    reg                    [2:0] np_mode_r;             // [0]=sub_on_fire  [1]=reserved (was clear_syn_curr; clear via FILL)  [2]=clear_pot
     reg                          sp_skip_neuron_r;      // 1 = skip neuron_processing after spike_processing
 
     //----------------------------------------------------------------
@@ -276,7 +276,7 @@ module acc_snn_processor # (
     //   8'h40  bin_point_syn_curr_r
     //   8'h68  np_syn_curr_decay_mult_r
     //   8'h6C  np_pot_decay_mult_r
-    //   8'h98  np_mode_r              [2:0]  sub_on_fire / clear_syn_curr / clear_pot
+    //   8'h98  np_mode_r              [2:0]  sub_on_fire / reserved / clear_pot
     //   8'h9C  sp_skip_neuron_r       [0]    1 = skip neuron_processing after spike_processing
     //
     // per-task control word (lives inside the cfg_mem push window):
@@ -503,7 +503,6 @@ module acc_snn_processor # (
         .rows_per_neuron_i      (sp_rows_per_neuron_r),
         .weight_idx_sz_i        (sp_weight_idx_sz_r),
         .weight_mode_i          (sp_weight_mode_r),
-        .clear_syn_curr_i       (np_mode_r[1]),
         .x_kernel_len_i         (sp_x_kernel_len_r),
         .y_kernel_len_i         (sp_y_kernel_len_r),
         .x_kernel_offset_i      (sp_x_kernel_offset_r),

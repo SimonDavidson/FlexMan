@@ -17,14 +17,12 @@ module syn_curr_update
     input  wire                          reset,
 
     // Interface to control signals:
-    input  wire                          start_new_block_i,
     input  wire                          running_i,
     input  wire                          finished_pass_weight_i,
     output wire                          finished_pass_o,
     output wire                          syn_curr_update_running_o,
 
     input  wire                    [1:0] weight_mode_i,
-    input  wire                          clear_syn_curr_i,
     input  wire   [SPARSE_IDX_SZ-1:0]    sparse_index_i,
 
     input  wire         [`ADDR_SIZE-1:0] syn_curr_base_addr_i,
@@ -51,7 +49,6 @@ module syn_curr_update
 );
 
 localparam WEIGHT_BITS     = 2**WEIGHT_SLICE_SZ;
-localparam NUM_SYN_NEURONS = 1 << `PIN_BITS;    // 1024 max output neurons
 
 reg               [WEIGHT_IDX_SZ-1:0]    weight_index_r;
 wire              [WEIGHT_IDX_SZ-1:0]    weight_index;
@@ -60,7 +57,6 @@ reg                     [`ADDR_SIZE-1:0] syn_curr_addr_r;
 wire                  [IN_DATA_BITS-1:0] aligned_weight_value;
 reg                                      syn_curr_update_running_r;
 wire                                     syn_curr_update_running_nxt;
-reg            [NUM_SYN_NEURONS-1:0]     syn_curr_first_wr_r;
 reg                     [`ADDR_SIZE-1:0] syn_curr_flat_index_r;
 
 always @ (posedge clk)
@@ -80,20 +76,6 @@ assign syn_curr_update_running_nxt = (running_i &
 assign syn_curr_update_running_o = syn_curr_update_running_r;
 
 assign finished_pass_o = syn_curr_update_running_r & ~syn_curr_update_running_nxt;
-
-//////////////////////////////////////////////////////////////////////////////
-// Track which output-neuron addresses have been written this task.
-// When clear_syn_curr_i is set, the first write to each address accumulates
-// from zero rather than from the stale memory value.
-
-always @ (posedge clk) begin
-    if (reset)
-        syn_curr_first_wr_r <= {NUM_SYN_NEURONS{1'b0}};
-    else if (start_new_block_i)
-        syn_curr_first_wr_r <= {NUM_SYN_NEURONS{1'b0}};
-    else if (req_pending_r & ~syn_curr_mem_wait_i)
-        syn_curr_first_wr_r[syn_curr_flat_index_r[`PIN_BITS-1:0]] <= 1'b1;
-end
 
 //////////////////////////////////////////////////////////////////////////////
 // Fetch logic for syn_current value
@@ -151,9 +133,10 @@ assign syn_curr_mem_rd_o = (syn_curr_mem_wr_o)    ? 1'b0 :
 
 assign aligned_weight_value = {{(IN_DATA_BITS-WEIGHT_BITS){weight_value_i[WEIGHT_BITS-1]}}, weight_value_i[WEIGHT_BITS-1:0]};
 
-wire [`WTD_BITS-1:0] base_syn_curr =
-    (clear_syn_curr_i & ~syn_curr_first_wr_r[syn_curr_flat_index_r[`PIN_BITS-1:0]])
-    ? {`WTD_BITS{1'b0}} : syn_curr_mem_data_i;
+// syn_curr always accumulates from memory.  To start a buffer from zero, issue
+// a FILL(value=0) task on the syn_curr buffer before use (the old in-accelerator
+// clear_syn_curr first-write tracking has been removed to save fabric area).
+wire [`WTD_BITS-1:0] base_syn_curr = syn_curr_mem_data_i;
 
 assign syn_curr_mem_data_o = base_syn_curr + aligned_weight_value;
 

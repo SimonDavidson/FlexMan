@@ -83,7 +83,6 @@ reg [Y_STEP_SZ-1:0]        y_kernel_step;
 reg [WEIGHT_SLICE_SZ-1:0]  index_sz;
 reg [WEIGHT_SLICE_SZ-1:0]  tuple_sz;
 reg [`PIN_BITS-1:0]         sparse_count;
-reg                         clear_syn_curr;
 reg [ELEMS_PER_ROW-1:0]    weights_per_word;
 reg [ROWS_PER_NEURON-1:0]  rows_per_neuron;
 reg [WEIGHT_IDX_SZ-1:0]    weight_idx_sz;
@@ -162,7 +161,6 @@ dut (
     .weight_sz_i            (weight_sz),
     .bin_point_syn_curr_i   (bin_point_syn_curr),
     .weight_mode_i          (weight_mode),
-    .clear_syn_curr_i       (clear_syn_curr),
     .in_x_len_i             (in_x_len),
     .in_y_len_i             (in_y_len),
     .out_x_len_i            (out_x_len),
@@ -263,7 +261,6 @@ initial begin
     weight_sz        = 3'b011;   // 8-bit weights
     bin_point_syn_curr = 5'd0;
     weight_mode      = 2'b00;    // full connectivity
-    clear_syn_curr   = 0;
     in_x_len         = 4'd2;
     in_y_len         = 4'd2;
     out_x_len        = 4'd2;
