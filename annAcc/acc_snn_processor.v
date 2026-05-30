@@ -250,6 +250,10 @@ module ann_processor # (
     //          Writes here drive the same flop as 0x9C — last write wins.
     //          config_manager pushes cfg_mem word 4 here on every TASK
     //          dispatch, so per-cfg_id rotation works automatically.
+    //
+    //   per-task decay multiplier (also inside the cfg_mem push window):
+    //   8'h1C  np_pot_decay_mult_r       (32-bit Q0.32) — alias of 0x6C
+    //          (annAcc has no syn_curr decay path; 0x18 unused.)
     //================================================================
     wire addr_match = (sys_addr_i[31:16] == TGT_CONFIG_BASE_ADDR[31:16]);
 
@@ -330,6 +334,7 @@ module ann_processor # (
                 8'hA0: np_thresh_op_r          <= sys_data_i[1:0];
                 8'h9C: sp_skip_neuron_r        <= sys_data_i[0];
                 8'h10: sp_skip_neuron_r        <= sys_data_i[0];
+                8'h1C: np_pot_decay_mult_r     <= sys_data_i[31:0];
                 default: ;
             endcase
         end

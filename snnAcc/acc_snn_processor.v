@@ -288,6 +288,13 @@ module acc_snn_processor # (
     //          Writes here drive the same flops as 0x98/0x9C — last write
     //          wins. config_manager pushes cfg_mem word 4 here on every
     //          TASK dispatch, so per-cfg_id rotation works automatically.
+    //
+    // per-task decay multipliers (also inside the cfg_mem push window):
+    //   8'h18  np_syn_curr_decay_mult_r  (32-bit Q0.32) — alias of 0x68
+    //   8'h1C  np_pot_decay_mult_r       (32-bit Q0.32) — alias of 0x6C
+    //          Same backward-compat pattern as task_ctrl: cfg_mem words 6
+    //          and 7 push to these new slots on every TASK dispatch so each
+    //          cfg_id can carry its own α/β.
     //================================================================
     wire addr_match = (sys_addr_i[31:16] == TGT_CONFIG_BASE_ADDR[31:16]);
 
@@ -371,6 +378,8 @@ module acc_snn_processor # (
                     sp_skip_neuron_r             <= sys_data_i[0];
                     np_mode_r                    <= sys_data_i[3:1];
                 end
+                8'h18: np_syn_curr_decay_mult_r  <= sys_data_i[31:0];
+                8'h1C: np_pot_decay_mult_r       <= sys_data_i[31:0];
                 default: ; // ignore unrecognised addresses
             endcase
         end
