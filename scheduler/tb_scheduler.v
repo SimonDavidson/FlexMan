@@ -290,6 +290,11 @@ integer ph4_finish_count;
 reg     ph4_r_done;        // reader (R, acc0) has completed
 reg     ph4_war;           // set if writer (W) dispatches before reader R completes
 
+// Phase 5 (strict in-order dispatch) counters:
+integer ph5_dispatch_count;
+integer ph5_finish_count;
+reg     ph5_ooo;           // set if the younger task B dispatches before the older stalled A
+
 initial begin
     dispatch_count    = 0;
     finish_count      = 0;
@@ -305,6 +310,9 @@ initial begin
     ph4_finish_count  = 0;
     ph4_r_done        = 1'b0;
     ph4_war           = 1'b0;
+    ph5_dispatch_count = 0;
+    ph5_finish_count  = 0;
+    ph5_ooo           = 1'b0;
 end
 
 always @(posedge clk) begin
@@ -401,7 +409,7 @@ always @(posedge clk) begin
                              $time);
                 phase = 3; // launch program 4 (free-on-completion WAR test)
             end
-        end else begin
+        end else if (phase == 3) begin
             // ---- Program 4: free source buffer on COMPLETION, not dispatch -----
             // R (acc0) reads X(buf5); W (acc1) overwrites X. W is gated only by X
             // becoming free.  With free-on-completion, W must wait for R to finish.
@@ -426,6 +434,36 @@ always @(posedge clk) begin
                              $time);
                 else
                     $display("[%0t ns] P4 FAIL - WAR: writer overwrote buffer while reader still reading.",
+                             $time);
+                phase = 4; // launch program 5 (strict in-order dispatch test)
+            end
+        end else begin
+            // ---- Program 5: strict in-order dispatch ---------------------------
+            // A (acc0,cfg28, program-earlier) stalls on un-seeded source; B
+            // (acc1,cfg29, program-later) is fully ready.  No shared buffers, so
+            // the ONLY thing that could let B run before A is out-of-order
+            // dispatch.  In-order => A (the head) must dispatch first.
+            if (acc_finished_w[0]) $display("[%0t ns] P5 ACC0 done (A)", $time);
+            if (acc_finished_w[1]) $display("[%0t ns] P5 ACC1 done (B)", $time);
+            ph5_finish_count = ph5_finish_count + acc_finished_w[0] + acc_finished_w[1];
+            if (start_new_block) begin
+                ph5_dispatch_count = ph5_dispatch_count + 1;
+                $display("[%0t ns] P5 DISPATCH #%0d  acc=%0d  cfg=%0d", $time,
+                         ph5_dispatch_count,
+                         buffer_info[E_ACC_START +: TGT_ACC_SZ],
+                         buffer_info[E_CFG_START +: CFG_ID_SZ]);
+                // The first dispatch must be A (cfg=28).  If B (cfg=29) goes
+                // first, it passed the stalled older A => out-of-order.
+                if (ph5_dispatch_count == 1 &&
+                    buffer_info[E_CFG_START +: CFG_ID_SZ] == 29)
+                    ph5_ooo = 1'b1;
+            end
+            if (ph5_finish_count >= 2) begin
+                if (!ph5_ooo)
+                    $display("[%0t ns] P5 PASS - in-order: older stalled A dispatched before ready younger B.",
+                             $time);
+                else
+                    $display("[%0t ns] P5 FAIL - out-of-order: younger B dispatched before older stalled A.",
                              $time);
                 #20 $finish;
             end
@@ -556,6 +594,24 @@ initial begin
                        MODE_TGT, 4'd5, 3'd1);               // W overwrites X(buf5)
     prog_mem[54] = STOP_INST;
 
+    // ---- Program 5: strict in-order dispatch test (words 60–64) ----------
+    //   A (acc0,cfg28): SRC bufA(buf8, NOT seeded -> stalls) -> TGT buf10
+    //   B (acc1,cfg29): SRC bufB(buf9, seeded -> ready)      -> TGT buf11
+    // (cfg IDs must fit the 5-bit CFG field, max 31.)
+    // No shared buffers.  In-order must dispatch A (the head) first even though
+    // B is ready and A is stalled.  bufA is seeded later so A can finish.
+    prog_mem[60] = tw1(2'd0, 5'd28, 1'b0,
+                       MODE_SRC, 4'd8, MODE_UNUSED, 4'd0, MODE_UNUSED, 4'd0);
+    prog_mem[61] = tw2(MODE_UNUSED, 4'd0, 3'd0,
+                       MODE_UNUSED, 4'd0, 3'd0,
+                       MODE_TGT, 4'd10, 3'd1);
+    prog_mem[62] = tw1(2'd1, 5'd29, 1'b0,
+                       MODE_SRC, 4'd9, MODE_UNUSED, 4'd0, MODE_UNUSED, 4'd0);
+    prog_mem[63] = tw2(MODE_UNUSED, 4'd0, 3'd0,
+                       MODE_UNUSED, 4'd0, 3'd0,
+                       MODE_TGT, 4'd11, 3'd1);
+    prog_mem[64] = STOP_INST;
+
     // ---- Release reset ---------------------------------------------------
     repeat(4) @(posedge clk); #1;
     reset = 1'b0;
@@ -624,6 +680,26 @@ initial begin
     // ---- Start program 4 ------------------------------------------------
     axi_write(32'hE000_0000, 32'd50);           // LOAD_PC: start at word 50
     axi_write(32'hE010_0000, 32'b0);            // START
+
+    // ---- Wait for program 4 to finish (monitor sets phase=4) -------------
+    wait(phase == 4);
+
+    // ---- Reset for program 5 --------------------------------------------
+    reset = 1'b1;
+    repeat(4) @(posedge clk); #1;
+    reset = 1'b0;
+
+    // ---- Pre-fill program 5: only B's source (buf9). A's source (buf8)
+    //      is seeded LATER so A stalls first. ---------------------------------
+    axi_write(32'hE050_0000, {25'b0, 3'd1, 4'd9});   // buf 9 (bufB), ready
+
+    // ---- Start program 5 ------------------------------------------------
+    axi_write(32'hE000_0000, 32'd60);           // LOAD_PC: start at word 60
+    axi_write(32'hE010_0000, 32'b0);            // START
+
+    // ---- Let A stall while B is ready, then release A's source ----------
+    repeat(40) @(posedge clk); #1;
+    axi_write(32'hE050_0000, {25'b0, 3'd1, 4'd8});   // buf 8 (bufA) now full -> A can run
 end
 
 endmodule

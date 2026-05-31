@@ -63,12 +63,14 @@ assign table_empty_o = table_empty;
 assign load_entry[NUM_SCH_ENTRIES-1] = free_to_add_entry & load_new_entry_i;
 assign load_entry[NUM_SCH_ENTRIES-2:0] = 'b0;
 
-// Select the earliest (lowest-index) ready slot:
-integer j;
+// Strict in-order dispatch: only the oldest entry (index 0, since entries
+// compact toward 0) may dispatch, and only when it is ready.  A younger ready
+// entry can never pass a stalled older one — this is what guarantees inter-task
+// buffer ordering without register renaming or a reorder buffer.
 always @(*) begin
    select_to_go = {(NUM_SCH_ENTRIES+1){1'b0}};
-   for (j = NUM_SCH_ENTRIES-1; j >= 0; j = j - 1)
-      if (ready_to_go[j]) select_to_go = ({{NUM_SCH_ENTRIES{1'b0}}, 1'b1} << j);
+   if (ready_to_go[0])
+      select_to_go = {{NUM_SCH_ENTRIES{1'b0}}, 1'b1};
 end
 
 integer i;
@@ -112,7 +114,10 @@ assign entry_data_o = entry_data_mux;
 wire dispatch_ok             = ~cm_busy_i;
 assign delete_launched_entry = select_to_go[NUM_SCH_ENTRIES-1:0] & {NUM_SCH_ENTRIES{dispatch_ok}};
 assign delete_entry          = delete_launched_entry | delete_shifted_entry;
-assign launching             = (|ready_to_go) & dispatch_ok;
+// Launch only when an entry is actually selected (the in-order head).  Gating on
+// |ready_to_go would fire a dispatch pulse even when the head is not ready but a
+// younger entry is — nothing would be deleted and the pulse would repeat.
+assign launching             = (|select_to_go[NUM_SCH_ENTRIES-1:0]) & dispatch_ok;
 assign dispatch_to_acc_o     = launching;
 
 assign entry_valid_r[NUM_SCH_ENTRIES]   = 1'b0;

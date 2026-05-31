@@ -10,9 +10,15 @@ or tools that generate such programs.
 
 The scheduler reads a flat array of 32-bit words from external memory (the *program*). It
 fetches instructions sequentially and dispatches layer-computation tasks to one or more
-hardware accelerators (e.g. SNN, Hadamard). Tasks are held in a scheduler table and run
-out-of-order, subject to buffer dependency constraints. The program controls ordering through
-the buffer system; direct sequencing is not otherwise enforced between TASK instructions.
+hardware accelerators (e.g. SNN, Hadamard). Tasks are held in a scheduler table and dispatched
+**strictly in program order** — a task waits until it is the oldest entry in the table before it
+can dispatch, and only then when its buffer dependencies are satisfied. (A task may still
+*complete* out of order, on whichever accelerator finishes first.) In-order dispatch, together
+with the per-buffer state, is what guarantees correct read/write ordering on shared buffers
+without register renaming or a reorder buffer. The program therefore controls ordering through
+both program order and the buffer system: producers must precede their consumers in the program,
+and the compiler should interleave independent tasks so accelerators stay busy while a dependent
+task waits at the head of the table.
 
 Hardware loop counters (LOOP / LOOPEND) allow compact programs with repeated structure
 (e.g. iterating over timesteps in a spiking network). Eight independent counters are
@@ -27,8 +33,8 @@ of state maintained by the scheduler:
 |-------|---------|
 | **busy** | A task has claimed this buffer but has not yet completed. No other task may claim it until busy clears. |
 | **full** | The task that owns this buffer has completed. Consumer tasks may now read it. |
-| **colour** | A 1-bit tag. A consumer task only claims a full buffer if its colour field matches. Prevents a stale or reordered task from consuming data intended for a later task. |
-| **counter** | The number of consumers still to read this buffer (loaded from the TASK `#Targets` field). Decremented each time a consumer **completes** (not when it is dispatched — accelerators stream the buffer live until they finish). When it reaches zero, `full` clears, colour flips, and the buffer becomes free again. |
+| **colour** | A 1-bit tag, set on a producer's dispatch and checked on a consumer's dispatch (consumer colour must match). **Vestigial:** with strict in-order dispatch it is redundant for generation separation, and the hardware never auto-manages it (it does *not* flip when the buffer frees — the program would have to alternate it). Current programs leave it 0. |
+| **counter** | The number of consumers still to read this buffer (loaded from the TASK `#Targets` field). Decremented each time a consumer **completes** (not when it is dispatched — accelerators stream the buffer live until they finish). When it reaches zero, `full` clears and the buffer becomes free again. |
 
 ### Buffer Slot Modes
 
@@ -469,7 +475,7 @@ and dispatched. The values are pushed into the accelerator at dispatch time.
 1. **Buffer lifecycle (TARGET mode).** Assign a slot mode of TARGET (`11`) and set `#Targets = N`.
    The buffer becomes busy on dispatch and full on completion. Each of the N downstream TASKs
    that lists it as a SOURCE decrements the counter when that consumer **completes**; after the
-   Nth consumer completes, the buffer is automatically freed and its colour flipped. (A consumer
+   Nth consumer completes, the buffer is automatically freed. (A consumer
    holds the buffer until it finishes, so a later writer cannot overwrite data still being read.)
 
 2. **Read-Write buffer lifecycle.** Assign a slot mode of READ-WRITE (`10`) with `#Targets = N`.
