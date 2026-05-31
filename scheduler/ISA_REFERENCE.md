@@ -28,7 +28,7 @@ of state maintained by the scheduler:
 | **busy** | A task has claimed this buffer but has not yet completed. No other task may claim it until busy clears. |
 | **full** | The task that owns this buffer has completed. Consumer tasks may now read it. |
 | **colour** | A 1-bit tag. A consumer task only claims a full buffer if its colour field matches. Prevents a stale or reordered task from consuming data intended for a later task. |
-| **counter** | The number of consumers still to read this buffer (loaded from the TASK `#Targets` field). Decremented each time a consumer is dispatched. When it reaches zero, `full` clears, colour flips, and the buffer becomes free again. |
+| **counter** | The number of consumers still to read this buffer (loaded from the TASK `#Targets` field). Decremented each time a consumer **completes** (not when it is dispatched — accelerators stream the buffer live until they finish). When it reaches zero, `full` clears, colour flips, and the buffer becomes free again. |
 
 ### Buffer Slot Modes
 
@@ -37,7 +37,7 @@ Each buffer slot in a TASK instruction carries a 2-bit mode field:
 | Mode | Encoding | Dispatch condition | Action on dispatch | Action on completion |
 |------|----------|-------------------|--------------------|----------------------|
 | **UNUSED** | `2'b00` | None (slot skipped) | None | None |
-| **SOURCE** | `2'b01` | Buffer must be **full** and colour must match | Decrement usage counter | None |
+| **SOURCE** | `2'b01` | Buffer must be **full** and colour must match | None | Decrement usage counter (frees buffer when it hits zero) |
 | **READ-WRITE** | `2'b10` | Buffer must be **full** and colour must match | Mark buffer **busy** (clears both full and free) | Mark buffer **full** with stored #Targets |
 | **TARGET** | `2'b11` | Buffer must be **free** | Reserve buffer (clears free) | Mark buffer **full** with stored #Targets |
 
@@ -466,8 +466,9 @@ and dispatched. The values are pushed into the accelerator at dispatch time.
 
 1. **Buffer lifecycle (TARGET mode).** Assign a slot mode of TARGET (`11`) and set `#Targets = N`.
    The buffer becomes busy on dispatch and full on completion. Each of the N downstream TASKs
-   that lists it as a SOURCE decrements the counter; after the Nth consumer is dispatched, the
-   buffer is automatically freed and its colour flipped.
+   that lists it as a SOURCE decrements the counter when that consumer **completes**; after the
+   Nth consumer completes, the buffer is automatically freed and its colour flipped. (A consumer
+   holds the buffer until it finishes, so a later writer cannot overwrite data still being read.)
 
 2. **Read-Write buffer lifecycle.** Assign a slot mode of READ-WRITE (`10`) with `#Targets = N`.
    On dispatch the buffer transitions from full to busy (old data consumed); on completion it

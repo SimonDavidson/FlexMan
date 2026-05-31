@@ -285,6 +285,11 @@ integer ph3_dispatch_count;
 integer ph3_finish_count;
 reg     ph3_overlap;       // set if a new iteration's first task dispatches before the table drains
 
+// Phase 4 (free-on-completion WAR) counters:
+integer ph4_finish_count;
+reg     ph4_r_done;        // reader (R, acc0) has completed
+reg     ph4_war;           // set if writer (W) dispatches before reader R completes
+
 initial begin
     dispatch_count    = 0;
     finish_count      = 0;
@@ -297,6 +302,9 @@ initial begin
     ph3_dispatch_count = 0;
     ph3_finish_count  = 0;
     ph3_overlap       = 1'b0;
+    ph4_finish_count  = 0;
+    ph4_r_done        = 1'b0;
+    ph4_war           = 1'b0;
 end
 
 always @(posedge clk) begin
@@ -365,7 +373,7 @@ always @(posedge clk) begin
                     $display("[%0t ns] P2 FAIL – T31 dispatched before T30 completed.", $time);
                 phase = 2; // launch program 3 (LOOPEND barrier test)
             end
-        end else begin
+        end else if (phase == 2) begin
             // ---- Program 3: LOOPEND drain barrier (cross-timestep WAR) ---------
             // Count completions first so a same-cycle dispatch+complete is not a false fail.
             if (acc_finished_w[0]) $display("[%0t ns] P3 ACC0 done", $time);
@@ -390,6 +398,34 @@ always @(posedge clk) begin
                              $time);
                 else
                     $display("[%0t ns] P3 FAIL - cross-iteration overlap: timestep t+1 dispatched before timestep t drained.",
+                             $time);
+                phase = 3; // launch program 4 (free-on-completion WAR test)
+            end
+        end else begin
+            // ---- Program 4: free source buffer on COMPLETION, not dispatch -----
+            // R (acc0) reads X(buf5); W (acc1) overwrites X. W is gated only by X
+            // becoming free.  With free-on-completion, W must wait for R to finish.
+            // Count completions first so a same-cycle complete+dispatch is not missed.
+            if (acc_finished_w[0]) begin
+                $display("[%0t ns] P4 ACC0 done (reader R)", $time);
+                ph4_r_done = 1'b1;
+            end
+            if (acc_finished_w[1]) $display("[%0t ns] P4 ACC1 done (writer W)", $time);
+            ph4_finish_count = ph4_finish_count + acc_finished_w[0] + acc_finished_w[1];
+            if (start_new_block) begin
+                $display("[%0t ns] P4 DISPATCH  acc=%0d  cfg=%0d", $time,
+                         buffer_info[E_ACC_START +: TGT_ACC_SZ],
+                         buffer_info[E_CFG_START +: CFG_ID_SZ]);
+                // Writer W (cfg=31) must not dispatch until reader R has completed.
+                if (buffer_info[E_CFG_START +: CFG_ID_SZ] == 31 && !ph4_r_done)
+                    ph4_war = 1'b1;
+            end
+            if (ph4_finish_count >= 2) begin
+                if (!ph4_war)
+                    $display("[%0t ns] P4 PASS - WAR: writer waited for reader to complete before overwriting buffer.",
+                             $time);
+                else
+                    $display("[%0t ns] P4 FAIL - WAR: writer overwrote buffer while reader still reading.",
                              $time);
                 #20 $finish;
             end
@@ -503,6 +539,23 @@ initial begin
     prog_mem[45] = loopend_inst(3'd0);                      // LOOPEND id0 (drain barrier)
     prog_mem[46] = STOP_INST;
 
+    // ---- Program 4: free-on-completion WAR test (words 50–54) ------------
+    //   R (acc0,cfg30): SRC X(buf5)  -> TGT buf6   (reader of X)
+    //   W (acc1,cfg31): SRC buf7     -> TGT X(buf5) (overwrites X)
+    // W is gated only by X(buf5) becoming free.  With the SOURCE consume moved
+    // to completion, X frees only when R *completes*, so W must wait for R.
+    prog_mem[50] = tw1(2'd0, 5'd30, 1'b0,
+                       MODE_SRC, 4'd5, MODE_UNUSED, 4'd0, MODE_UNUSED, 4'd0);
+    prog_mem[51] = tw2(MODE_UNUSED, 4'd0, 3'd0,
+                       MODE_UNUSED, 4'd0, 3'd0,
+                       MODE_TGT, 4'd6, 3'd1);               // R writes buf6
+    prog_mem[52] = tw1(2'd1, 5'd31, 1'b0,
+                       MODE_SRC, 4'd7, MODE_UNUSED, 4'd0, MODE_UNUSED, 4'd0);
+    prog_mem[53] = tw2(MODE_UNUSED, 4'd0, 3'd0,
+                       MODE_UNUSED, 4'd0, 3'd0,
+                       MODE_TGT, 4'd5, 3'd1);               // W overwrites X(buf5)
+    prog_mem[54] = STOP_INST;
+
     // ---- Release reset ---------------------------------------------------
     repeat(4) @(posedge clk); #1;
     reset = 1'b0;
@@ -553,6 +606,23 @@ initial begin
 
     // ---- Start program 3 ------------------------------------------------
     axi_write(32'hE000_0000, 32'd40);           // LOAD_PC: start at word 40
+    axi_write(32'hE010_0000, 32'b0);            // START
+
+    // ---- Wait for program 3 to finish (monitor sets phase=3) -------------
+    wait(phase == 3);
+
+    // ---- Reset for program 4 --------------------------------------------
+    reset = 1'b1;
+    repeat(4) @(posedge clk); #1;
+    reset = 1'b0;
+
+    // ---- Pre-fill program 4 seed buffers --------------------------------
+    // X(buf5): read by R (ntgt=1); buf7: source for W (ntgt=1).
+    axi_write(32'hE050_0000, {25'b0, 3'd1, 4'd5});   // buf 5 (X),   ntgt=1
+    axi_write(32'hE050_0000, {25'b0, 3'd1, 4'd7});   // buf 7,       ntgt=1
+
+    // ---- Start program 4 ------------------------------------------------
+    axi_write(32'hE000_0000, 32'd50);           // LOAD_PC: start at word 50
     axi_write(32'hE010_0000, 32'b0);            // START
 end
 

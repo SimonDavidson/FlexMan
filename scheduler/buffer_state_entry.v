@@ -37,7 +37,7 @@ module buffer_state_entry
      input wire                     buff_now_full_i,
      input wire [TGT_COUNT_SZ-1:0]  buff_now_usage_count_i,
 
-     // One consumer of this buffer has been dispatched:
+     // One consumer of this buffer has completed:
      input wire                     buff_content_consumed_i,
 
      // Current status of this buffer:

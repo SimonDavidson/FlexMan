@@ -11,7 +11,7 @@
 //
 // Each TASK carries NUM_SLOTS buffer slots, each with a 2-bit mode:
 //   2'b00 unused  — skip
-//   2'b01 source  — consume (decrement usage count) on dispatch
+//   2'b01 source  — consume (decrement usage count) on completion
 //   2'b10 rw      — claim (free=0, full=0) on dispatch; refill on completion
 //   2'b11 target  — reserve (free=0) on dispatch; fill on completion
 //
@@ -145,7 +145,6 @@ end
 //-----------------------------------------------------------------
 always @*
 begin
-   buff_src_consumed = 'b0;
    buff_rw_claim     = 'b0;
    buff_new_tgt      = 'b0;
    new_task_acc      = 'b0;
@@ -159,9 +158,11 @@ begin
          bid = slot_buff_i[s*BUFF_INDX_SZ +: BUFF_INDX_SZ];
          md  = slot_mode_i[s*MODE_SZ      +: MODE_SZ];
          case (md)
-            `MODE_SRC: buff_src_consumed[bid] = 1'b1;
-            `MODE_RW:  buff_rw_claim[bid]     = 1'b1;
-            `MODE_TGT: buff_new_tgt[bid]      = 1'b1;
+            `MODE_RW:  buff_rw_claim[bid] = 1'b1;
+            `MODE_TGT: buff_new_tgt[bid]  = 1'b1;
+            // MODE_SRC: consume now happens on task completion (see below), not
+            // dispatch — accelerators stream the buffer live until they finish,
+            // so the buffer must stay allocated until the reader completes.
             default:   ;
          endcase
       end
@@ -173,7 +174,8 @@ end
 //-----------------------------------------------------------------
 always @*
 begin
-   buff_now_full = 'b0;
+   buff_now_full     = 'b0;
+   buff_src_consumed = 'b0;
    for (bi_idx = 0; bi_idx < NUM_BUFFERS; bi_idx = bi_idx + 1)
       buff_now_ntgt[bi_idx] = 'b0;
 
@@ -191,6 +193,12 @@ begin
             buff_now_ntgt[bid]   =
                tr_slot_ntgt[selected_acc_idx][s*TGT_COUNT_SZ +: TGT_COUNT_SZ];
          end
+         else if (md == `MODE_SRC)
+            // Decrement the read usage-count (and free on the last consumer)
+            // when the consuming task COMPLETES, not when it dispatches — closes
+            // the write-after-read hazard against accelerators that stream the
+            // buffer live from shared memory.
+            buff_src_consumed[bid] = 1'b1;
       end
    end
 end

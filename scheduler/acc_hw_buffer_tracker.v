@@ -14,7 +14,7 @@
 //
 // Slot modes:
 //   2'b00 unused  — ignored on completion
-//   2'b01 source  — consumed on dispatch, no action on completion
+//   2'b01 source  — no action on dispatch; consumed (usage count decremented) on completion
 //   2'b10 rw      — claimed on dispatch, refilled on completion
 //   2'b11 target  — reserved on dispatch, filled on completion
 //
