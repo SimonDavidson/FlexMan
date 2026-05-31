@@ -1214,7 +1214,12 @@ fill_unit #(
     .hd_src_r_wr_o      (fu_hd_src_r_wr),
     .hd_src_r_addr_o    (fu_hd_src_r_addr),
     .hd_src_r_data_o    (fu_hd_src_r_data),
-    .hd_src_r_wait_i    (fu_hd_src_r_wait)
+    .hd_src_r_wait_i    (fu_hd_src_r_wait),
+    // Shared activation/spike pool (siren-detector only; unused here)
+    .shared_data_wr_o   (),
+    .shared_data_addr_o (),
+    .shared_data_data_o (),
+    .shared_data_wait_i (1'b0)
 );
 
 endmodule // flexman

@@ -40,7 +40,7 @@ module fill_unit #(
     parameter BUFF_INDX_SZ  = 4,
     parameter ADDR_SIZE     = `ADDR_SIZE,   // 30
     parameter DATA_SZ       = 32,
-    parameter NUM_MEM_TYPES = 25
+    parameter NUM_MEM_TYPES = 26
 ) (
     input wire clk,
     input wire reset,
@@ -194,7 +194,13 @@ module fill_unit #(
     output wire                  hd_src_r_wr_o,
     output wire [ADDR_SIZE-1:0]  hd_src_r_addr_o,
     output wire [DATA_SZ-1:0]    hd_src_r_data_o,
-    input  wire                  hd_src_r_wait_i
+    input  wire                  hd_src_r_wait_i,
+
+    // ── Shared activation/spike pool (siren_detector_top routes the LSB) ─
+    output wire                  shared_data_wr_o,
+    output wire [ADDR_SIZE-1:0]  shared_data_addr_o,
+    output wire [DATA_SZ-1:0]    shared_data_data_o,
+    input  wire                  shared_data_wait_i
 );
 
 // ─── Memory index localparams ─────────────────────────────────────────────────
@@ -223,6 +229,9 @@ localparam IDX_HD_SRC_A     = 21;
 localparam IDX_HD_SRC_B     = 22;
 localparam IDX_HD_SRC_Z     = 23;
 localparam IDX_HD_SRC_R     = 24;
+// New destination: shared activation/spike pool (siren_detector_top routes
+// the address LSB to pick which physical bank in the interleaved scheme).
+localparam IDX_SHARED_DATA  = 25;
 
 // ─── FSM states ───────────────────────────────────────────────────────────────
 localparam ST_IDLE     = 2'd0;
@@ -285,7 +294,8 @@ wire selected_wait = (mem_sel_r[IDX_S0_WEIGHT]    & s0_weight_wait_i)   |
                      (mem_sel_r[IDX_HD_SRC_A]      & hd_src_a_wait_i)    |
                      (mem_sel_r[IDX_HD_SRC_B]      & hd_src_b_wait_i)    |
                      (mem_sel_r[IDX_HD_SRC_Z]      & hd_src_z_wait_i)    |
-                     (mem_sel_r[IDX_HD_SRC_R]      & hd_src_r_wait_i);
+                     (mem_sel_r[IDX_HD_SRC_R]      & hd_src_r_wait_i)    |
+                     (mem_sel_r[IDX_SHARED_DATA]   & shared_data_wait_i);
 
 // ─── FSM ──────────────────────────────────────────────────────────────────────
 always @(posedge clk) begin
@@ -453,5 +463,9 @@ assign hd_src_z_data_o  = wr_data;
 assign hd_src_r_wr_o    = do_write & mem_sel_r[IDX_HD_SRC_R];
 assign hd_src_r_addr_o  = wr_addr;
 assign hd_src_r_data_o  = wr_data;
+
+assign shared_data_wr_o   = do_write & mem_sel_r[IDX_SHARED_DATA];
+assign shared_data_addr_o = wr_addr;
+assign shared_data_data_o = wr_data;
 
 endmodule
