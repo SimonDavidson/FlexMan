@@ -160,6 +160,22 @@ function [31:0] nxt_inst;
     nxt_inst = {26'b0, nxt_out, nxt_in, 1'b0, 3'b100};
 endfunction
 
+localparam INST_LOOP    = 3'b110;
+localparam INST_LOOPEND = 3'b111;
+
+// LOOP: [31:6]=count, [5:3]=loop id, [2:0]=opcode.  Body runs count+1 times.
+function [31:0] loop_inst;
+    input [2:0]  id;
+    input [25:0] count;
+    loop_inst = {count, id, INST_LOOP};
+endfunction
+
+// LOOPEND: [5:3]=loop id, [2:0]=opcode.  Now a drain barrier (waits for table_empty).
+function [31:0] loopend_inst;
+    input [2:0] id;
+    loopend_inst = {26'b0, id, INST_LOOPEND};
+endfunction
+
 // ---- Clock and reset -------------------------------------------------------
 reg clk, reset;
 initial clk = 1'b0;
@@ -258,11 +274,16 @@ integer finish_count;
 integer nxt_in_count;
 integer nxt_out_count;
 
-// Phase 2 (RW contention test) counters:
-integer phase;             // 0 = program 1 running, 1 = program 2 running
+// Phase counters: 0 = program 1, 1 = program 2 (RW contention), 2 = program 3 (LOOPEND barrier)
+integer phase;
 integer ph2_dispatch_count;
 integer ph2_finish_count;
 reg     ph2_t31_premature; // set if 2nd dispatch fires before 1st completion
+
+// Phase 3 (LOOPEND drain barrier) counters:
+integer ph3_dispatch_count;
+integer ph3_finish_count;
+reg     ph3_overlap;       // set if a new iteration's first task dispatches before the table drains
 
 initial begin
     dispatch_count    = 0;
@@ -273,6 +294,9 @@ initial begin
     ph2_dispatch_count = 0;
     ph2_finish_count  = 0;
     ph2_t31_premature = 1'b0;
+    ph3_dispatch_count = 0;
+    ph3_finish_count  = 0;
+    ph3_overlap       = 1'b0;
 end
 
 always @(posedge clk) begin
@@ -317,7 +341,7 @@ always @(posedge clk) begin
                 end
                 phase = 1; // signal initial block to launch program 2
             end
-        end else begin
+        end else if (phase == 1) begin
             // ---- Program 2: RW contention test --------------------------------
             // Count completions first so a same-cycle dispatch+complete is not a false fail.
             if (acc_finished_w[0]) $display("[%0t ns] P2 ACC0 done", $time);
@@ -339,6 +363,34 @@ always @(posedge clk) begin
                              $time);
                 else
                     $display("[%0t ns] P2 FAIL – T31 dispatched before T30 completed.", $time);
+                phase = 2; // launch program 3 (LOOPEND barrier test)
+            end
+        end else begin
+            // ---- Program 3: LOOPEND drain barrier (cross-timestep WAR) ---------
+            // Count completions first so a same-cycle dispatch+complete is not a false fail.
+            if (acc_finished_w[0]) $display("[%0t ns] P3 ACC0 done", $time);
+            if (acc_finished_w[1]) $display("[%0t ns] P3 ACC1 done", $time);
+            ph3_finish_count = ph3_finish_count + acc_finished_w[0] + acc_finished_w[1];
+            if (start_new_block) begin
+                ph3_dispatch_count = ph3_dispatch_count + 1;
+                $display("[%0t ns] P3 DISPATCH #%0d  acc=%0d  cfg=%0d",
+                         $time, ph3_dispatch_count,
+                         buffer_info[E_ACC_START +: TGT_ACC_SZ],
+                         buffer_info[E_CFG_START +: CFG_ID_SZ]);
+                // Each timestep's first task (cfg=20) must see a fully drained table:
+                // every previously dispatched task has completed.  If not, the LOOPEND
+                // barrier failed and timestep t+1 overlapped timestep t.
+                if (buffer_info[E_CFG_START +: CFG_ID_SZ] == 20 &&
+                    ph3_finish_count != ph3_dispatch_count - 1)
+                    ph3_overlap = 1'b1;
+            end
+            if (ph3_finish_count >= 6) begin
+                if (!ph3_overlap)
+                    $display("[%0t ns] P3 PASS - LOOPEND barrier: 3 timesteps, no cross-iteration overlap.",
+                             $time);
+                else
+                    $display("[%0t ns] P3 FAIL - cross-iteration overlap: timestep t+1 dispatched before timestep t drained.",
+                             $time);
                 #20 $finish;
             end
         end
@@ -427,6 +479,30 @@ initial begin
     for (k = 24; k < 32; k = k + 1) prog_mem[k] = 32'h0;
     for (k = 37; k < 64; k = k + 1) prog_mem[k] = 32'h0;
 
+    // ---- Program 3: LOOPEND drain barrier test (words 40–46) -------------
+    // 3 timesteps (LOOP count=2).  Body = 2 tasks:
+    //   task1 (acc0,cfg20): SRC inA(buf0), RW P(buf8), TGT mid(buf9 ntgt=1)
+    //   task2 (acc1,cfg21): SRC mid(buf9), RW Q(buf11)
+    // P,Q are persistent recurrent RW state; mid is the per-timestep inter-layer
+    // output, produced then consumed within each iteration.  task1 on acc0 and
+    // task2 on acc1 so any cross-iteration overlap would be gated purely by
+    // buffer state, not accelerator-busy.  With the LOOPEND barrier each timestep
+    // must fully drain before the next begins.  (Assignments come after the
+    // zero-fill loops above so they are not overwritten.)
+    prog_mem[40] = loop_inst(3'd0, 26'd2);                  // LOOP id0, 3 iterations
+    prog_mem[41] = tw1(2'd0, 5'd20, 1'b0,
+                       MODE_SRC, 4'd0, MODE_UNUSED, 4'd0, MODE_UNUSED, 4'd0);
+    prog_mem[42] = tw2(MODE_RW, 4'd8, 3'd0,                 // slot3: RW P(buf8)
+                       MODE_UNUSED, 4'd0, 3'd0,
+                       MODE_TGT, 4'd9, 3'd1);               // slot5: TGT mid(buf9)
+    prog_mem[43] = tw1(2'd1, 5'd21, 1'b0,
+                       MODE_SRC, 4'd9, MODE_UNUSED, 4'd0, MODE_UNUSED, 4'd0);
+    prog_mem[44] = tw2(MODE_RW, 4'd11, 3'd0,                // slot3: RW Q(buf11)
+                       MODE_UNUSED, 4'd0, 3'd0,
+                       MODE_UNUSED, 4'd0, 3'd0);
+    prog_mem[45] = loopend_inst(3'd0);                      // LOOPEND id0 (drain barrier)
+    prog_mem[46] = STOP_INST;
+
     // ---- Release reset ---------------------------------------------------
     repeat(4) @(posedge clk); #1;
     reset = 1'b0;
@@ -458,6 +534,25 @@ initial begin
 
     // ---- Start program 2 ------------------------------------------------
     axi_write(32'hE000_0000, 32'd32);           // LOAD_PC: start at word 32
+    axi_write(32'hE010_0000, 32'b0);            // START
+
+    // ---- Wait for program 2 to finish (monitor sets phase=2) -------------
+    wait(phase == 2);
+
+    // ---- Reset for program 3 --------------------------------------------
+    reset = 1'b1;
+    repeat(4) @(posedge clk); #1;
+    reset = 1'b0;
+
+    // ---- Pre-fill program 3 seed buffers --------------------------------
+    // inA(buf0): input, ntgt=3 so it stays full across all 3 timestep reads.
+    // P(buf8), Q(buf11): recurrent RW state, seeded full so iter-1 RW slots dispatch.
+    axi_write(32'hE050_0000, {25'b0, 3'd3, 4'd0});   // buf 0  (inA), ntgt=3
+    axi_write(32'hE050_0000, {25'b0, 3'd1, 4'd8});   // buf 8  (P),   full
+    axi_write(32'hE050_0000, {25'b0, 3'd1, 4'd11});  // buf 11 (Q),   full
+
+    // ---- Start program 3 ------------------------------------------------
+    axi_write(32'hE000_0000, 32'd40);           // LOAD_PC: start at word 40
     axi_write(32'hE010_0000, 32'b0);            // START
 end
 

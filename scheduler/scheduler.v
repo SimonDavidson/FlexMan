@@ -143,6 +143,12 @@ wire load_new_entry;
 wire table_slot_free;
 wire table_empty;
 
+// Fully drained = nothing waiting to dispatch (table_empty) AND nothing still
+// executing on any accelerator (~|acc_busy_i).  table_empty alone is only a
+// *dispatch* barrier (entries are deleted on dispatch, not completion), so the
+// LOOPEND completion barrier must also wait for in-flight tasks to finish.
+wire all_tasks_drained = table_empty & ~|acc_busy_i;
+
 reg  prog_running_r;
 wire prog_running_nxt;
 wire keep_fetching;
@@ -457,7 +463,7 @@ assign inst_consumed = inst_valid_for_decode & ~test_stall_pipe & (
                         |  inst_is_jump
                         | (inst_is_check  & check_result_ready)
                         |  inst_is_loop
-                        |  inst_is_loopend
+                        | (inst_is_loopend & all_tasks_drained)
                         | (inst_is_nxt    & table_empty)
                        )
                      | inst_consumed_w2;

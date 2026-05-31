@@ -347,9 +347,21 @@ Closes a hardware loop. The loop ID must match the enclosing LOOP.
 
 **Behaviour:**
 
+LOOPEND is a **completion barrier**: it stalls until the scheduler table is empty *and* every
+accelerator is idle (no task still in flight) before it acts. Only once the current iteration's
+tasks have all **completed** does it:
+
 - **Counter > 0:** Decrement the counter and jump to the saved restart address (the instruction
   immediately after the matching LOOP). The body executes one more time.
 - **Counter = 0:** Fall through to the next instruction in sequence.
+
+This barrier makes one loop iteration a global synchronisation boundary: the next iteration
+(e.g. the next SNN timestep) cannot begin while the previous iteration's tasks are still
+running. It closes cross-iteration write-after-read hazards on read-write state buffers
+(membrane potentials, synaptic currents) that are reused every timestep — the next timestep's
+producer can never race the current timestep's consumers, because the table is fully drained
+first. (Note this is stronger than `NXT`, whose `table_empty` gate only waits for all tasks to
+be *dispatched*, not completed.)
 
 Loops may be nested up to 8 levels deep provided each level uses a distinct loop ID. There is
 no hardware enforcement of proper nesting; mis-matched IDs produce undefined behaviour.
