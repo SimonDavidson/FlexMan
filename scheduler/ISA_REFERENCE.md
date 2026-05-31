@@ -507,4 +507,7 @@ and dispatched. The values are pushed into the accelerator at dispatch time.
    total (the counter is decremented on each backward edge; the body falls through when the
    counter reaches zero). Each of the 8 loop counters is independent; assign a distinct loop
    ID to each nesting level. A typical SNN timestep loop places LOOP at the start of the
-   timestep body and LOOPEND just before the NXT instruction that advances the time window.
+   timestep body, the NXT that advances the time window at the end of the body, and LOOPEND
+   immediately after that NXT — so the window advances on every iteration (NXT is inside the
+   loop, not after it). LOOPEND itself is a completion barrier (waits for all dispatched tasks
+   to finish), so each timestep is fully drained before the next begins.
