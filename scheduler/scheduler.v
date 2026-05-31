@@ -146,7 +146,9 @@ wire table_empty;
 // Fully drained = nothing waiting to dispatch (table_empty) AND nothing still
 // executing on any accelerator (~|acc_busy_i).  table_empty alone is only a
 // *dispatch* barrier (entries are deleted on dispatch, not completion), so the
-// LOOPEND completion barrier must also wait for in-flight tasks to finish.
+// LOOPEND and NXT completion barriers must also wait for in-flight tasks to
+// finish — NXT must not advance the input/output window pointer until the tasks
+// using the current window have completed.
 wire all_tasks_drained = table_empty & ~|acc_busy_i;
 
 reg  prog_running_r;
@@ -464,15 +466,15 @@ assign inst_consumed = inst_valid_for_decode & ~test_stall_pipe & (
                         | (inst_is_check  & check_result_ready)
                         |  inst_is_loop
                         | (inst_is_loopend & all_tasks_drained)
-                        | (inst_is_nxt    & table_empty)
+                        | (inst_is_nxt    & all_tasks_drained)
                        )
                      | inst_consumed_w2;
 
 // load_new_entry fires when word 2 of a two-word instruction is latched:
 assign load_new_entry = inst_consumed_w2;
 
-assign nxt_input_pulse_o  = inst_valid_for_decode & inst_is_nxt & inst_word[4] & table_empty & ~test_stall_pipe;
-assign nxt_output_pulse_o = inst_valid_for_decode & inst_is_nxt & inst_word[5] & table_empty & ~test_stall_pipe;
+assign nxt_input_pulse_o  = inst_valid_for_decode & inst_is_nxt & inst_word[4] & all_tasks_drained & ~test_stall_pipe;
+assign nxt_output_pulse_o = inst_valid_for_decode & inst_is_nxt & inst_word[5] & all_tasks_drained & ~test_stall_pipe;
 
 assign fill_value_o      = fill_value_r;
 assign fill_block_size_o = fill_block_size_r;

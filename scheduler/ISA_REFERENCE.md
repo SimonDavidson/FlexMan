@@ -235,9 +235,11 @@ a non-zero result.
 
 ### NXT — `opcode 0b100`
 
-Advances the time-window pointer for input data, output data, or both. Acts as a **barrier**:
-the scheduler stalls until every entry currently in the task table has completed, then fires
-the selected pulse(s) for exactly one cycle before continuing.
+Advances the time-window pointer for input data, output data, or both. Acts as a **completion
+barrier**: the scheduler stalls until the task table is empty *and* every accelerator is idle
+(all in-flight tasks have completed — not merely dispatched), then fires the selected pulse(s)
+for exactly one cycle before continuing. Waiting for completion ensures the window pointer is
+not advanced while an in-flight task is still reading/writing the current window.
 
 ```
  31              6   5        4   3         2    0
@@ -360,8 +362,8 @@ This barrier makes one loop iteration a global synchronisation boundary: the nex
 running. It closes cross-iteration write-after-read hazards on read-write state buffers
 (membrane potentials, synaptic currents) that are reused every timestep — the next timestep's
 producer can never race the current timestep's consumers, because the table is fully drained
-first. (Note this is stronger than `NXT`, whose `table_empty` gate only waits for all tasks to
-be *dispatched*, not completed.)
+first. (`NXT` uses the same completion-drain condition, so an `NXT` inside the loop body and the
+`LOOPEND` at its end both enforce it.)
 
 Loops may be nested up to 8 levels deep provided each level uses a distinct loop ID. There is
 no hardware enforcement of proper nesting; mis-matched IDs produce undefined behaviour.
