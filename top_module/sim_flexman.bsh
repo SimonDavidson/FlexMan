@@ -4,6 +4,7 @@
 xrun -sv -timescale 10ps/1ps -top tb_flexman \
   tb_flexman.v \
   flexman.v \
+  ../shared/shared_pool.v \
   ../scheduler/scheduler.v \
   ../scheduler/sch_table.v \
   ../scheduler/sch_entry.v \

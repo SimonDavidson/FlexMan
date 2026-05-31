@@ -67,50 +67,32 @@ reg [31:0]          prog_mem       [0:PROG_DEPTH-1];
 reg [31:0]          cfg_mem        [0:MEM_DEPTH-1];
 reg [31:0]          bba_mem        [0:MEM_DEPTH-1];
 
+// Dedicated per-acc mems (weight/bias/thresh/pot only).  act/spike/syn_curr and
+// ALL Hadamard buffers (src_a/b/z/r) now live in the shared pool
+// (u_m0..u_m3_data_mem below).  Access the pool via pool_rd()/pool_wr().
 // snnAcc0
 reg [`WTD_BITS-1:0] s0_weight_mem  [0:MEM_DEPTH-1];
-reg [`ACT_BITS-1:0] s0_act_mem     [0:MEM_DEPTH-1];
-reg [`POT_BITS-1:0] s0_syn_curr_mem[0:MEM_DEPTH-1];
 reg [`WTD_BITS-1:0] s0_bias_curr_mem[0:MEM_DEPTH-1];
 reg [`WTD_BITS-1:0] s0_thresh_mem  [0:MEM_DEPTH-1];
 reg [`POT_BITS-1:0] s0_pot_mem     [0:MEM_DEPTH-1];
-reg [`ACT_BITS-1:0] s0_spike_mem   [0:MEM_DEPTH-1];
-
 // snnAcc1
 reg [`WTD_BITS-1:0] s1_weight_mem  [0:MEM_DEPTH-1];
-reg [`ACT_BITS-1:0] s1_act_mem     [0:MEM_DEPTH-1];
-reg [`POT_BITS-1:0] s1_syn_curr_mem[0:MEM_DEPTH-1];
 reg [`WTD_BITS-1:0] s1_bias_curr_mem[0:MEM_DEPTH-1];
 reg [`WTD_BITS-1:0] s1_thresh_mem  [0:MEM_DEPTH-1];
 reg [`POT_BITS-1:0] s1_pot_mem     [0:MEM_DEPTH-1];
-reg [`ACT_BITS-1:0] s1_spike_mem   [0:MEM_DEPTH-1];
-
 // annAcc
 reg [`WTD_BITS-1:0] a0_weight_mem  [0:MEM_DEPTH-1];
-reg [`ACT_BITS-1:0] a0_act_mem     [0:MEM_DEPTH-1];
-reg [`POT_BITS-1:0] a0_syn_curr_mem[0:MEM_DEPTH-1];
 reg [`WTD_BITS-1:0] a0_bias_curr_mem[0:MEM_DEPTH-1];
 reg [`WTD_BITS-1:0] a0_thresh_mem  [0:MEM_DEPTH-1];
 reg [`POT_BITS-1:0] a0_pot_mem     [0:MEM_DEPTH-1];
-reg [`ACT_BITS-1:0] a0_spike_mem   [0:MEM_DEPTH-1];
-
-// Hadamard
-reg [31:0]          hd_src_a_mem   [0:MEM_DEPTH-1];
-reg [31:0]          hd_src_b_mem   [0:MEM_DEPTH-1];
-reg [31:0]          hd_src_z_mem   [0:MEM_DEPTH-1];
-reg [31:0]          hd_src_r_mem   [0:MEM_DEPTH-1];
 
 // ─── DUT input regs (driven procedurally) ────────────────────────────────────
 reg         sys_req_i;
 reg  [31:0] sys_addr_i;
 reg  [31:0] sys_data_i;
 
-reg                         start_program_i;
-reg  [PROG_ADDR_BITS-1:0]   program_addr_i;
-
-reg  mark_buff_as_full_i;
-reg  [BUFF_INDX_SZ-1:0]   full_buff_id_i;
-reg  [TGT_COUNT_SZ-1:0]   full_buff_usage_i;
+// Program load + control now go over the shared AXI bus (scheduler internalised
+// start_program / mark_buff_as_full), so no dedicated control regs here.
 
 // ─── DUT outputs (wires) ──────────────────────────────────────────────────────
 wire         sys_ack_o;
@@ -118,6 +100,10 @@ wire [31:0]  sys_data_o;
 
 wire [`ADDR_SIZE-1:0]      prog_mem_addr_o;
 wire                        prog_mem_req_o;
+wire                        prog_mem_wr_o;
+wire [PROG_ADDR_BITS-1:0]   prog_mem_wr_addr_o;
+wire [PROG_DATA_BITS-1:0]   prog_mem_wr_data_o;
+wire                        prog_mem_wr_wait_i = 1'b0;
 
 wire                        cfg_mem_rd_o;
 wire [31:0]                 cfg_mem_addr_o;
@@ -145,17 +131,6 @@ wire                        s0_weight_mem_wr_o;
 wire [`ADDR_SIZE-1:0]       s0_weight_mem_wr_addr_o;
 wire [31:0]                 s0_weight_mem_wr_data_o;
 
-wire                        s0_act_mem_req_o;
-wire [`ADDR_SIZE-1:0]       s0_act_mem_addr_o;
-wire                        s0_act_mem_wr_o;
-wire [`ADDR_SIZE-1:0]       s0_act_mem_wr_addr_o;
-wire [31:0]                 s0_act_mem_wr_data_o;
-
-wire                        s0_syn_curr_mem_wr_o;
-wire                        s0_syn_curr_mem_rd_o;
-wire [`ADDR_SIZE-1:0]       s0_syn_curr_mem_addr_o;
-wire [`POT_BITS-1:0]        s0_syn_curr_mem_data_o;
-
 wire                        s0_bias_curr_mem_rd_o;
 wire [`ADDR_SIZE-1:0]       s0_bias_curr_mem_addr_o;
 wire                        s0_bias_curr_mem_wr_o;
@@ -173,27 +148,12 @@ wire                        s0_pot_mem_rd_o;
 wire [`ADDR_SIZE-1:0]       s0_pot_mem_addr_o;
 wire [`POT_BITS-1:0]        s0_pot_mem_data_o;
 
-wire                        s0_spike_mem_wr_o;
-wire [`ADDR_SIZE-1:0]       s0_spike_mem_addr_o;
-wire [`ACT_BITS-1:0]        s0_spike_mem_data_o;
-
 // snnAcc1
 wire                        s1_weight_mem_rd_o;
 wire [`ADDR_SIZE-1:0]       s1_weight_mem_addr_o;
 wire                        s1_weight_mem_wr_o;
 wire [`ADDR_SIZE-1:0]       s1_weight_mem_wr_addr_o;
 wire [31:0]                 s1_weight_mem_wr_data_o;
-
-wire                        s1_act_mem_req_o;
-wire [`ADDR_SIZE-1:0]       s1_act_mem_addr_o;
-wire                        s1_act_mem_wr_o;
-wire [`ADDR_SIZE-1:0]       s1_act_mem_wr_addr_o;
-wire [31:0]                 s1_act_mem_wr_data_o;
-
-wire                        s1_syn_curr_mem_wr_o;
-wire                        s1_syn_curr_mem_rd_o;
-wire [`ADDR_SIZE-1:0]       s1_syn_curr_mem_addr_o;
-wire [`POT_BITS-1:0]        s1_syn_curr_mem_data_o;
 
 wire                        s1_bias_curr_mem_rd_o;
 wire [`ADDR_SIZE-1:0]       s1_bias_curr_mem_addr_o;
@@ -212,27 +172,12 @@ wire                        s1_pot_mem_rd_o;
 wire [`ADDR_SIZE-1:0]       s1_pot_mem_addr_o;
 wire [`POT_BITS-1:0]        s1_pot_mem_data_o;
 
-wire                        s1_spike_mem_wr_o;
-wire [`ADDR_SIZE-1:0]       s1_spike_mem_addr_o;
-wire [`ACT_BITS-1:0]        s1_spike_mem_data_o;
-
 // annAcc
 wire                        a0_weight_mem_rd_o;
 wire [`ADDR_SIZE-1:0]       a0_weight_mem_addr_o;
 wire                        a0_weight_mem_wr_o;
 wire [`ADDR_SIZE-1:0]       a0_weight_mem_wr_addr_o;
 wire [31:0]                 a0_weight_mem_wr_data_o;
-
-wire                        a0_act_mem_req_o;
-wire [`ADDR_SIZE-1:0]       a0_act_mem_addr_o;
-wire                        a0_act_mem_wr_o;
-wire [`ADDR_SIZE-1:0]       a0_act_mem_wr_addr_o;
-wire [31:0]                 a0_act_mem_wr_data_o;
-
-wire                        a0_syn_curr_mem_wr_o;
-wire                        a0_syn_curr_mem_rd_o;
-wire [`ADDR_SIZE-1:0]       a0_syn_curr_mem_addr_o;
-wire [`POT_BITS-1:0]        a0_syn_curr_mem_data_o;
 
 wire                        a0_bias_curr_mem_rd_o;
 wire [`ADDR_SIZE-1:0]       a0_bias_curr_mem_addr_o;
@@ -251,34 +196,19 @@ wire                        a0_pot_mem_rd_o;
 wire [`ADDR_SIZE-1:0]       a0_pot_mem_addr_o;
 wire [`POT_BITS-1:0]        a0_pot_mem_data_o;
 
-wire                        a0_spike_mem_wr_o;
-wire [`ADDR_SIZE-1:0]       a0_spike_mem_addr_o;
-wire [`ACT_BITS-1:0]        a0_spike_mem_data_o;
-
-// Hadamard
-wire                        hd_src_a_mem_rd_o;
-wire [`ADDR_SIZE-1:0]       hd_src_a_mem_addr_o;
-wire                        hd_src_a_mem_wr_o;
-wire [`ADDR_SIZE-1:0]       hd_src_a_mem_wr_addr_o;
-wire [31:0]                 hd_src_a_mem_wr_data_o;
-
-wire                        hd_src_b_mem_rd_o;
-wire [`ADDR_SIZE-1:0]       hd_src_b_mem_addr_o;
-wire                        hd_src_b_mem_wr_o;
-wire [`ADDR_SIZE-1:0]       hd_src_b_mem_wr_addr_o;
-wire [31:0]                 hd_src_b_mem_wr_data_o;
-
-wire                        hd_src_z_mem_rd_o;
-wire [`ADDR_SIZE-1:0]       hd_src_z_mem_addr_o;
-wire                        hd_src_z_mem_wr_o;
-wire [`ADDR_SIZE-1:0]       hd_src_z_mem_wr_addr_o;
-wire [31:0]                 hd_src_z_mem_wr_data_o;
-
-wire                        hd_src_r_mem_rd_o;
-wire [`ADDR_SIZE-1:0]       hd_src_r_mem_addr_o;
-wire                        hd_src_r_mem_wr_o;
-wire [`ADDR_SIZE-1:0]       hd_src_r_mem_wr_addr_o;
-wire [31:0]                 hd_src_r_mem_data_o;
+// Shared pool banks (4 interleaved) — driven by the DUT's m0..m3 ports.
+wire                  m0_data_mem_rd_o, m0_data_mem_wr_o;
+wire [`ADDR_SIZE-1:0] m0_data_mem_addr_o;
+wire [31:0]           m0_data_mem_wdata_o;
+wire                  m1_data_mem_rd_o, m1_data_mem_wr_o;
+wire [`ADDR_SIZE-1:0] m1_data_mem_addr_o;
+wire [31:0]           m1_data_mem_wdata_o;
+wire                  m2_data_mem_rd_o, m2_data_mem_wr_o;
+wire [`ADDR_SIZE-1:0] m2_data_mem_addr_o;
+wire [31:0]           m2_data_mem_wdata_o;
+wire                  m3_data_mem_rd_o, m3_data_mem_wr_o;
+wire [`ADDR_SIZE-1:0] m3_data_mem_addr_o;
+wire [31:0]           m3_data_mem_wdata_o;
 
 // ─── Constant inputs (tied to 0) ──────────────────────────────────────────────
 wire test_stall_pipe      = 1'b0;
@@ -289,48 +219,32 @@ wire fu_bba_mem_wait_i    = 1'b0;
 
 wire s0_weight_mem_wait_i    = 1'b0;
 wire s0_weight_mem_wr_wait_i = 1'b0;
-wire s0_act_mem_wait_i       = 1'b0;
-wire s0_act_mem_wr_wait_i    = 1'b0;
-wire s0_syn_curr_mem_wait_i  = 1'b0;
 wire s0_bias_curr_mem_wait_i = 1'b0;
 wire s0_bias_curr_mem_wr_wait_i = 1'b0;
 wire s0_thresh_mem_wait_i    = 1'b0;
 wire s0_thresh_mem_wr_wait_i = 1'b0;
 wire s0_pot_mem_wait_i       = 1'b0;
-wire s0_spike_mem_wait_i     = 1'b0;
 
 wire s1_weight_mem_wait_i    = 1'b0;
 wire s1_weight_mem_wr_wait_i = 1'b0;
-wire s1_act_mem_wait_i       = 1'b0;
-wire s1_act_mem_wr_wait_i    = 1'b0;
-wire s1_syn_curr_mem_wait_i  = 1'b0;
 wire s1_bias_curr_mem_wait_i = 1'b0;
 wire s1_bias_curr_mem_wr_wait_i = 1'b0;
 wire s1_thresh_mem_wait_i    = 1'b0;
 wire s1_thresh_mem_wr_wait_i = 1'b0;
 wire s1_pot_mem_wait_i       = 1'b0;
-wire s1_spike_mem_wait_i     = 1'b0;
 
 wire a0_weight_mem_wait_i    = 1'b0;
 wire a0_weight_mem_wr_wait_i = 1'b0;
-wire a0_act_mem_wait_i       = 1'b0;
-wire a0_act_mem_wr_wait_i    = 1'b0;
-wire a0_syn_curr_mem_wait_i  = 1'b0;
 wire a0_bias_curr_mem_wait_i = 1'b0;
 wire a0_bias_curr_mem_wr_wait_i = 1'b0;
 wire a0_thresh_mem_wait_i    = 1'b0;
 wire a0_thresh_mem_wr_wait_i = 1'b0;
 wire a0_pot_mem_wait_i       = 1'b0;
-wire a0_spike_mem_wait_i     = 1'b0;
 
-wire hd_src_a_mem_wait_i     = 1'b0;
-wire hd_src_a_mem_wr_wait_i  = 1'b0;
-wire hd_src_b_mem_wait_i     = 1'b0;
-wire hd_src_b_mem_wr_wait_i  = 1'b0;
-wire hd_src_z_mem_wait_i     = 1'b0;
-wire hd_src_z_mem_wr_wait_i  = 1'b0;
-wire hd_src_r_mem_wait_i     = 1'b0;
-wire hd_src_r_mem_wr_wait_i  = 1'b0;
+wire m0_data_mem_wait_i      = 1'b0;
+wire m1_data_mem_wait_i      = 1'b0;
+wire m2_data_mem_wait_i      = 1'b0;
+wire m3_data_mem_wait_i      = 1'b0;
 
 // ─── Memory read data (combinatorial from arrays) ─────────────────────────────
 wire [PROG_DATA_BITS-1:0] prog_mem_data_i =
@@ -348,10 +262,6 @@ wire [31:0] fu_bba_mem_data_i =
 // snnAcc0 read data
 wire [`WTD_BITS-1:0] s0_weight_mem_data_i =
     s0_weight_mem[s0_weight_mem_addr_o[MEM_ADDR_BITS-1:0]];
-wire [`ACT_BITS-1:0] s0_act_mem_data_i =
-    s0_act_mem[s0_act_mem_addr_o[MEM_ADDR_BITS-1:0]];
-wire [`POT_BITS-1:0] s0_syn_curr_mem_data_i =
-    s0_syn_curr_mem[s0_syn_curr_mem_addr_o[MEM_ADDR_BITS-1:0]];
 wire [`WTD_BITS-1:0] s0_bias_curr_mem_data_i =
     s0_bias_curr_mem[s0_bias_curr_mem_addr_o[MEM_ADDR_BITS-1:0]];
 wire [`WTD_BITS-1:0] s0_thresh_mem_data_i =
@@ -362,10 +272,6 @@ wire [`POT_BITS-1:0] s0_pot_mem_data_i =
 // snnAcc1 read data
 wire [`WTD_BITS-1:0] s1_weight_mem_data_i =
     s1_weight_mem[s1_weight_mem_addr_o[MEM_ADDR_BITS-1:0]];
-wire [`ACT_BITS-1:0] s1_act_mem_data_i =
-    s1_act_mem[s1_act_mem_addr_o[MEM_ADDR_BITS-1:0]];
-wire [`POT_BITS-1:0] s1_syn_curr_mem_data_i =
-    s1_syn_curr_mem[s1_syn_curr_mem_addr_o[MEM_ADDR_BITS-1:0]];
 wire [`WTD_BITS-1:0] s1_bias_curr_mem_data_i =
     s1_bias_curr_mem[s1_bias_curr_mem_addr_o[MEM_ADDR_BITS-1:0]];
 wire [`WTD_BITS-1:0] s1_thresh_mem_data_i =
@@ -376,10 +282,6 @@ wire [`POT_BITS-1:0] s1_pot_mem_data_i =
 // annAcc read data
 wire [`WTD_BITS-1:0] a0_weight_mem_data_i =
     a0_weight_mem[a0_weight_mem_addr_o[MEM_ADDR_BITS-1:0]];
-wire [`ACT_BITS-1:0] a0_act_mem_data_i =
-    a0_act_mem[a0_act_mem_addr_o[MEM_ADDR_BITS-1:0]];
-wire [`POT_BITS-1:0] a0_syn_curr_mem_data_i =
-    a0_syn_curr_mem[a0_syn_curr_mem_addr_o[MEM_ADDR_BITS-1:0]];
 wire [`WTD_BITS-1:0] a0_bias_curr_mem_data_i =
     a0_bias_curr_mem[a0_bias_curr_mem_addr_o[MEM_ADDR_BITS-1:0]];
 wire [`WTD_BITS-1:0] a0_thresh_mem_data_i =
@@ -387,15 +289,49 @@ wire [`WTD_BITS-1:0] a0_thresh_mem_data_i =
 wire [`POT_BITS-1:0] a0_pot_mem_data_i =
     a0_pot_mem[a0_pot_mem_addr_o[MEM_ADDR_BITS-1:0]];
 
-// Hadamard read data
-wire [31:0] hd_src_a_mem_data_i =
-    hd_src_a_mem[hd_src_a_mem_addr_o[MEM_ADDR_BITS-1:0]];
-wire [31:0] hd_src_b_mem_data_i =
-    hd_src_b_mem[hd_src_b_mem_addr_o[MEM_ADDR_BITS-1:0]];
-wire [31:0] hd_src_z_mem_data_i =
-    hd_src_z_mem[hd_src_z_mem_addr_o[MEM_ADDR_BITS-1:0]];
-wire [31:0] hd_src_r_mem_data_i =
-    hd_src_r_mem[hd_src_r_mem_addr_o[MEM_ADDR_BITS-1:0]];
+// ─── Shared act/spike/syn_curr + Hadamard pool — 4 interleaved sync banks ────
+// bank = logical addr[1:0]; the DUT emits the bank-local word (logical >> 2).
+wire [31:0] m0_data_mem_rdata_i, m1_data_mem_rdata_i;
+wire [31:0] m2_data_mem_rdata_i, m3_data_mem_rdata_i;
+sram_model #(.DATA_W(32), .DEPTH(MEM_DEPTH)) u_m0_data_mem (
+    .clk(clk), .we(m0_data_mem_wr_o), .re(m0_data_mem_rd_o),
+    .addr(m0_data_mem_addr_o[MEM_ADDR_BITS-1:0]),
+    .wdata(m0_data_mem_wdata_o), .rdata(m0_data_mem_rdata_i));
+sram_model #(.DATA_W(32), .DEPTH(MEM_DEPTH)) u_m1_data_mem (
+    .clk(clk), .we(m1_data_mem_wr_o), .re(m1_data_mem_rd_o),
+    .addr(m1_data_mem_addr_o[MEM_ADDR_BITS-1:0]),
+    .wdata(m1_data_mem_wdata_o), .rdata(m1_data_mem_rdata_i));
+sram_model #(.DATA_W(32), .DEPTH(MEM_DEPTH)) u_m2_data_mem (
+    .clk(clk), .we(m2_data_mem_wr_o), .re(m2_data_mem_rd_o),
+    .addr(m2_data_mem_addr_o[MEM_ADDR_BITS-1:0]),
+    .wdata(m2_data_mem_wdata_o), .rdata(m2_data_mem_rdata_i));
+sram_model #(.DATA_W(32), .DEPTH(MEM_DEPTH)) u_m3_data_mem (
+    .clk(clk), .we(m3_data_mem_wr_o), .re(m3_data_mem_rd_o),
+    .addr(m3_data_mem_addr_o[MEM_ADDR_BITS-1:0]),
+    .wdata(m3_data_mem_wdata_o), .rdata(m3_data_mem_rdata_i));
+
+// Pool access helpers: logical address -> (bank = a[1:0], word = a>>2).
+function [31:0] pool_rd;
+    input integer a;
+    case (a[1:0])
+        2'd0: pool_rd = u_m0_data_mem.mem[a >> 2];
+        2'd1: pool_rd = u_m1_data_mem.mem[a >> 2];
+        2'd2: pool_rd = u_m2_data_mem.mem[a >> 2];
+        default: pool_rd = u_m3_data_mem.mem[a >> 2];
+    endcase
+endfunction
+task pool_wr;
+    input integer a;
+    input [31:0]  d;
+    begin
+        case (a[1:0])
+            2'd0: u_m0_data_mem.mem[a >> 2] = d;
+            2'd1: u_m1_data_mem.mem[a >> 2] = d;
+            2'd2: u_m2_data_mem.mem[a >> 2] = d;
+            default: u_m3_data_mem.mem[a >> 2] = d;
+        endcase
+    end
+endtask
 
 // ─── Sequential write-backs to behavioral memories ────────────────────────────
 always @(posedge clk) begin
@@ -410,12 +346,6 @@ always @(posedge clk) begin
     if (s0_weight_mem_wr_o)
         s0_weight_mem[s0_weight_mem_wr_addr_o[MEM_ADDR_BITS-1:0]]
             <= s0_weight_mem_wr_data_o;
-    if (s0_act_mem_wr_o)
-        s0_act_mem[s0_act_mem_wr_addr_o[MEM_ADDR_BITS-1:0]]
-            <= s0_act_mem_wr_data_o;
-    if (s0_syn_curr_mem_wr_o)
-        s0_syn_curr_mem[s0_syn_curr_mem_addr_o[MEM_ADDR_BITS-1:0]]
-            <= s0_syn_curr_mem_data_o;
     if (s0_bias_curr_mem_wr_o)
         s0_bias_curr_mem[s0_bias_curr_mem_wr_addr_o[MEM_ADDR_BITS-1:0]]
             <= s0_bias_curr_mem_wr_data_o;
@@ -425,9 +355,6 @@ always @(posedge clk) begin
     if (s0_pot_mem_wr_o)
         s0_pot_mem[s0_pot_mem_addr_o[MEM_ADDR_BITS-1:0]]
             <= s0_pot_mem_data_o;
-    if (s0_spike_mem_wr_o)
-        s0_spike_mem[s0_spike_mem_addr_o[MEM_ADDR_BITS-1:0]]
-            <= s0_spike_mem_data_o;
 end
 
 // snnAcc1 write-backs
@@ -435,12 +362,6 @@ always @(posedge clk) begin
     if (s1_weight_mem_wr_o)
         s1_weight_mem[s1_weight_mem_wr_addr_o[MEM_ADDR_BITS-1:0]]
             <= s1_weight_mem_wr_data_o;
-    if (s1_act_mem_wr_o)
-        s1_act_mem[s1_act_mem_wr_addr_o[MEM_ADDR_BITS-1:0]]
-            <= s1_act_mem_wr_data_o;
-    if (s1_syn_curr_mem_wr_o)
-        s1_syn_curr_mem[s1_syn_curr_mem_addr_o[MEM_ADDR_BITS-1:0]]
-            <= s1_syn_curr_mem_data_o;
     if (s1_bias_curr_mem_wr_o)
         s1_bias_curr_mem[s1_bias_curr_mem_wr_addr_o[MEM_ADDR_BITS-1:0]]
             <= s1_bias_curr_mem_wr_data_o;
@@ -450,9 +371,6 @@ always @(posedge clk) begin
     if (s1_pot_mem_wr_o)
         s1_pot_mem[s1_pot_mem_addr_o[MEM_ADDR_BITS-1:0]]
             <= s1_pot_mem_data_o;
-    if (s1_spike_mem_wr_o)
-        s1_spike_mem[s1_spike_mem_addr_o[MEM_ADDR_BITS-1:0]]
-            <= s1_spike_mem_data_o;
 end
 
 // annAcc write-backs
@@ -460,12 +378,6 @@ always @(posedge clk) begin
     if (a0_weight_mem_wr_o)
         a0_weight_mem[a0_weight_mem_wr_addr_o[MEM_ADDR_BITS-1:0]]
             <= a0_weight_mem_wr_data_o;
-    if (a0_act_mem_wr_o)
-        a0_act_mem[a0_act_mem_wr_addr_o[MEM_ADDR_BITS-1:0]]
-            <= a0_act_mem_wr_data_o;
-    if (a0_syn_curr_mem_wr_o)
-        a0_syn_curr_mem[a0_syn_curr_mem_addr_o[MEM_ADDR_BITS-1:0]]
-            <= a0_syn_curr_mem_data_o;
     if (a0_bias_curr_mem_wr_o)
         a0_bias_curr_mem[a0_bias_curr_mem_wr_addr_o[MEM_ADDR_BITS-1:0]]
             <= a0_bias_curr_mem_wr_data_o;
@@ -475,26 +387,8 @@ always @(posedge clk) begin
     if (a0_pot_mem_wr_o)
         a0_pot_mem[a0_pot_mem_addr_o[MEM_ADDR_BITS-1:0]]
             <= a0_pot_mem_data_o;
-    if (a0_spike_mem_wr_o)
-        a0_spike_mem[a0_spike_mem_addr_o[MEM_ADDR_BITS-1:0]]
-            <= a0_spike_mem_data_o;
 end
-
-// Hadamard write-backs
-always @(posedge clk) begin
-    if (hd_src_a_mem_wr_o)
-        hd_src_a_mem[hd_src_a_mem_wr_addr_o[MEM_ADDR_BITS-1:0]]
-            <= hd_src_a_mem_wr_data_o;
-    if (hd_src_b_mem_wr_o)
-        hd_src_b_mem[hd_src_b_mem_wr_addr_o[MEM_ADDR_BITS-1:0]]
-            <= hd_src_b_mem_wr_data_o;
-    if (hd_src_z_mem_wr_o)
-        hd_src_z_mem[hd_src_z_mem_wr_addr_o[MEM_ADDR_BITS-1:0]]
-            <= hd_src_z_mem_wr_data_o;
-    if (hd_src_r_mem_wr_o)
-        hd_src_r_mem[hd_src_r_mem_wr_addr_o[MEM_ADDR_BITS-1:0]]
-            <= hd_src_r_mem_data_o;
-end
+// act/spike/syn_curr + Hadamard writes handled by the shared sram_models.
 
 // ─── DUT ──────────────────────────────────────────────────────────────────────
 flexman #(
@@ -520,12 +414,14 @@ flexman #(
     .sys_data_i           (sys_data_i),
     .sys_data_o           (sys_data_o),
 
-    .start_program_i      (start_program_i),
-    .program_addr_i       (program_addr_i),
     .prog_mem_addr_o      (prog_mem_addr_o),
     .prog_mem_data_i      (prog_mem_data_i),
     .prog_mem_req_o       (prog_mem_req_o),
     .prog_mem_wait_i      (prog_mem_wait_i),
+    .prog_mem_wr_o        (prog_mem_wr_o),
+    .prog_mem_wr_addr_o   (prog_mem_wr_addr_o),
+    .prog_mem_wr_data_o   (prog_mem_wr_data_o),
+    .prog_mem_wr_wait_i   (prog_mem_wr_wait_i),
 
     .cfg_mem_rd_o         (cfg_mem_rd_o),
     .cfg_mem_wait_i       (cfg_mem_wait_i),
@@ -548,9 +444,6 @@ flexman #(
     .fu_bba_mem_addr_o    (fu_bba_mem_addr_o),
     .fu_bba_mem_data_i    (fu_bba_mem_data_i),
 
-    .mark_buff_as_full_i  (mark_buff_as_full_i),
-    .full_buff_id_i       (full_buff_id_i),
-    .full_buff_usage_i    (full_buff_usage_i),
     .nxt_input_pulse_o    (nxt_input_pulse_o),
     .nxt_output_pulse_o   (nxt_output_pulse_o),
 
@@ -565,22 +458,6 @@ flexman #(
     .s0_weight_mem_wr_wait_i (s0_weight_mem_wr_wait_i),
     .s0_weight_mem_wr_addr_o (s0_weight_mem_wr_addr_o),
     .s0_weight_mem_wr_data_o (s0_weight_mem_wr_data_o),
-
-    .s0_act_mem_req_o        (s0_act_mem_req_o),
-    .s0_act_mem_wait_i       (s0_act_mem_wait_i),
-    .s0_act_mem_addr_o       (s0_act_mem_addr_o),
-    .s0_act_mem_data_i       (s0_act_mem_data_i),
-    .s0_act_mem_wr_o         (s0_act_mem_wr_o),
-    .s0_act_mem_wr_wait_i    (s0_act_mem_wr_wait_i),
-    .s0_act_mem_wr_addr_o    (s0_act_mem_wr_addr_o),
-    .s0_act_mem_wr_data_o    (s0_act_mem_wr_data_o),
-
-    .s0_syn_curr_mem_wr_o    (s0_syn_curr_mem_wr_o),
-    .s0_syn_curr_mem_rd_o    (s0_syn_curr_mem_rd_o),
-    .s0_syn_curr_mem_wait_i  (s0_syn_curr_mem_wait_i),
-    .s0_syn_curr_mem_addr_o  (s0_syn_curr_mem_addr_o),
-    .s0_syn_curr_mem_data_o  (s0_syn_curr_mem_data_o),
-    .s0_syn_curr_mem_data_i  (s0_syn_curr_mem_data_i),
 
     .s0_bias_curr_mem_rd_o      (s0_bias_curr_mem_rd_o),
     .s0_bias_curr_mem_wait_i    (s0_bias_curr_mem_wait_i),
@@ -607,11 +484,6 @@ flexman #(
     .s0_pot_mem_data_o       (s0_pot_mem_data_o),
     .s0_pot_mem_data_i       (s0_pot_mem_data_i),
 
-    .s0_spike_mem_wr_o       (s0_spike_mem_wr_o),
-    .s0_spike_mem_wait_i     (s0_spike_mem_wait_i),
-    .s0_spike_mem_addr_o     (s0_spike_mem_addr_o),
-    .s0_spike_mem_data_o     (s0_spike_mem_data_o),
-
     // snnAcc1
     .s1_weight_mem_rd_o      (s1_weight_mem_rd_o),
     .s1_weight_mem_wait_i    (s1_weight_mem_wait_i),
@@ -621,22 +493,6 @@ flexman #(
     .s1_weight_mem_wr_wait_i (s1_weight_mem_wr_wait_i),
     .s1_weight_mem_wr_addr_o (s1_weight_mem_wr_addr_o),
     .s1_weight_mem_wr_data_o (s1_weight_mem_wr_data_o),
-
-    .s1_act_mem_req_o        (s1_act_mem_req_o),
-    .s1_act_mem_wait_i       (s1_act_mem_wait_i),
-    .s1_act_mem_addr_o       (s1_act_mem_addr_o),
-    .s1_act_mem_data_i       (s1_act_mem_data_i),
-    .s1_act_mem_wr_o         (s1_act_mem_wr_o),
-    .s1_act_mem_wr_wait_i    (s1_act_mem_wr_wait_i),
-    .s1_act_mem_wr_addr_o    (s1_act_mem_wr_addr_o),
-    .s1_act_mem_wr_data_o    (s1_act_mem_wr_data_o),
-
-    .s1_syn_curr_mem_wr_o    (s1_syn_curr_mem_wr_o),
-    .s1_syn_curr_mem_rd_o    (s1_syn_curr_mem_rd_o),
-    .s1_syn_curr_mem_wait_i  (s1_syn_curr_mem_wait_i),
-    .s1_syn_curr_mem_addr_o  (s1_syn_curr_mem_addr_o),
-    .s1_syn_curr_mem_data_o  (s1_syn_curr_mem_data_o),
-    .s1_syn_curr_mem_data_i  (s1_syn_curr_mem_data_i),
 
     .s1_bias_curr_mem_rd_o      (s1_bias_curr_mem_rd_o),
     .s1_bias_curr_mem_wait_i    (s1_bias_curr_mem_wait_i),
@@ -663,11 +519,6 @@ flexman #(
     .s1_pot_mem_data_o       (s1_pot_mem_data_o),
     .s1_pot_mem_data_i       (s1_pot_mem_data_i),
 
-    .s1_spike_mem_wr_o       (s1_spike_mem_wr_o),
-    .s1_spike_mem_wait_i     (s1_spike_mem_wait_i),
-    .s1_spike_mem_addr_o     (s1_spike_mem_addr_o),
-    .s1_spike_mem_data_o     (s1_spike_mem_data_o),
-
     // annAcc
     .a0_weight_mem_rd_o      (a0_weight_mem_rd_o),
     .a0_weight_mem_wait_i    (a0_weight_mem_wait_i),
@@ -677,22 +528,6 @@ flexman #(
     .a0_weight_mem_wr_wait_i (a0_weight_mem_wr_wait_i),
     .a0_weight_mem_wr_addr_o (a0_weight_mem_wr_addr_o),
     .a0_weight_mem_wr_data_o (a0_weight_mem_wr_data_o),
-
-    .a0_act_mem_req_o        (a0_act_mem_req_o),
-    .a0_act_mem_wait_i       (a0_act_mem_wait_i),
-    .a0_act_mem_addr_o       (a0_act_mem_addr_o),
-    .a0_act_mem_data_i       (a0_act_mem_data_i),
-    .a0_act_mem_wr_o         (a0_act_mem_wr_o),
-    .a0_act_mem_wr_wait_i    (a0_act_mem_wr_wait_i),
-    .a0_act_mem_wr_addr_o    (a0_act_mem_wr_addr_o),
-    .a0_act_mem_wr_data_o    (a0_act_mem_wr_data_o),
-
-    .a0_syn_curr_mem_wr_o    (a0_syn_curr_mem_wr_o),
-    .a0_syn_curr_mem_rd_o    (a0_syn_curr_mem_rd_o),
-    .a0_syn_curr_mem_wait_i  (a0_syn_curr_mem_wait_i),
-    .a0_syn_curr_mem_addr_o  (a0_syn_curr_mem_addr_o),
-    .a0_syn_curr_mem_data_o  (a0_syn_curr_mem_data_o),
-    .a0_syn_curr_mem_data_i  (a0_syn_curr_mem_data_i),
 
     .a0_bias_curr_mem_rd_o      (a0_bias_curr_mem_rd_o),
     .a0_bias_curr_mem_wait_i    (a0_bias_curr_mem_wait_i),
@@ -719,47 +554,31 @@ flexman #(
     .a0_pot_mem_data_o       (a0_pot_mem_data_o),
     .a0_pot_mem_data_i       (a0_pot_mem_data_i),
 
-    .a0_spike_mem_wr_o       (a0_spike_mem_wr_o),
-    .a0_spike_mem_wait_i     (a0_spike_mem_wait_i),
-    .a0_spike_mem_addr_o     (a0_spike_mem_addr_o),
-    .a0_spike_mem_data_o     (a0_spike_mem_data_o),
-
-    // Hadamard
-    .hd_src_a_mem_rd_o       (hd_src_a_mem_rd_o),
-    .hd_src_a_mem_wait_i     (hd_src_a_mem_wait_i),
-    .hd_src_a_mem_addr_o     (hd_src_a_mem_addr_o),
-    .hd_src_a_mem_data_i     (hd_src_a_mem_data_i),
-    .hd_src_a_mem_wr_o       (hd_src_a_mem_wr_o),
-    .hd_src_a_mem_wr_wait_i  (hd_src_a_mem_wr_wait_i),
-    .hd_src_a_mem_wr_addr_o  (hd_src_a_mem_wr_addr_o),
-    .hd_src_a_mem_wr_data_o  (hd_src_a_mem_wr_data_o),
-
-    .hd_src_b_mem_rd_o       (hd_src_b_mem_rd_o),
-    .hd_src_b_mem_wait_i     (hd_src_b_mem_wait_i),
-    .hd_src_b_mem_addr_o     (hd_src_b_mem_addr_o),
-    .hd_src_b_mem_data_i     (hd_src_b_mem_data_i),
-    .hd_src_b_mem_wr_o       (hd_src_b_mem_wr_o),
-    .hd_src_b_mem_wr_wait_i  (hd_src_b_mem_wr_wait_i),
-    .hd_src_b_mem_wr_addr_o  (hd_src_b_mem_wr_addr_o),
-    .hd_src_b_mem_wr_data_o  (hd_src_b_mem_wr_data_o),
-
-    .hd_src_z_mem_rd_o       (hd_src_z_mem_rd_o),
-    .hd_src_z_mem_wait_i     (hd_src_z_mem_wait_i),
-    .hd_src_z_mem_addr_o     (hd_src_z_mem_addr_o),
-    .hd_src_z_mem_data_i     (hd_src_z_mem_data_i),
-    .hd_src_z_mem_wr_o       (hd_src_z_mem_wr_o),
-    .hd_src_z_mem_wr_wait_i  (hd_src_z_mem_wr_wait_i),
-    .hd_src_z_mem_wr_addr_o  (hd_src_z_mem_wr_addr_o),
-    .hd_src_z_mem_wr_data_o  (hd_src_z_mem_wr_data_o),
-
-    .hd_src_r_mem_rd_o       (hd_src_r_mem_rd_o),
-    .hd_src_r_mem_wait_i     (hd_src_r_mem_wait_i),
-    .hd_src_r_mem_addr_o     (hd_src_r_mem_addr_o),
-    .hd_src_r_mem_data_i     (hd_src_r_mem_data_i),
-    .hd_src_r_mem_wr_o       (hd_src_r_mem_wr_o),
-    .hd_src_r_mem_wr_addr_o  (hd_src_r_mem_wr_addr_o),
-    .hd_src_r_mem_wr_wait_i  (hd_src_r_mem_wr_wait_i),
-    .hd_src_r_mem_data_o     (hd_src_r_mem_data_o)
+    // Shared act/spike/syn_curr + Hadamard pool (4 interleaved banks)
+    .m0_data_mem_rd_o    (m0_data_mem_rd_o),
+    .m0_data_mem_wr_o    (m0_data_mem_wr_o),
+    .m0_data_mem_wait_i  (m0_data_mem_wait_i),
+    .m0_data_mem_addr_o  (m0_data_mem_addr_o),
+    .m0_data_mem_wdata_o (m0_data_mem_wdata_o),
+    .m0_data_mem_rdata_i (m0_data_mem_rdata_i),
+    .m1_data_mem_rd_o    (m1_data_mem_rd_o),
+    .m1_data_mem_wr_o    (m1_data_mem_wr_o),
+    .m1_data_mem_wait_i  (m1_data_mem_wait_i),
+    .m1_data_mem_addr_o  (m1_data_mem_addr_o),
+    .m1_data_mem_wdata_o (m1_data_mem_wdata_o),
+    .m1_data_mem_rdata_i (m1_data_mem_rdata_i),
+    .m2_data_mem_rd_o    (m2_data_mem_rd_o),
+    .m2_data_mem_wr_o    (m2_data_mem_wr_o),
+    .m2_data_mem_wait_i  (m2_data_mem_wait_i),
+    .m2_data_mem_addr_o  (m2_data_mem_addr_o),
+    .m2_data_mem_wdata_o (m2_data_mem_wdata_o),
+    .m2_data_mem_rdata_i (m2_data_mem_rdata_i),
+    .m3_data_mem_rd_o    (m3_data_mem_rd_o),
+    .m3_data_mem_wr_o    (m3_data_mem_wr_o),
+    .m3_data_mem_wait_i  (m3_data_mem_wait_i),
+    .m3_data_mem_addr_o  (m3_data_mem_addr_o),
+    .m3_data_mem_wdata_o (m3_data_mem_wdata_o),
+    .m3_data_mem_rdata_i (m3_data_mem_rdata_i)
 );
 
 // ─── Monitors ────────────────────────────────────────────────────────────────
@@ -785,12 +604,11 @@ always @(posedge clk) begin
             nxt_out_count = nxt_out_count + 1;
             $display("[%0t] T%0d: nxt_output_pulse #%0d", $time, test_num, nxt_out_count);
         end
-        if (s0_act_mem_wr_o) begin
-            fill_wr_count = fill_wr_count + 1;
-            $display("[%0t] T%0d: s0_act FILL wr [%0d] = %08h",
-                     $time, test_num,
-                     s0_act_mem_wr_addr_o, s0_act_mem_wr_data_o);
-        end
+        // Shared-pool writes (FILL during T2; only FILL writes the pool then).
+        if (m0_data_mem_wr_o) fill_wr_count = fill_wr_count + 1;
+        if (m1_data_mem_wr_o) fill_wr_count = fill_wr_count + 1;
+        if (m2_data_mem_wr_o) fill_wr_count = fill_wr_count + 1;
+        if (m3_data_mem_wr_o) fill_wr_count = fill_wr_count + 1;
     end
 end
 
@@ -835,30 +653,21 @@ task clear_all_mems;
             cfg_mem[mi]          = 32'h0;
             bba_mem[mi]          = 32'h0;
             s0_weight_mem[mi]    = 32'h0;
-            s0_act_mem[mi]       = 32'h0;
-            s0_syn_curr_mem[mi]  = 32'h0;
             s0_bias_curr_mem[mi] = 32'h0;
             s0_thresh_mem[mi]    = 32'h0;
             s0_pot_mem[mi]       = 32'h0;
-            s0_spike_mem[mi]     = 32'h0;
             s1_weight_mem[mi]    = 32'h0;
-            s1_act_mem[mi]       = 32'h0;
-            s1_syn_curr_mem[mi]  = 32'h0;
             s1_bias_curr_mem[mi] = 32'h0;
             s1_thresh_mem[mi]    = 32'h0;
             s1_pot_mem[mi]       = 32'h0;
-            s1_spike_mem[mi]     = 32'h0;
             a0_weight_mem[mi]    = 32'h0;
-            a0_act_mem[mi]       = 32'h0;
-            a0_syn_curr_mem[mi]  = 32'h0;
             a0_bias_curr_mem[mi] = 32'h0;
             a0_thresh_mem[mi]    = 32'h0;
             a0_pot_mem[mi]       = 32'h0;
-            a0_spike_mem[mi]     = 32'h0;
-            hd_src_a_mem[mi]     = 32'h0;
-            hd_src_b_mem[mi]     = 32'h0;
-            hd_src_z_mem[mi]     = 32'h0;
-            hd_src_r_mem[mi]     = 32'h0;
+            u_m0_data_mem.mem[mi] = 32'h0;   // shared pool (act/spike/syn_curr + hd)
+            u_m1_data_mem.mem[mi] = 32'h0;
+            u_m2_data_mem.mem[mi] = 32'h0;
+            u_m3_data_mem.mem[mi] = 32'h0;
         end
     end
 endtask
@@ -870,11 +679,6 @@ initial begin
     sys_req_i           = 1'b0;
     sys_addr_i          = 32'h0;
     sys_data_i          = 32'h0;
-    start_program_i     = 1'b0;
-    program_addr_i      = {PROG_ADDR_BITS{1'b0}};
-    mark_buff_as_full_i = 1'b0;
-    full_buff_id_i      = {BUFF_INDX_SZ{1'b0}};
-    full_buff_usage_i   = {TGT_COUNT_SZ{1'b0}};
     clear_all_mems;
 
     // ══════════════════════════════════════════════════════════════════════
@@ -889,11 +693,8 @@ initial begin
     repeat(4) @(posedge clk); #1;
     reset = 1'b0;
 
-    @(posedge clk); #1;
-    start_program_i = 1'b1;
-    program_addr_i  = {PROG_ADDR_BITS{1'b0}};
-    @(posedge clk); #1;
-    start_program_i = 1'b0;
+    axi_write(32'hE000_0000, 32'd0);   // LOAD_PC = 0
+    axi_write(32'hE010_0000, 32'd0);   // START
 
     repeat(60) @(posedge clk);
 
@@ -929,31 +730,28 @@ initial begin
     // BBA memory: buffer 0 base word-address = 0  (fill writes to s0_act[0..3])
     bba_mem[0] = 32'h0000_0000;
 
-    // fill_unit mem_sel table: buffer 0 → s0_act (index 1, one-hot bit 1)
-    // AXI addr: FU_TABLE_ADDR + (buff_id << 2) = 0xC000_0000
-    axi_write(32'hC000_0000, 32'h0000_0002);
+    // fill_unit mem_sel table: buffer 0 → shared pool (IDX_SHARED_DATA = bit 25).
+    // The top routes addr[1:0] to one of 4 banks. AXI addr: FU_TABLE_ADDR.
+    axi_write(32'hC000_0000, 32'h0200_0000);
 
-    @(posedge clk); #1;
-    start_program_i = 1'b1;
-    program_addr_i  = {PROG_ADDR_BITS{1'b0}};
-    @(posedge clk); #1;
-    start_program_i = 1'b0;
+    axi_write(32'hE000_0000, 32'd0);   // LOAD_PC = 0
+    axi_write(32'hE010_0000, 32'd0);   // START
 
     // BBA read takes 1 cycle; then 4 write cycles; then done pulse.
     // Allow generous margin for scheduler fetch + dispatch latency.
     repeat(100) @(posedge clk);
 
     if (fill_wr_count == 4           &&
-        s0_act_mem[0] == 32'hDEADBEEF &&
-        s0_act_mem[1] == 32'hDEADBEEF &&
-        s0_act_mem[2] == 32'hDEADBEEF &&
-        s0_act_mem[3] == 32'hDEADBEEF) begin
-        $display("[T2] PASS  FILL wrote %0d words; s0_act[0..3] = 0xDEADBEEF",
+        pool_rd(0) == 32'hDEADBEEF &&
+        pool_rd(1) == 32'hDEADBEEF &&
+        pool_rd(2) == 32'hDEADBEEF &&
+        pool_rd(3) == 32'hDEADBEEF) begin
+        $display("[T2] PASS  FILL wrote %0d words; pool[0..3] = 0xDEADBEEF",
                  fill_wr_count);
     end else begin
-        $display("[T2] FAIL  fill_wr_count=%0d (exp 4)  s0_act[0..3]=%08h %08h %08h %08h",
+        $display("[T2] FAIL  fill_wr_count=%0d (exp 4)  pool[0..3]=%08h %08h %08h %08h",
                  fill_wr_count,
-                 s0_act_mem[0], s0_act_mem[1], s0_act_mem[2], s0_act_mem[3]);
+                 pool_rd(0), pool_rd(1), pool_rd(2), pool_rd(3));
         #20 $finish;
     end
 
@@ -963,3 +761,28 @@ initial begin
 end
 
 endmodule // tb_flexman
+
+// ─── Synchronous single-port SRAM model (1-cycle read latency) ───────────────
+module sram_model #(
+    parameter DATA_W = 32,
+    parameter DEPTH  = 256
+)(
+    input  wire              clk,
+    input  wire              we,
+    input  wire              re,
+    input  wire        [7:0] addr,
+    input  wire [DATA_W-1:0] wdata,
+    output reg  [DATA_W-1:0] rdata
+);
+    reg [DATA_W-1:0] mem [0:DEPTH-1];
+    integer i;
+    initial begin
+        for (i = 0; i < DEPTH; i = i + 1)
+            mem[i] = {DATA_W{1'b0}};
+        rdata = {DATA_W{1'b0}};
+    end
+    always @(posedge clk) begin
+        if (we) mem[addr] <= wdata;
+        if (re) rdata     <= mem[addr];
+    end
+endmodule
