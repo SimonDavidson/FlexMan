@@ -7,6 +7,7 @@ module ann_syn_curr_update
                            parameter X_OUTPUT_SZ        = 8,
                            parameter Y_OUTPUT_SZ        = 8,
                            parameter IN_DATA_BITS       = 32,
+                           parameter ACT_VAL_BITS       = IN_DATA_BITS, // activation operand width into the MAC
                            parameter WEIGHT_IDX_SZ      = 5, // 2^5 =  32-bit
 			   parameter WEIGHT_SLICE_SZ    = 5,
                            parameter WEIGHT_DATA_IDX_SZ = 5, // 2^5 =  32-bit
@@ -145,7 +146,7 @@ assign syn_curr_mem_rd_o = (syn_curr_mem_wr_o)    ? 1'b0 :
 assign aligned_weight_value = {{(IN_DATA_BITS-WEIGHT_BITS){weight_value_r[WEIGHT_BITS-1]}}, weight_value_r[WEIGHT_BITS-1:0]};
 
 // MAC: accumulate act_value (unsigned) * weight (signed) into syn_curr
-wire signed [IN_DATA_BITS*2:0] mac_product;
+wire signed [IN_DATA_BITS+ACT_VAL_BITS:0] mac_product;
 assign mac_product = $signed(aligned_weight_value) * $signed({1'b0, act_value_r});
 assign syn_curr_mem_data_o = syn_curr_mem_data_i + mac_product[IN_DATA_BITS-1:0];
 
