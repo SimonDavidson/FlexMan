@@ -73,16 +73,6 @@ module fill_unit #(
     output wire [DATA_SZ-1:0]    s0_weight_data_o,
     input  wire                  s0_weight_wait_i,
 
-    output wire                  s0_act_wr_o,
-    output wire [ADDR_SIZE-1:0]  s0_act_addr_o,
-    output wire [DATA_SZ-1:0]    s0_act_data_o,
-    input  wire                  s0_act_wait_i,
-
-    output wire                  s0_syn_curr_wr_o,
-    output wire [ADDR_SIZE-1:0]  s0_syn_curr_addr_o,
-    output wire [DATA_SZ-1:0]    s0_syn_curr_data_o,
-    input  wire                  s0_syn_curr_wait_i,
-
     output wire                  s0_bias_curr_wr_o,
     output wire [ADDR_SIZE-1:0]  s0_bias_curr_addr_o,
     output wire [DATA_SZ-1:0]    s0_bias_curr_data_o,
@@ -98,26 +88,11 @@ module fill_unit #(
     output wire [DATA_SZ-1:0]    s0_pot_data_o,
     input  wire                  s0_pot_wait_i,
 
-    output wire                  s0_spike_wr_o,
-    output wire [ADDR_SIZE-1:0]  s0_spike_addr_o,
-    output wire [DATA_SZ-1:0]    s0_spike_data_o,
-    input  wire                  s0_spike_wait_i,
-
     // ── snnAcc1 memory write ports ───────────────────────────────────────────
     output wire                  s1_weight_wr_o,
     output wire [ADDR_SIZE-1:0]  s1_weight_addr_o,
     output wire [DATA_SZ-1:0]    s1_weight_data_o,
     input  wire                  s1_weight_wait_i,
-
-    output wire                  s1_act_wr_o,
-    output wire [ADDR_SIZE-1:0]  s1_act_addr_o,
-    output wire [DATA_SZ-1:0]    s1_act_data_o,
-    input  wire                  s1_act_wait_i,
-
-    output wire                  s1_syn_curr_wr_o,
-    output wire [ADDR_SIZE-1:0]  s1_syn_curr_addr_o,
-    output wire [DATA_SZ-1:0]    s1_syn_curr_data_o,
-    input  wire                  s1_syn_curr_wait_i,
 
     output wire                  s1_bias_curr_wr_o,
     output wire [ADDR_SIZE-1:0]  s1_bias_curr_addr_o,
@@ -134,26 +109,11 @@ module fill_unit #(
     output wire [DATA_SZ-1:0]    s1_pot_data_o,
     input  wire                  s1_pot_wait_i,
 
-    output wire                  s1_spike_wr_o,
-    output wire [ADDR_SIZE-1:0]  s1_spike_addr_o,
-    output wire [DATA_SZ-1:0]    s1_spike_data_o,
-    input  wire                  s1_spike_wait_i,
-
     // ── annAcc memory write ports ─────────────────────────────────────────────
     output wire                  a0_weight_wr_o,
     output wire [ADDR_SIZE-1:0]  a0_weight_addr_o,
     output wire [DATA_SZ-1:0]    a0_weight_data_o,
     input  wire                  a0_weight_wait_i,
-
-    output wire                  a0_act_wr_o,
-    output wire [ADDR_SIZE-1:0]  a0_act_addr_o,
-    output wire [DATA_SZ-1:0]    a0_act_data_o,
-    input  wire                  a0_act_wait_i,
-
-    output wire                  a0_syn_curr_wr_o,
-    output wire [ADDR_SIZE-1:0]  a0_syn_curr_addr_o,
-    output wire [DATA_SZ-1:0]    a0_syn_curr_data_o,
-    input  wire                  a0_syn_curr_wait_i,
 
     output wire                  a0_bias_curr_wr_o,
     output wire [ADDR_SIZE-1:0]  a0_bias_curr_addr_o,
@@ -170,33 +130,9 @@ module fill_unit #(
     output wire [DATA_SZ-1:0]    a0_pot_data_o,
     input  wire                  a0_pot_wait_i,
 
-    output wire                  a0_spike_wr_o,
-    output wire [ADDR_SIZE-1:0]  a0_spike_addr_o,
-    output wire [DATA_SZ-1:0]    a0_spike_data_o,
-    input  wire                  a0_spike_wait_i,
-
-    // ── Hadamard memory write ports ───────────────────────────────────────────
-    output wire                  hd_src_a_wr_o,
-    output wire [ADDR_SIZE-1:0]  hd_src_a_addr_o,
-    output wire [DATA_SZ-1:0]    hd_src_a_data_o,
-    input  wire                  hd_src_a_wait_i,
-
-    output wire                  hd_src_b_wr_o,
-    output wire [ADDR_SIZE-1:0]  hd_src_b_addr_o,
-    output wire [DATA_SZ-1:0]    hd_src_b_data_o,
-    input  wire                  hd_src_b_wait_i,
-
-    output wire                  hd_src_z_wr_o,
-    output wire [ADDR_SIZE-1:0]  hd_src_z_addr_o,
-    output wire [DATA_SZ-1:0]    hd_src_z_data_o,
-    input  wire                  hd_src_z_wait_i,
-
-    output wire                  hd_src_r_wr_o,
-    output wire [ADDR_SIZE-1:0]  hd_src_r_addr_o,
-    output wire [DATA_SZ-1:0]    hd_src_r_data_o,
-    input  wire                  hd_src_r_wait_i,
-
-    // ── Shared activation/spike pool (siren_detector_top routes the LSB) ─
+    // ── Shared activation/spike/syn_curr pool — act/spike/syn_curr (all accs)
+    //    and the Hadamard buffers now fill through this single port; the top
+    //    routes the address LSBs to pick the interleaved bank. ────────────────
     output wire                  shared_data_wr_o,
     output wire [ADDR_SIZE-1:0]  shared_data_addr_o,
     output wire [DATA_SZ-1:0]    shared_data_data_o,
@@ -204,33 +140,25 @@ module fill_unit #(
 );
 
 // ─── Memory index localparams ─────────────────────────────────────────────────
+// One-hot bit positions in the mem_sel table.  act / spike / syn_curr (all
+// accelerators) and the Hadamard buffers now fill via IDX_SHARED_DATA, so their
+// former per-acc indices are removed.  The remaining indices KEEP their original
+// values so the host's mem_sel encoding is unchanged; the vacated positions
+// (1,2,6,8,9,13,15,16,20-24) are simply reserved/unused.
 localparam IDX_S0_WEIGHT    =  0;
-localparam IDX_S0_ACT       =  1;
-localparam IDX_S0_SYN_CURR  =  2;
 localparam IDX_S0_BIAS_CURR =  3;
 localparam IDX_S0_THRESH    =  4;
 localparam IDX_S0_POT       =  5;
-localparam IDX_S0_SPIKE     =  6;
 localparam IDX_S1_WEIGHT    =  7;
-localparam IDX_S1_ACT       =  8;
-localparam IDX_S1_SYN_CURR  =  9;
 localparam IDX_S1_BIAS_CURR = 10;
 localparam IDX_S1_THRESH    = 11;
 localparam IDX_S1_POT       = 12;
-localparam IDX_S1_SPIKE     = 13;
 localparam IDX_A0_WEIGHT    = 14;
-localparam IDX_A0_ACT       = 15;
-localparam IDX_A0_SYN_CURR  = 16;
 localparam IDX_A0_BIAS_CURR = 17;
 localparam IDX_A0_THRESH    = 18;
 localparam IDX_A0_POT       = 19;
-localparam IDX_A0_SPIKE     = 20;
-localparam IDX_HD_SRC_A     = 21;
-localparam IDX_HD_SRC_B     = 22;
-localparam IDX_HD_SRC_Z     = 23;
-localparam IDX_HD_SRC_R     = 24;
-// New destination: shared activation/spike pool (siren_detector_top routes
-// the address LSB to pick which physical bank in the interleaved scheme).
+// Shared activation/spike/syn_curr + Hadamard pool (top routes the address LSBs
+// to pick the interleaved bank).
 localparam IDX_SHARED_DATA  = 25;
 
 // ─── FSM states ───────────────────────────────────────────────────────────────
@@ -271,30 +199,17 @@ assign fu_bba_addr_o = {{(32-BUFF_INDX_SZ){1'b0}}, buff_id_r};
 
 // ─── Wait mux: one-hot select from selected memory's wait signal ──────────────
 wire selected_wait = (mem_sel_r[IDX_S0_WEIGHT]    & s0_weight_wait_i)   |
-                     (mem_sel_r[IDX_S0_ACT]        & s0_act_wait_i)      |
-                     (mem_sel_r[IDX_S0_SYN_CURR]   & s0_syn_curr_wait_i) |
                      (mem_sel_r[IDX_S0_BIAS_CURR]  & s0_bias_curr_wait_i)|
                      (mem_sel_r[IDX_S0_THRESH]     & s0_thresh_wait_i)   |
                      (mem_sel_r[IDX_S0_POT]        & s0_pot_wait_i)      |
-                     (mem_sel_r[IDX_S0_SPIKE]      & s0_spike_wait_i)    |
                      (mem_sel_r[IDX_S1_WEIGHT]     & s1_weight_wait_i)   |
-                     (mem_sel_r[IDX_S1_ACT]        & s1_act_wait_i)      |
-                     (mem_sel_r[IDX_S1_SYN_CURR]   & s1_syn_curr_wait_i) |
                      (mem_sel_r[IDX_S1_BIAS_CURR]  & s1_bias_curr_wait_i)|
                      (mem_sel_r[IDX_S1_THRESH]     & s1_thresh_wait_i)   |
                      (mem_sel_r[IDX_S1_POT]        & s1_pot_wait_i)      |
-                     (mem_sel_r[IDX_S1_SPIKE]      & s1_spike_wait_i)    |
                      (mem_sel_r[IDX_A0_WEIGHT]     & a0_weight_wait_i)   |
-                     (mem_sel_r[IDX_A0_ACT]        & a0_act_wait_i)      |
-                     (mem_sel_r[IDX_A0_SYN_CURR]   & a0_syn_curr_wait_i) |
                      (mem_sel_r[IDX_A0_BIAS_CURR]  & a0_bias_curr_wait_i)|
                      (mem_sel_r[IDX_A0_THRESH]     & a0_thresh_wait_i)   |
                      (mem_sel_r[IDX_A0_POT]        & a0_pot_wait_i)      |
-                     (mem_sel_r[IDX_A0_SPIKE]      & a0_spike_wait_i)    |
-                     (mem_sel_r[IDX_HD_SRC_A]      & hd_src_a_wait_i)    |
-                     (mem_sel_r[IDX_HD_SRC_B]      & hd_src_b_wait_i)    |
-                     (mem_sel_r[IDX_HD_SRC_Z]      & hd_src_z_wait_i)    |
-                     (mem_sel_r[IDX_HD_SRC_R]      & hd_src_r_wait_i)    |
                      (mem_sel_r[IDX_SHARED_DATA]   & shared_data_wait_i);
 
 // ─── FSM ──────────────────────────────────────────────────────────────────────
@@ -368,14 +283,6 @@ assign s0_weight_wr_o    = do_write & mem_sel_r[IDX_S0_WEIGHT];
 assign s0_weight_addr_o  = wr_addr;
 assign s0_weight_data_o  = wr_data;
 
-assign s0_act_wr_o       = do_write & mem_sel_r[IDX_S0_ACT];
-assign s0_act_addr_o     = wr_addr;
-assign s0_act_data_o     = wr_data;
-
-assign s0_syn_curr_wr_o  = do_write & mem_sel_r[IDX_S0_SYN_CURR];
-assign s0_syn_curr_addr_o = wr_addr;
-assign s0_syn_curr_data_o = wr_data;
-
 assign s0_bias_curr_wr_o  = do_write & mem_sel_r[IDX_S0_BIAS_CURR];
 assign s0_bias_curr_addr_o = wr_addr;
 assign s0_bias_curr_data_o = wr_data;
@@ -388,21 +295,9 @@ assign s0_pot_wr_o       = do_write & mem_sel_r[IDX_S0_POT];
 assign s0_pot_addr_o     = wr_addr;
 assign s0_pot_data_o     = wr_data;
 
-assign s0_spike_wr_o     = do_write & mem_sel_r[IDX_S0_SPIKE];
-assign s0_spike_addr_o   = wr_addr;
-assign s0_spike_data_o   = wr_data;
-
 assign s1_weight_wr_o    = do_write & mem_sel_r[IDX_S1_WEIGHT];
 assign s1_weight_addr_o  = wr_addr;
 assign s1_weight_data_o  = wr_data;
-
-assign s1_act_wr_o       = do_write & mem_sel_r[IDX_S1_ACT];
-assign s1_act_addr_o     = wr_addr;
-assign s1_act_data_o     = wr_data;
-
-assign s1_syn_curr_wr_o  = do_write & mem_sel_r[IDX_S1_SYN_CURR];
-assign s1_syn_curr_addr_o = wr_addr;
-assign s1_syn_curr_data_o = wr_data;
 
 assign s1_bias_curr_wr_o  = do_write & mem_sel_r[IDX_S1_BIAS_CURR];
 assign s1_bias_curr_addr_o = wr_addr;
@@ -416,21 +311,9 @@ assign s1_pot_wr_o       = do_write & mem_sel_r[IDX_S1_POT];
 assign s1_pot_addr_o     = wr_addr;
 assign s1_pot_data_o     = wr_data;
 
-assign s1_spike_wr_o     = do_write & mem_sel_r[IDX_S1_SPIKE];
-assign s1_spike_addr_o   = wr_addr;
-assign s1_spike_data_o   = wr_data;
-
 assign a0_weight_wr_o    = do_write & mem_sel_r[IDX_A0_WEIGHT];
 assign a0_weight_addr_o  = wr_addr;
 assign a0_weight_data_o  = wr_data;
-
-assign a0_act_wr_o       = do_write & mem_sel_r[IDX_A0_ACT];
-assign a0_act_addr_o     = wr_addr;
-assign a0_act_data_o     = wr_data;
-
-assign a0_syn_curr_wr_o  = do_write & mem_sel_r[IDX_A0_SYN_CURR];
-assign a0_syn_curr_addr_o = wr_addr;
-assign a0_syn_curr_data_o = wr_data;
 
 assign a0_bias_curr_wr_o  = do_write & mem_sel_r[IDX_A0_BIAS_CURR];
 assign a0_bias_curr_addr_o = wr_addr;
@@ -443,26 +326,6 @@ assign a0_thresh_data_o  = wr_data;
 assign a0_pot_wr_o       = do_write & mem_sel_r[IDX_A0_POT];
 assign a0_pot_addr_o     = wr_addr;
 assign a0_pot_data_o     = wr_data;
-
-assign a0_spike_wr_o     = do_write & mem_sel_r[IDX_A0_SPIKE];
-assign a0_spike_addr_o   = wr_addr;
-assign a0_spike_data_o   = wr_data;
-
-assign hd_src_a_wr_o    = do_write & mem_sel_r[IDX_HD_SRC_A];
-assign hd_src_a_addr_o  = wr_addr;
-assign hd_src_a_data_o  = wr_data;
-
-assign hd_src_b_wr_o    = do_write & mem_sel_r[IDX_HD_SRC_B];
-assign hd_src_b_addr_o  = wr_addr;
-assign hd_src_b_data_o  = wr_data;
-
-assign hd_src_z_wr_o    = do_write & mem_sel_r[IDX_HD_SRC_Z];
-assign hd_src_z_addr_o  = wr_addr;
-assign hd_src_z_data_o  = wr_data;
-
-assign hd_src_r_wr_o    = do_write & mem_sel_r[IDX_HD_SRC_R];
-assign hd_src_r_addr_o  = wr_addr;
-assign hd_src_r_data_o  = wr_data;
 
 assign shared_data_wr_o   = do_write & mem_sel_r[IDX_SHARED_DATA];
 assign shared_data_addr_o = wr_addr;

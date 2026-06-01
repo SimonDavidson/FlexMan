@@ -24,7 +24,7 @@
 //       Confirms a high-index memory type is correctly selected.
 //   T3  BBA back-pressure: hold fu_bba_wait_i for 3 cycles after dispatch;
 //       verify no writes fire during the wait, then normal fill resumes.
-//   T4  Memory back-pressure: assert s0_syn_curr_wait_i mid-fill;
+//   T4  Memory back-pressure: assert shared_data_wait_i mid-fill;
 //       verify write count and address sequence are still correct.
 //   T5  Back-to-back: T2 immediately followed by T1 (dispatch on the same
 //       cycle as acc_finished_o of the first fill).
@@ -39,34 +39,25 @@ localparam NUM_BUFFERS   = 16;
 localparam BUFF_INDX_SZ  = 4;
 localparam ADDR_SIZE     = `ADDR_SIZE;   // 30
 localparam DATA_SZ       = 32;
-localparam NUM_MEM_TYPES = 25;
+localparam NUM_MEM_TYPES = 26;
 
-// Memory index constants (must match fill_unit.v)
+// Memory index constants (must match fill_unit.v).  act/spike/syn_curr (all
+// accelerators) and the Hadamard buffers now fill via IDX_SHARED_DATA; only
+// weight/bias_curr/thresh/pot have dedicated fill ports.  Kept indices retain
+// their original bit positions.
 localparam IDX_S0_WEIGHT    =  0;
-localparam IDX_S0_ACT       =  1;
-localparam IDX_S0_SYN_CURR  =  2;
 localparam IDX_S0_BIAS_CURR =  3;
 localparam IDX_S0_THRESH    =  4;
 localparam IDX_S0_POT       =  5;
-localparam IDX_S0_SPIKE     =  6;
 localparam IDX_S1_WEIGHT    =  7;
-localparam IDX_S1_ACT       =  8;
-localparam IDX_S1_SYN_CURR  =  9;
 localparam IDX_S1_BIAS_CURR = 10;
 localparam IDX_S1_THRESH    = 11;
 localparam IDX_S1_POT       = 12;
-localparam IDX_S1_SPIKE     = 13;
 localparam IDX_A0_WEIGHT    = 14;
-localparam IDX_A0_ACT       = 15;
-localparam IDX_A0_SYN_CURR  = 16;
 localparam IDX_A0_BIAS_CURR = 17;
 localparam IDX_A0_THRESH    = 18;
 localparam IDX_A0_POT       = 19;
-localparam IDX_A0_SPIKE     = 20;
-localparam IDX_HD_SRC_A     = 21;
-localparam IDX_HD_SRC_B     = 22;
-localparam IDX_HD_SRC_Z     = 23;
-localparam IDX_HD_SRC_R     = 24;
+localparam IDX_SHARED_DATA  = 25;
 
 localparam CLK_HALF = 5;
 localparam TIMEOUT  = 300;
@@ -94,38 +85,22 @@ reg                      fu_bba_wait_i;
 wire [31:0]              fu_bba_addr_o;
 reg  [31:0]              fu_bba_data_i;
 
-// snnAcc0 write ports
-wire                  s0_weight_wr_o;    wire [ADDR_SIZE-1:0] s0_weight_addr_o;    wire [DATA_SZ-1:0] s0_weight_data_o;    reg s0_weight_wait_i;
-wire                  s0_act_wr_o;       wire [ADDR_SIZE-1:0] s0_act_addr_o;       wire [DATA_SZ-1:0] s0_act_data_o;       reg s0_act_wait_i;
-wire                  s0_syn_curr_wr_o;  wire [ADDR_SIZE-1:0] s0_syn_curr_addr_o;  wire [DATA_SZ-1:0] s0_syn_curr_data_o;  reg s0_syn_curr_wait_i;
-wire                  s0_bias_curr_wr_o; wire [ADDR_SIZE-1:0] s0_bias_curr_addr_o; wire [DATA_SZ-1:0] s0_bias_curr_data_o; reg s0_bias_curr_wait_i;
-wire                  s0_thresh_wr_o;    wire [ADDR_SIZE-1:0] s0_thresh_addr_o;    wire [DATA_SZ-1:0] s0_thresh_data_o;    reg s0_thresh_wait_i;
-wire                  s0_pot_wr_o;       wire [ADDR_SIZE-1:0] s0_pot_addr_o;       wire [DATA_SZ-1:0] s0_pot_data_o;       reg s0_pot_wait_i;
-wire                  s0_spike_wr_o;     wire [ADDR_SIZE-1:0] s0_spike_addr_o;     wire [DATA_SZ-1:0] s0_spike_data_o;     reg s0_spike_wait_i;
+// Per-accelerator dedicated write ports (weight / bias_curr / thresh / pot)
+wire s0_weight_wr_o;    wire [ADDR_SIZE-1:0] s0_weight_addr_o;    wire [DATA_SZ-1:0] s0_weight_data_o;    reg s0_weight_wait_i;
+wire s0_bias_curr_wr_o; wire [ADDR_SIZE-1:0] s0_bias_curr_addr_o; wire [DATA_SZ-1:0] s0_bias_curr_data_o; reg s0_bias_curr_wait_i;
+wire s0_thresh_wr_o;    wire [ADDR_SIZE-1:0] s0_thresh_addr_o;    wire [DATA_SZ-1:0] s0_thresh_data_o;    reg s0_thresh_wait_i;
+wire s0_pot_wr_o;       wire [ADDR_SIZE-1:0] s0_pot_addr_o;       wire [DATA_SZ-1:0] s0_pot_data_o;       reg s0_pot_wait_i;
+wire s1_weight_wr_o;    wire [ADDR_SIZE-1:0] s1_weight_addr_o;    wire [DATA_SZ-1:0] s1_weight_data_o;    reg s1_weight_wait_i;
+wire s1_bias_curr_wr_o; wire [ADDR_SIZE-1:0] s1_bias_curr_addr_o; wire [DATA_SZ-1:0] s1_bias_curr_data_o; reg s1_bias_curr_wait_i;
+wire s1_thresh_wr_o;    wire [ADDR_SIZE-1:0] s1_thresh_addr_o;    wire [DATA_SZ-1:0] s1_thresh_data_o;    reg s1_thresh_wait_i;
+wire s1_pot_wr_o;       wire [ADDR_SIZE-1:0] s1_pot_addr_o;       wire [DATA_SZ-1:0] s1_pot_data_o;       reg s1_pot_wait_i;
+wire a0_weight_wr_o;    wire [ADDR_SIZE-1:0] a0_weight_addr_o;    wire [DATA_SZ-1:0] a0_weight_data_o;    reg a0_weight_wait_i;
+wire a0_bias_curr_wr_o; wire [ADDR_SIZE-1:0] a0_bias_curr_addr_o; wire [DATA_SZ-1:0] a0_bias_curr_data_o; reg a0_bias_curr_wait_i;
+wire a0_thresh_wr_o;    wire [ADDR_SIZE-1:0] a0_thresh_addr_o;    wire [DATA_SZ-1:0] a0_thresh_data_o;    reg a0_thresh_wait_i;
+wire a0_pot_wr_o;       wire [ADDR_SIZE-1:0] a0_pot_addr_o;       wire [DATA_SZ-1:0] a0_pot_data_o;       reg a0_pot_wait_i;
 
-// snnAcc1 write ports
-wire                  s1_weight_wr_o;    wire [ADDR_SIZE-1:0] s1_weight_addr_o;    wire [DATA_SZ-1:0] s1_weight_data_o;    reg s1_weight_wait_i;
-wire                  s1_act_wr_o;       wire [ADDR_SIZE-1:0] s1_act_addr_o;       wire [DATA_SZ-1:0] s1_act_data_o;       reg s1_act_wait_i;
-wire                  s1_syn_curr_wr_o;  wire [ADDR_SIZE-1:0] s1_syn_curr_addr_o;  wire [DATA_SZ-1:0] s1_syn_curr_data_o;  reg s1_syn_curr_wait_i;
-wire                  s1_bias_curr_wr_o; wire [ADDR_SIZE-1:0] s1_bias_curr_addr_o; wire [DATA_SZ-1:0] s1_bias_curr_data_o; reg s1_bias_curr_wait_i;
-wire                  s1_thresh_wr_o;    wire [ADDR_SIZE-1:0] s1_thresh_addr_o;    wire [DATA_SZ-1:0] s1_thresh_data_o;    reg s1_thresh_wait_i;
-wire                  s1_pot_wr_o;       wire [ADDR_SIZE-1:0] s1_pot_addr_o;       wire [DATA_SZ-1:0] s1_pot_data_o;       reg s1_pot_wait_i;
-wire                  s1_spike_wr_o;     wire [ADDR_SIZE-1:0] s1_spike_addr_o;     wire [DATA_SZ-1:0] s1_spike_data_o;     reg s1_spike_wait_i;
-
-// annAcc write ports
-wire                  a0_weight_wr_o;    wire [ADDR_SIZE-1:0] a0_weight_addr_o;    wire [DATA_SZ-1:0] a0_weight_data_o;    reg a0_weight_wait_i;
-wire                  a0_act_wr_o;       wire [ADDR_SIZE-1:0] a0_act_addr_o;       wire [DATA_SZ-1:0] a0_act_data_o;       reg a0_act_wait_i;
-wire                  a0_syn_curr_wr_o;  wire [ADDR_SIZE-1:0] a0_syn_curr_addr_o;  wire [DATA_SZ-1:0] a0_syn_curr_data_o;  reg a0_syn_curr_wait_i;
-wire                  a0_bias_curr_wr_o; wire [ADDR_SIZE-1:0] a0_bias_curr_addr_o; wire [DATA_SZ-1:0] a0_bias_curr_data_o; reg a0_bias_curr_wait_i;
-wire                  a0_thresh_wr_o;    wire [ADDR_SIZE-1:0] a0_thresh_addr_o;    wire [DATA_SZ-1:0] a0_thresh_data_o;    reg a0_thresh_wait_i;
-wire                  a0_pot_wr_o;       wire [ADDR_SIZE-1:0] a0_pot_addr_o;       wire [DATA_SZ-1:0] a0_pot_data_o;       reg a0_pot_wait_i;
-wire                  a0_spike_wr_o;     wire [ADDR_SIZE-1:0] a0_spike_addr_o;     wire [DATA_SZ-1:0] a0_spike_data_o;     reg a0_spike_wait_i;
-
-// Hadamard write ports
-wire                  hd_src_a_wr_o;    wire [ADDR_SIZE-1:0] hd_src_a_addr_o;    wire [DATA_SZ-1:0] hd_src_a_data_o;    reg hd_src_a_wait_i;
-wire                  hd_src_b_wr_o;    wire [ADDR_SIZE-1:0] hd_src_b_addr_o;    wire [DATA_SZ-1:0] hd_src_b_data_o;    reg hd_src_b_wait_i;
-wire                  hd_src_z_wr_o;    wire [ADDR_SIZE-1:0] hd_src_z_addr_o;    wire [DATA_SZ-1:0] hd_src_z_data_o;    reg hd_src_z_wait_i;
-wire                  hd_src_r_wr_o;    wire [ADDR_SIZE-1:0] hd_src_r_addr_o;    wire [DATA_SZ-1:0] hd_src_r_data_o;    reg hd_src_r_wait_i;
+// Shared act/spike/syn_curr + Hadamard pool write port
+wire shared_data_wr_o;  wire [ADDR_SIZE-1:0] shared_data_addr_o;  wire [DATA_SZ-1:0] shared_data_data_o;  reg shared_data_wait_i;
 
 // ─── DUT ─────────────────────────────────────────────────────────────────────
 fill_unit #(
@@ -151,30 +126,18 @@ fill_unit #(
     .fu_bba_addr_o      (fu_bba_addr_o),
     .fu_bba_data_i      (fu_bba_data_i),
     .s0_weight_wr_o     (s0_weight_wr_o),    .s0_weight_addr_o    (s0_weight_addr_o),    .s0_weight_data_o    (s0_weight_data_o),    .s0_weight_wait_i    (s0_weight_wait_i),
-    .s0_act_wr_o        (s0_act_wr_o),       .s0_act_addr_o       (s0_act_addr_o),       .s0_act_data_o       (s0_act_data_o),       .s0_act_wait_i       (s0_act_wait_i),
-    .s0_syn_curr_wr_o   (s0_syn_curr_wr_o),  .s0_syn_curr_addr_o  (s0_syn_curr_addr_o),  .s0_syn_curr_data_o  (s0_syn_curr_data_o),  .s0_syn_curr_wait_i  (s0_syn_curr_wait_i),
     .s0_bias_curr_wr_o  (s0_bias_curr_wr_o), .s0_bias_curr_addr_o (s0_bias_curr_addr_o), .s0_bias_curr_data_o (s0_bias_curr_data_o), .s0_bias_curr_wait_i (s0_bias_curr_wait_i),
     .s0_thresh_wr_o     (s0_thresh_wr_o),    .s0_thresh_addr_o    (s0_thresh_addr_o),    .s0_thresh_data_o    (s0_thresh_data_o),    .s0_thresh_wait_i    (s0_thresh_wait_i),
     .s0_pot_wr_o        (s0_pot_wr_o),       .s0_pot_addr_o       (s0_pot_addr_o),       .s0_pot_data_o       (s0_pot_data_o),       .s0_pot_wait_i       (s0_pot_wait_i),
-    .s0_spike_wr_o      (s0_spike_wr_o),     .s0_spike_addr_o     (s0_spike_addr_o),     .s0_spike_data_o     (s0_spike_data_o),     .s0_spike_wait_i     (s0_spike_wait_i),
     .s1_weight_wr_o     (s1_weight_wr_o),    .s1_weight_addr_o    (s1_weight_addr_o),    .s1_weight_data_o    (s1_weight_data_o),    .s1_weight_wait_i    (s1_weight_wait_i),
-    .s1_act_wr_o        (s1_act_wr_o),       .s1_act_addr_o       (s1_act_addr_o),       .s1_act_data_o       (s1_act_data_o),       .s1_act_wait_i       (s1_act_wait_i),
-    .s1_syn_curr_wr_o   (s1_syn_curr_wr_o),  .s1_syn_curr_addr_o  (s1_syn_curr_addr_o),  .s1_syn_curr_data_o  (s1_syn_curr_data_o),  .s1_syn_curr_wait_i  (s1_syn_curr_wait_i),
     .s1_bias_curr_wr_o  (s1_bias_curr_wr_o), .s1_bias_curr_addr_o (s1_bias_curr_addr_o), .s1_bias_curr_data_o (s1_bias_curr_data_o), .s1_bias_curr_wait_i (s1_bias_curr_wait_i),
     .s1_thresh_wr_o     (s1_thresh_wr_o),    .s1_thresh_addr_o    (s1_thresh_addr_o),    .s1_thresh_data_o    (s1_thresh_data_o),    .s1_thresh_wait_i    (s1_thresh_wait_i),
     .s1_pot_wr_o        (s1_pot_wr_o),       .s1_pot_addr_o       (s1_pot_addr_o),       .s1_pot_data_o       (s1_pot_data_o),       .s1_pot_wait_i       (s1_pot_wait_i),
-    .s1_spike_wr_o      (s1_spike_wr_o),     .s1_spike_addr_o     (s1_spike_addr_o),     .s1_spike_data_o     (s1_spike_data_o),     .s1_spike_wait_i     (s1_spike_wait_i),
     .a0_weight_wr_o     (a0_weight_wr_o),    .a0_weight_addr_o    (a0_weight_addr_o),    .a0_weight_data_o    (a0_weight_data_o),    .a0_weight_wait_i    (a0_weight_wait_i),
-    .a0_act_wr_o        (a0_act_wr_o),       .a0_act_addr_o       (a0_act_addr_o),       .a0_act_data_o       (a0_act_data_o),       .a0_act_wait_i       (a0_act_wait_i),
-    .a0_syn_curr_wr_o   (a0_syn_curr_wr_o),  .a0_syn_curr_addr_o  (a0_syn_curr_addr_o),  .a0_syn_curr_data_o  (a0_syn_curr_data_o),  .a0_syn_curr_wait_i  (a0_syn_curr_wait_i),
     .a0_bias_curr_wr_o  (a0_bias_curr_wr_o), .a0_bias_curr_addr_o (a0_bias_curr_addr_o), .a0_bias_curr_data_o (a0_bias_curr_data_o), .a0_bias_curr_wait_i (a0_bias_curr_wait_i),
     .a0_thresh_wr_o     (a0_thresh_wr_o),    .a0_thresh_addr_o    (a0_thresh_addr_o),    .a0_thresh_data_o    (a0_thresh_data_o),    .a0_thresh_wait_i    (a0_thresh_wait_i),
     .a0_pot_wr_o        (a0_pot_wr_o),       .a0_pot_addr_o       (a0_pot_addr_o),       .a0_pot_data_o       (a0_pot_data_o),       .a0_pot_wait_i       (a0_pot_wait_i),
-    .a0_spike_wr_o      (a0_spike_wr_o),     .a0_spike_addr_o     (a0_spike_addr_o),     .a0_spike_data_o     (a0_spike_data_o),     .a0_spike_wait_i     (a0_spike_wait_i),
-    .hd_src_a_wr_o      (hd_src_a_wr_o),    .hd_src_a_addr_o     (hd_src_a_addr_o),     .hd_src_a_data_o     (hd_src_a_data_o),     .hd_src_a_wait_i     (hd_src_a_wait_i),
-    .hd_src_b_wr_o      (hd_src_b_wr_o),    .hd_src_b_addr_o     (hd_src_b_addr_o),     .hd_src_b_data_o     (hd_src_b_data_o),     .hd_src_b_wait_i     (hd_src_b_wait_i),
-    .hd_src_z_wr_o      (hd_src_z_wr_o),    .hd_src_z_addr_o     (hd_src_z_addr_o),     .hd_src_z_data_o     (hd_src_z_data_o),     .hd_src_z_wait_i     (hd_src_z_wait_i),
-    .hd_src_r_wr_o      (hd_src_r_wr_o),    .hd_src_r_addr_o     (hd_src_r_addr_o),     .hd_src_r_data_o     (hd_src_r_data_o),     .hd_src_r_wait_i     (hd_src_r_wait_i)
+    .shared_data_wr_o   (shared_data_wr_o),  .shared_data_addr_o  (shared_data_addr_o),  .shared_data_data_o  (shared_data_data_o),  .shared_data_wait_i  (shared_data_wait_i)
 );
 
 // ─── Clock ────────────────────────────────────────────────────────────────────
@@ -183,13 +146,10 @@ always #CLK_HALF clk = ~clk;
 // ─── OR of all write enables ─────────────────────────────────────────────────
 // Used to detect spurious writes on non-selected buses.
 wire any_wr_o =
-    s0_weight_wr_o | s0_act_wr_o | s0_syn_curr_wr_o | s0_bias_curr_wr_o |
-    s0_thresh_wr_o | s0_pot_wr_o | s0_spike_wr_o |
-    s1_weight_wr_o | s1_act_wr_o | s1_syn_curr_wr_o | s1_bias_curr_wr_o |
-    s1_thresh_wr_o | s1_pot_wr_o | s1_spike_wr_o |
-    a0_weight_wr_o | a0_act_wr_o | a0_syn_curr_wr_o | a0_bias_curr_wr_o |
-    a0_thresh_wr_o | a0_pot_wr_o | a0_spike_wr_o |
-    hd_src_a_wr_o | hd_src_b_wr_o | hd_src_z_wr_o | hd_src_r_wr_o;
+    s0_weight_wr_o | s0_bias_curr_wr_o | s0_thresh_wr_o | s0_pot_wr_o |
+    s1_weight_wr_o | s1_bias_curr_wr_o | s1_thresh_wr_o | s1_pot_wr_o |
+    a0_weight_wr_o | a0_bias_curr_wr_o | a0_thresh_wr_o | a0_pot_wr_o |
+    shared_data_wr_o;
 
 // ─── Write capture ────────────────────────────────────────────────────────────
 // per_wr_cnt[i]: number of writes on memory bus i this test
@@ -203,87 +163,51 @@ integer             fail_count;
 // Mux: address/data from whichever bus is active (one-hot, so priority mux is fine)
 wire [ADDR_SIZE-1:0] active_addr_o =
     s0_weight_wr_o    ? s0_weight_addr_o    :
-    s0_act_wr_o       ? s0_act_addr_o       :
-    s0_syn_curr_wr_o  ? s0_syn_curr_addr_o  :
     s0_bias_curr_wr_o ? s0_bias_curr_addr_o :
     s0_thresh_wr_o    ? s0_thresh_addr_o    :
     s0_pot_wr_o       ? s0_pot_addr_o       :
-    s0_spike_wr_o     ? s0_spike_addr_o     :
     s1_weight_wr_o    ? s1_weight_addr_o    :
-    s1_act_wr_o       ? s1_act_addr_o       :
-    s1_syn_curr_wr_o  ? s1_syn_curr_addr_o  :
     s1_bias_curr_wr_o ? s1_bias_curr_addr_o :
     s1_thresh_wr_o    ? s1_thresh_addr_o    :
     s1_pot_wr_o       ? s1_pot_addr_o       :
-    s1_spike_wr_o     ? s1_spike_addr_o     :
     a0_weight_wr_o    ? a0_weight_addr_o    :
-    a0_act_wr_o       ? a0_act_addr_o       :
-    a0_syn_curr_wr_o  ? a0_syn_curr_addr_o  :
     a0_bias_curr_wr_o ? a0_bias_curr_addr_o :
     a0_thresh_wr_o    ? a0_thresh_addr_o    :
     a0_pot_wr_o       ? a0_pot_addr_o       :
-    a0_spike_wr_o     ? a0_spike_addr_o     :
-    hd_src_a_wr_o     ? hd_src_a_addr_o     :
-    hd_src_b_wr_o     ? hd_src_b_addr_o     :
-    hd_src_z_wr_o     ? hd_src_z_addr_o     :
-    hd_src_r_wr_o     ? hd_src_r_addr_o     :
+    shared_data_wr_o  ? shared_data_addr_o  :
                         {ADDR_SIZE{1'bx}};
 
 wire [DATA_SZ-1:0] active_data_o =
     s0_weight_wr_o    ? s0_weight_data_o    :
-    s0_act_wr_o       ? s0_act_data_o       :
-    s0_syn_curr_wr_o  ? s0_syn_curr_data_o  :
     s0_bias_curr_wr_o ? s0_bias_curr_data_o :
     s0_thresh_wr_o    ? s0_thresh_data_o    :
     s0_pot_wr_o       ? s0_pot_data_o       :
-    s0_spike_wr_o     ? s0_spike_data_o     :
     s1_weight_wr_o    ? s1_weight_data_o    :
-    s1_act_wr_o       ? s1_act_data_o       :
-    s1_syn_curr_wr_o  ? s1_syn_curr_data_o  :
     s1_bias_curr_wr_o ? s1_bias_curr_data_o :
     s1_thresh_wr_o    ? s1_thresh_data_o    :
     s1_pot_wr_o       ? s1_pot_data_o       :
-    s1_spike_wr_o     ? s1_spike_data_o     :
     a0_weight_wr_o    ? a0_weight_data_o    :
-    a0_act_wr_o       ? a0_act_data_o       :
-    a0_syn_curr_wr_o  ? a0_syn_curr_data_o  :
     a0_bias_curr_wr_o ? a0_bias_curr_data_o :
     a0_thresh_wr_o    ? a0_thresh_data_o    :
     a0_pot_wr_o       ? a0_pot_data_o       :
-    a0_spike_wr_o     ? a0_spike_data_o     :
-    hd_src_a_wr_o     ? hd_src_a_data_o     :
-    hd_src_b_wr_o     ? hd_src_b_data_o     :
-    hd_src_z_wr_o     ? hd_src_z_data_o     :
-    hd_src_r_wr_o     ? hd_src_r_data_o     :
+    shared_data_wr_o  ? shared_data_data_o  :
                         {DATA_SZ{1'bx}};
 
 // Index of the currently-active write bus (for per_wr_cnt updates)
 wire [4:0] active_bus_idx =
     s0_weight_wr_o    ? IDX_S0_WEIGHT    :
-    s0_act_wr_o       ? IDX_S0_ACT       :
-    s0_syn_curr_wr_o  ? IDX_S0_SYN_CURR  :
     s0_bias_curr_wr_o ? IDX_S0_BIAS_CURR :
     s0_thresh_wr_o    ? IDX_S0_THRESH    :
     s0_pot_wr_o       ? IDX_S0_POT       :
-    s0_spike_wr_o     ? IDX_S0_SPIKE     :
     s1_weight_wr_o    ? IDX_S1_WEIGHT    :
-    s1_act_wr_o       ? IDX_S1_ACT       :
-    s1_syn_curr_wr_o  ? IDX_S1_SYN_CURR  :
     s1_bias_curr_wr_o ? IDX_S1_BIAS_CURR :
     s1_thresh_wr_o    ? IDX_S1_THRESH    :
     s1_pot_wr_o       ? IDX_S1_POT       :
-    s1_spike_wr_o     ? IDX_S1_SPIKE     :
     a0_weight_wr_o    ? IDX_A0_WEIGHT    :
-    a0_act_wr_o       ? IDX_A0_ACT       :
-    a0_syn_curr_wr_o  ? IDX_A0_SYN_CURR  :
     a0_bias_curr_wr_o ? IDX_A0_BIAS_CURR :
     a0_thresh_wr_o    ? IDX_A0_THRESH    :
     a0_pot_wr_o       ? IDX_A0_POT       :
-    a0_spike_wr_o     ? IDX_A0_SPIKE     :
-    hd_src_a_wr_o     ? IDX_HD_SRC_A     :
-    hd_src_b_wr_o     ? IDX_HD_SRC_B     :
-    hd_src_z_wr_o     ? IDX_HD_SRC_Z     :
-    hd_src_r_wr_o     ? IDX_HD_SRC_R     : 5'd31;   // 31 = none
+    shared_data_wr_o  ? IDX_SHARED_DATA  : 5'd31;   // 31 = none
 
 // Capture on the falling edge to see combinational outputs from last posedge
 always @(negedge clk) begin
@@ -313,20 +237,13 @@ task do_reset;
         fill_block_size_i = 20'b0;
         fu_bba_wait_i     = 1'b0;
         fu_bba_data_i     = 32'b0;
-        s0_weight_wait_i    = 1'b0; s0_act_wait_i      = 1'b0;
-        s0_syn_curr_wait_i  = 1'b0; s0_bias_curr_wait_i= 1'b0;
-        s0_thresh_wait_i    = 1'b0; s0_pot_wait_i      = 1'b0;
-        s0_spike_wait_i     = 1'b0;
-        s1_weight_wait_i    = 1'b0; s1_act_wait_i      = 1'b0;
-        s1_syn_curr_wait_i  = 1'b0; s1_bias_curr_wait_i= 1'b0;
-        s1_thresh_wait_i    = 1'b0; s1_pot_wait_i      = 1'b0;
-        s1_spike_wait_i     = 1'b0;
-        a0_weight_wait_i    = 1'b0; a0_act_wait_i      = 1'b0;
-        a0_syn_curr_wait_i  = 1'b0; a0_bias_curr_wait_i= 1'b0;
-        a0_thresh_wait_i    = 1'b0; a0_pot_wait_i      = 1'b0;
-        a0_spike_wait_i     = 1'b0;
-        hd_src_a_wait_i     = 1'b0; hd_src_b_wait_i    = 1'b0;
-        hd_src_z_wait_i     = 1'b0; hd_src_r_wait_i    = 1'b0;
+        s0_weight_wait_i = 1'b0; s0_bias_curr_wait_i = 1'b0;
+        s0_thresh_wait_i = 1'b0; s0_pot_wait_i       = 1'b0;
+        s1_weight_wait_i = 1'b0; s1_bias_curr_wait_i = 1'b0;
+        s1_thresh_wait_i = 1'b0; s1_pot_wait_i       = 1'b0;
+        a0_weight_wait_i = 1'b0; a0_bias_curr_wait_i = 1'b0;
+        a0_thresh_wait_i = 1'b0; a0_pot_wait_i       = 1'b0;
+        shared_data_wait_i = 1'b0;
         fail_count          = 0;
         repeat (4) @(posedge clk);
         #1;
@@ -454,12 +371,12 @@ initial begin
     do_reset;
 
     // --------------------------------------------------------------------- T1
-    // Basic fill: buffer 3 → s0_syn_curr (IDX 2), 8 words, value=0xDEAD_BEEF
+    // Basic fill: buffer 3 → shared pool (IDX_SHARED_DATA), 8 words, 0xDEAD_BEEF
     // Base address in BBA = 0x1000 (word address)
-    $display("\n--- T1: basic fill (buf3 → s0_syn_curr, 8 words, 0xDEAD_BEEF) ---");
+    $display("\n--- T1: basic fill (buf3 -> shared pool, 8 words, 0xDEAD_BEEF) ---");
 
-    // Program mem_sel_table[3] via AXI: enable bit IDX_S0_SYN_CURR=2
-    axi_wr(fu_tbl_addr(3), (32'b1 << IDX_S0_SYN_CURR));
+    // Program mem_sel_table[3] via AXI: enable bit IDX_SHARED_DATA=2
+    axi_wr(fu_tbl_addr(3), (32'b1 << IDX_SHARED_DATA));
 
     // Set BBA data for buffer 3
     fu_bba_data_i = 32'h0000_1000;   // word-address 0x1000
@@ -469,7 +386,7 @@ initial begin
 
     wait_finished;
 
-    check_fill(IDX_S0_SYN_CURR, 8, "T1");
+    check_fill(IDX_SHARED_DATA, 8, "T1");
 
     // Verify acc_busy_o returned to 0 after finish
     if (acc_busy_o !== 1'b0) begin
@@ -481,10 +398,10 @@ initial begin
     @(posedge clk); @(posedge clk);
 
     // --------------------------------------------------------------------- T2
-    // Different memory: buffer 7 → hd_src_r (IDX 24), 4 words, value=0xCAFE_0000
-    $display("\n--- T2: different memory (buf7 → hd_src_r, 4 words, 0xCAFE_0000) ---");
+    // Different (dedicated) memory: buffer 7 → s0_pot, 4 words, 0xCAFE_0000
+    $display("\n--- T2: dedicated memory (buf7 -> s0_pot, 4 words, 0xCAFE_0000) ---");
 
-    axi_wr(fu_tbl_addr(7), (32'b1 << IDX_HD_SRC_R));
+    axi_wr(fu_tbl_addr(7), (32'b1 << IDX_S0_POT));
     fu_bba_data_i = 32'h0000_2000;
 
     clear_capture(30'h2000);
@@ -492,7 +409,7 @@ initial begin
 
     wait_finished;
 
-    check_fill(IDX_HD_SRC_R, 4, "T2");
+    check_fill(IDX_S0_POT, 4, "T2");
 
     @(posedge clk); @(posedge clk);
 
@@ -523,8 +440,8 @@ initial begin
     wait_finished;
 
     // Write count must still be 8; addresses sequential from 0x3000
-    if (per_wr_cnt[IDX_S0_SYN_CURR] !== 8) begin
-        $display("FAIL T3: wrong write count %0d (expected 8)", per_wr_cnt[IDX_S0_SYN_CURR]);
+    if (per_wr_cnt[IDX_SHARED_DATA] !== 8) begin
+        $display("FAIL T3: wrong write count %0d (expected 8)", per_wr_cnt[IDX_SHARED_DATA]);
         fail_count = fail_count + 1;
     end else
         $display("PASS T3: correct write count after BBA wait");
@@ -538,7 +455,7 @@ initial begin
     @(posedge clk); @(posedge clk);
 
     // --------------------------------------------------------------------- T4
-    // Memory back-pressure: assert s0_syn_curr_wait_i after the 3rd write.
+    // Memory back-pressure: assert shared_data_wait_i after the 3rd write.
     // The fill must pause and resume, delivering all 8 writes in the correct order.
     $display("\n--- T4: memory back-pressure (hold wait after write 3) ---");
 
@@ -560,27 +477,27 @@ initial begin
         repeat (3) @(posedge clk); #1;
 
         // Record write count, then hold memory wait
-        wr_before_wait = per_wr_cnt[IDX_S0_SYN_CURR];
-        s0_syn_curr_wait_i = 1'b1;
+        wr_before_wait = per_wr_cnt[IDX_SHARED_DATA];
+        shared_data_wait_i = 1'b1;
 
         // Verify no progress for 4 stall cycles
         repeat (4) begin
             @(posedge clk); #1;
-            if (per_wr_cnt[IDX_S0_SYN_CURR] !== wr_before_wait) begin
+            if (per_wr_cnt[IDX_SHARED_DATA] !== wr_before_wait) begin
                 $display("FAIL T4: write count advanced during wait (%0d → %0d)",
-                         wr_before_wait, per_wr_cnt[IDX_S0_SYN_CURR]);
+                         wr_before_wait, per_wr_cnt[IDX_SHARED_DATA]);
                 fail_count = fail_count + 1;
             end
         end
         $display("PASS T4: write count held at %0d during memory wait", wr_before_wait);
 
         // Release and wait for finish
-        s0_syn_curr_wait_i = 1'b0;
+        shared_data_wait_i = 1'b0;
     end
 
     wait_finished;
 
-    check_fill(IDX_S0_SYN_CURR, 8, "T4");
+    check_fill(IDX_SHARED_DATA, 8, "T4");
 
     @(posedge clk); @(posedge clk);
 
@@ -612,12 +529,12 @@ initial begin
             if (acc_finished_o) begin
                 t5_seen = 1'b1;
                 // Check T2 part while still at this time point
-                if (per_wr_cnt[IDX_HD_SRC_R] !== 4) begin
-                    $display("FAIL T5 (part A): hd_src_r write count %0d (exp 4)",
-                             per_wr_cnt[IDX_HD_SRC_R]);
+                if (per_wr_cnt[IDX_S0_POT] !== 4) begin
+                    $display("FAIL T5 (part A): s0_pot write count %0d (exp 4)",
+                             per_wr_cnt[IDX_S0_POT]);
                     fail_count = fail_count + 1;
                 end else
-                    $display("PASS T5 (part A): first fill (hd_src_r) completed with 4 writes");
+                    $display("PASS T5 (part A): first fill (s0_pot) completed with 4 writes");
             end
         end
         if (!t5_seen) begin
@@ -633,12 +550,12 @@ initial begin
 
     wait_finished;
 
-    if (per_wr_cnt[IDX_S0_SYN_CURR] !== 8) begin
-        $display("FAIL T5 (part B): s0_syn_curr write count %0d (exp 8)",
-                 per_wr_cnt[IDX_S0_SYN_CURR]);
+    if (per_wr_cnt[IDX_SHARED_DATA] !== 8) begin
+        $display("FAIL T5 (part B): shared-pool write count %0d (exp 8)",
+                 per_wr_cnt[IDX_SHARED_DATA]);
         fail_count = fail_count + 1;
     end else
-        $display("PASS T5 (part B): second fill (s0_syn_curr) completed with 8 writes");
+        $display("PASS T5 (part B): second fill (shared pool) completed with 8 writes");
 
     if (cap_addr_err) begin
         $display("FAIL T5 (part B): address error in second fill");
