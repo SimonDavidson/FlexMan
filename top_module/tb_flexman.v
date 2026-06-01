@@ -19,7 +19,7 @@ module tb_flexman;
 // ─── Parameters ───────────────────────────────────────────────────────────────
 localparam NUM_BUFFERS         = 16;
 localparam NUM_HW_ACCELERATORS = 5;
-localparam WORDS_PER_CONFIG    = 4;
+localparam WORDS_PER_CONFIG    = 16;
 localparam CFG_ID_SZ           = 5;
 localparam BUFF_INDX_SZ        = 4;
 localparam TGT_ACC_SZ          = 3;
@@ -585,13 +585,17 @@ flexman #(
 integer nxt_in_count;
 integer nxt_out_count;
 integer fill_wr_count;
+integer cm_cfg_done_count;
 integer test_num;
+integer t3_snn0_fin, t3_snn1_fin, t3_disp0, t3_disp1;
 
 initial begin
     nxt_in_count  = 0;
     nxt_out_count = 0;
     fill_wr_count = 0;
+    cm_cfg_done_count = 0;
     test_num      = 0;
+    t3_snn0_fin = 0; t3_snn1_fin = 0; t3_disp0 = 0; t3_disp1 = 0;
 end
 
 always @(posedge clk) begin
@@ -609,6 +613,11 @@ always @(posedge clk) begin
         if (m1_data_mem_wr_o) fill_wr_count = fill_wr_count + 1;
         if (m2_data_mem_wr_o) fill_wr_count = fill_wr_count + 1;
         if (m3_data_mem_wr_o) fill_wr_count = fill_wr_count + 1;
+        if (cm_config_finished_o) cm_cfg_done_count = cm_cfg_done_count + 1;
+        if (dut.u_snn0.acc_finished_o) t3_snn0_fin = t3_snn0_fin + 1;
+        if (dut.u_snn1.acc_finished_o) t3_snn1_fin = t3_snn1_fin + 1;
+        if (dut.sch_start_new_block && dut.sch_target_acc == 3'd0) t3_disp0 = t3_disp0 + 1;
+        if (dut.sch_start_new_block && dut.sch_target_acc == 3'd1) t3_disp1 = t3_disp1 + 1;
     end
 end
 
@@ -669,6 +678,37 @@ task clear_all_mems;
             u_m2_data_mem.mem[mi] = 32'h0;
             u_m3_data_mem.mem[mi] = 32'h0;
         end
+    end
+endtask
+
+// ─── snnAcc static-config helper ─────────────────────────────────────────────
+// Writes the per-accelerator "shape" registers (offsets 0x10..0x88) that are NOT
+// part of the 4-word per-task cfg_mem push (which carries 0x00..0x0C =
+// act_base / weight_base / syn_curr_base / weight_sz).  2 neurons, 2 inputs,
+// 8-bit weights, decay ~1.0.  `base` = SNN0_CFG_BASE or SNN1_CFG_BASE;
+// `spike_base` = where this accelerator writes its output spike buffer.
+task cfg_snn_static;
+    input [31:0] base;
+    input [31:0] spike_base;
+    begin
+        axi_write(base | 32'h40, 32'd0);          // bin_point_syn_curr
+        axi_write(base | 32'h44, 32'd2);          // sp_in_x_len
+        axi_write(base | 32'h48, 32'd1);          // sp_in_y_len
+        axi_write(base | 32'h4C, 32'd2);          // sp_out_x_len
+        axi_write(base | 32'h50, 32'd1);          // sp_out_y_len
+        axi_write(base | 32'h54, 32'd4);          // sp_weights_per_word
+        axi_write(base | 32'h58, 32'd1);          // sp_rows_per_neuron
+        axi_write(base | 32'h5C, 32'd5);          // sp_weight_idx_sz
+        axi_write(base | 32'h64, spike_base);     // np_spike_base_addr
+        axi_write(base | 32'h68, 32'hFFFF_FFFF);  // syn_curr_decay (static)
+        axi_write(base | 32'h6C, 32'hFFFF_FFFF);  // pot_decay (static)
+        axi_write(base | 32'h70, 32'd0);          // sp_weight_mode = full
+        axi_write(base | 32'h74, 32'd1);          // x_kernel_len
+        axi_write(base | 32'h78, 32'd1);          // y_kernel_len
+        axi_write(base | 32'h7C, 32'd1);          // x_kernel_step
+        axi_write(base | 32'h80, 32'd1);          // y_kernel_step
+        axi_write(base | 32'h84, 32'd0);          // x_kernel_offset
+        axi_write(base | 32'h88, 32'd0);          // y_kernel_offset
     end
 endtask
 
@@ -752,6 +792,107 @@ initial begin
         $display("[T2] FAIL  fill_wr_count=%0d (exp 4)  pool[0..3]=%08h %08h %08h %08h",
                  fill_wr_count,
                  pool_rd(0), pool_rd(1), pool_rd(2), pool_rd(3));
+        #20 $finish;
+    end
+
+    // ══════════════════════════════════════════════════════════════════════
+    // T3: INTER-ACCELERATOR DATAFLOW THROUGH THE SHARED POOL
+    //
+    //   This is the test the shared pool exists for: a buffer produced by one
+    //   accelerator's SPIKE output is consumed by another accelerator's ACT
+    //   input, through the same physical pool word.
+    //
+    //   snn0 (TASK 1): reads input spikes [1,1] @ pool[0], computes
+    //        syn_curr=[20,10], fires (threshold=1) → writes spike [1,1] to
+    //        pool[8] (the MID buffer).
+    //   snn1 (TASK 2): reads pool[8] as its act input → computes
+    //        syn_curr=[20,10] @ pool[24].
+    //   The scheduler holds snn1 until snn0 has produced buffer MID (producer/
+    //   consumer dependency via buffer id 1).
+    //
+    //   Proof of dataflow: snn1's syn_curr is NON-ZERO and matches W*[1,1] — it
+    //   could only have read [1,1] from pool[8], which snn0 wrote there.  If the
+    //   handoff failed, pool[8] would be 0 and snn1's syn_curr would be 0.
+    //
+    //   Pool layout (all disjoint, bba=0 so cfg bases are absolute):
+    //     0,1   IN  (snn0 act input)        8,9   MID (snn0 spike -> snn1 act)
+    //     16,17 snn0 syn_curr               24,25 snn1 syn_curr
+    //     32,33 OUT (snn1 spike output)
+    // ══════════════════════════════════════════════════════════════════════
+    reset = 1'b1;
+    nxt_in_count  = 0;
+    nxt_out_count = 0;
+    fill_wr_count = 0;
+    clear_all_mems;
+    repeat(4) @(posedge clk); #1;
+    reset = 1'b0;
+    test_num = 3;
+
+    // --- per-accelerator static (shape) config ---
+    cfg_snn_static(32'h1000_0000, 32'd8);    // snn0: spike out -> pool[8] (MID)
+    cfg_snn_static(32'h1001_0000, 32'd32);   // snn1: spike out -> pool[32] (OUT)
+
+    // --- per-task cfg_mem (16 words each, registers 0x00..0x3C) ---
+    // cfg_id 0 (snn0): act_base=0, weight_base=12, syn_curr_base=16
+    cfg_mem[ 0]=32'd0;  cfg_mem[ 1]=32'd12; cfg_mem[ 2]=32'd20; cfg_mem[ 3]=32'd3;   // act, weight, syn_curr base=20, weight_sz
+    cfg_mem[ 4]=32'h0; cfg_mem[ 5]=32'd1;  cfg_mem[ 6]=32'hFFFF_FFFF; cfg_mem[ 7]=32'hFFFF_FFFF; // task_ctrl=0 (accumulate, skip=0)
+    cfg_mem[ 8]=32'd1;  cfg_mem[ 9]=32'd0;  cfg_mem[10]=32'd30; cfg_mem[11]=32'd40;  // last_neuron, rsvd, bias_base, thresh_base
+    cfg_mem[12]=32'd50; cfg_mem[13]=32'd5;  cfg_mem[14]=32'd3;  cfg_mem[15]=32'd5;   // pot_base, syn_curr_sz, bias_sz, pot_sz
+    // cfg_id 1 (snn1): act_base=8 (=MID), weight_base=12, syn_curr_base=24
+    cfg_mem[16]=32'd8;  cfg_mem[17]=32'd12; cfg_mem[18]=32'd24; cfg_mem[19]=32'd3;
+    cfg_mem[20]=32'h4; cfg_mem[21]=32'd1;  cfg_mem[22]=32'hFFFF_FFFF; cfg_mem[23]=32'hFFFF_FFFF;  // task_ctrl=0x4 (clear)
+    cfg_mem[24]=32'd1;  cfg_mem[25]=32'd0;  cfg_mem[26]=32'd30; cfg_mem[27]=32'd40;
+    cfg_mem[28]=32'd50; cfg_mem[29]=32'd5;  cfg_mem[30]=32'd3;  cfg_mem[31]=32'd5;
+
+    // --- buffer base-address table (all 0; cfg bases are absolute) ---
+    bba_mem[0] = 32'd0;  bba_mem[1] = 32'd0;  bba_mem[2] = 32'd0;
+
+    // --- weights (dedicated per-acc): W = [10,5] col-major (8-bit) → syn_curr [20,10] from [1,1] ---
+    s0_weight_mem[12] = 32'h0000_050A;  s0_weight_mem[13] = 32'h0000_050A;   // snn0
+    s1_weight_mem[12] = 32'h0000_050A;  s1_weight_mem[13] = 32'h0000_050A;   // snn1
+    // --- bias = 0; thresholds (32-bit per neuron, since NP_*_SLICE_BITS=32) ---
+    s0_bias_curr_mem[30] = 32'd0;  s0_bias_curr_mem[31] = 32'd0;
+    s1_bias_curr_mem[30] = 32'd0;  s1_bias_curr_mem[31] = 32'd0;
+    s0_thresh_mem[40]    = 32'd1;  s0_thresh_mem[41]    = 32'd1;   // snn0 thresh=1 → FIRES (pot 19,9 >= 1)
+    s1_thresh_mem[40]    = 32'd50; s1_thresh_mem[41]    = 32'd50;  // snn1 thresh=50 → no fire (we check its syn_curr)
+
+    // --- input spikes for snn0: x = [1,1] at pool[0] ---
+    pool_wr(0, 32'h0000_0003);
+
+    // --- mark the input buffer (id 0) FULL so snn0 can dispatch (id=0, ntgt=1) ---
+    axi_write(32'hE050_0000, 32'h0000_0010);   // {cnt=1, id=0}
+
+    // --- program: TASK(snn0: src IN(0) -> tgt MID(1)); TASK(snn1: src MID(1) -> tgt OUT(2)); STOP ---
+    //   TASK word1 = {3'b0, id2,m2, id1,m1, id0,m0, colour, cfg, acc, 3'b000}
+    //   TASK word2 = {3'b0, n5,id5,m5, n4,id4,m4, n3,id3,m3, 2'b00}  (MODE_SRC=01, MODE_TGT=11)
+    prog_mem[0] = 32'h0000_0800;   // snn0: acc=0 cfg=0, slot0=SRC id=0
+    prog_mem[1] = 32'h0470_0000;   // slot5=TGT id=1 (MID) ntgt=1
+    prog_mem[2] = 32'h0000_2828;   // snn1: acc=1 cfg=1, slot0=SRC id=1 (MID)
+    prog_mem[3] = 32'h04B0_0000;   // slot5=TGT id=2 (OUT) ntgt=1
+    prog_mem[4] = STOP_INST;
+
+    axi_write(32'hE000_0000, 32'd0);   // LOAD_PC = 0
+    axi_write(32'hE010_0000, 32'd0);   // START
+
+    repeat(4000) @(posedge clk);
+
+    $display("[T3] dispatched snn0/snn1 = %0d/%0d, finished = %0d/%0d",
+             t3_disp0, t3_disp1, t3_snn0_fin, t3_snn1_fin);
+    $display("       snn0 spike output  pool[8]     = %08h   (handoff buffer MID; non-zero = snn0 fired)",
+             pool_rd(8));
+    $display("       snn1 syn_curr      pool[24/25] = %08h %08h  (snn1 computed from snn0's spike)",
+             pool_rd(24), pool_rd(25));
+    // Dataflow proof: snn1 read its act input from pool[8] = snn0's spike output.
+    // snn0 fired (pool[8] != 0); snn1's syn_curr is the NON-ZERO result of
+    // processing that spike.  Had snn0 not fired, pool[8] would be 0 and snn1's
+    // syn_curr would be 0 — so a non-zero, snn0-dependent snn1 result proves the
+    // spike crossed from snn0 to snn1 through the shared pool.
+    if (pool_rd(8)  != 32'd0    &&        // snn0 fired a spike into pool buffer MID
+        pool_rd(24) == 32'h0000_0013 &&   // snn1 read MID and computed syn_curr
+        pool_rd(25) == 32'h0000_0009) begin
+        $display("[T3] PASS  inter-accelerator dataflow: snn0 spike -> pool[8] -> snn1 act -> snn1 syn_curr");
+    end else begin
+        $display("[T3] FAIL  snn1 did not receive snn0's spike output through the pool");
         #20 $finish;
     end
 

@@ -53,7 +53,8 @@ module flexman #(
     // System sizing — must be consistent across all sub-modules.
     parameter NUM_BUFFERS         = 16,
     parameter NUM_HW_ACCELERATORS = 5,    // 4 computation + 1 fill_unit
-    parameter WORDS_PER_CONFIG    = 4,    // must be a power of 2 >= 2
+    parameter WORDS_PER_CONFIG    = 16,   // must be a power of 2 >= 2; 16 fits
+                                          // the snnAcc per-task config (~16 regs)
     parameter CFG_ID_SZ           = 5,
     parameter BUFF_INDX_SZ        = 4,    // = $clog2(NUM_BUFFERS)
     parameter TGT_ACC_SZ          = 3,    // extended to hold FILL_ACC_ID=4
@@ -284,7 +285,7 @@ localparam E_CFG_START = E_ACC_START + TGT_ACC_SZ;                            //
 // reach 0-3, so FILL_ACC_ID=4 is unreachable by normal TASK instructions.
 localparam [TGT_ACC_SZ-1:0] FILL_ACC_ID = NUM_HW_ACCELERATORS - 1;           // 4
 
-localparam LOG2_WPC    = 2;   // $clog2(WORDS_PER_CONFIG=4)
+localparam LOG2_WPC    = 4;   // $clog2(WORDS_PER_CONFIG=16)
 localparam BBA_CNT_SZ  = 2;   // $clog2(NUM_BBA_SENDS=4)
 
 // Number of computation accelerators served by config_manager (excludes fill_unit)
@@ -848,7 +849,14 @@ config_manager #(
 // ─── snnAcc0 (TGT_ACC_ID = 0) ────────────────────────────────────────────────
 acc_snn_processor #(
     .TGT_ACC_ID           (0),
-    .TGT_CONFIG_BASE_ADDR (SNN0_CFG_BASE)
+    .TGT_CONFIG_BASE_ADDR (SNN0_CFG_BASE),
+    // 32-bit syn_curr/pot/bias slices: use the full stored value rather than
+    // the top bits of a right-justified small integer (matches the tb mems).
+    .NP_SYN_CURR_SLICE_BITS (32),
+    .NP_POT_SLICE_BITS      (32),
+    .NP_BIAS_CURR_SLICE_BITS(32),
+    .SP_SYN_CURR_SLICE_BITS (32),
+    .SP_BIAS_CURR_SLICE_BITS(32)
 ) u_snn0 (
     .clk                   (clk),
     .reset                 (reset),
@@ -909,7 +917,12 @@ acc_snn_processor #(
 // ─── snnAcc1 (TGT_ACC_ID = 1) ────────────────────────────────────────────────
 acc_snn_processor #(
     .TGT_ACC_ID           (1),
-    .TGT_CONFIG_BASE_ADDR (SNN1_CFG_BASE)
+    .TGT_CONFIG_BASE_ADDR (SNN1_CFG_BASE),
+    .NP_SYN_CURR_SLICE_BITS (32),
+    .NP_POT_SLICE_BITS      (32),
+    .NP_BIAS_CURR_SLICE_BITS(32),
+    .SP_SYN_CURR_SLICE_BITS (32),
+    .SP_BIAS_CURR_SLICE_BITS(32)
 ) u_snn1 (
     .clk                   (clk),
     .reset                 (reset),
