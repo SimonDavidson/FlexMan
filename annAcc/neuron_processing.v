@@ -41,6 +41,8 @@ module ann_neuron_processing # (
     input wire                    [2:0] lut_out_sz_i,          // LUT element width
     input wire                    [2:0] act_out_sz_i,          // output activation width
     input wire                    [1:0] thresh_op_i,           // 00=RELU 01=LUT 10=ABS
+    input wire                    [4:0] bin_point_syn_curr_i,  // requant: input (accumulator) bin point
+    input wire                    [4:0] np_out_bin_point_i,    // requant: output activation bin point (0=disabled)
     input wire    [POT_DECAY_BITS-1:0] pot_decay_mult_i,
 
     // Scheduler interface
@@ -269,17 +271,57 @@ neuron_update0 (
 );
 
 ///////////////////////////////////////////////////////////////////////
+// 4b) Output requantisation: align the accumulator bin point to the output
+//     activation bin point, round-half-up, then unsigned-saturate to the
+//     act_out_sz field width.  act_out_w is the non-negative threshold result
+//     (ABS / RELU / LUT), so it is treated as unsigned magnitude.
+//       np_out_bin_point_i == 0  -> requant DISABLED: act_out_rq = act_out_w
+//          (legacy behaviour — the left-justify below takes the low N bits).
+//       otherwise  shift = bin_point_syn_curr_i - np_out_bin_point_i.
+//     Reuses the previously-unused bin_point_syn_curr_i hook.
+///////////////////////////////////////////////////////////////////////
+wire [4:0] rq_shift = bin_point_syn_curr_i - np_out_bin_point_i;
+wire [SYN_CURR_SLICE_BITS:0] rq_round =                              // +1 guard bit
+        {1'b0, act_out_w}
+      + ((rq_shift == 5'd0) ? {(SYN_CURR_SLICE_BITS+1){1'b0}}
+                            : ({{SYN_CURR_SLICE_BITS{1'b0}}, 1'b1} << (rq_shift - 5'd1)));
+wire [SYN_CURR_SLICE_BITS:0] rq_shifted = rq_round >> rq_shift;
+
+reg [SYN_CURR_SLICE_BITS-1:0] rq_max;     // unsigned max for the output field width
+always @(*) begin
+    case (act_out_sz_i)
+        3'b000: rq_max = 32'h0000_0001;   //  1 bit
+        3'b001: rq_max = 32'h0000_0003;   //  2 bits
+        3'b010: rq_max = 32'h0000_000F;   //  4 bits
+        3'b011: rq_max = 32'h0000_00FF;   //  8 bits
+        3'b100: rq_max = 32'h0000_FFFF;   // 16 bits
+        3'b101: rq_max = 32'hFFFF_FFFF;   // 32 bits (no clamp)
+        default: rq_max = 32'hFFFF_FFFF;
+    endcase
+end
+
+reg [SYN_CURR_SLICE_BITS-1:0] act_out_rq;
+always @(*) begin
+    if (np_out_bin_point_i == 5'd0)
+        act_out_rq = act_out_w;                                  // requant disabled
+    else if (rq_shifted > {1'b0, rq_max})
+        act_out_rq = rq_max;                                     // unsigned saturate
+    else
+        act_out_rq = rq_shifted[SYN_CURR_SLICE_BITS-1:0];
+end
+
+///////////////////////////////////////////////////////////////////////
 // 5) Left-justify for packers
 ///////////////////////////////////////////////////////////////////////
 
 always @(*) begin
     case (act_out_sz_i)
-        3'b000: act_out_lj = {act_out_w[0],    31'b0};
-        3'b001: act_out_lj = {act_out_w[1:0],  30'b0};
-        3'b010: act_out_lj = {act_out_w[3:0],  28'b0};
-        3'b011: act_out_lj = {act_out_w[7:0],  24'b0};
-        3'b100: act_out_lj = {act_out_w[15:0], 16'b0};
-        3'b101: act_out_lj = act_out_w[31:0];
+        3'b000: act_out_lj = {act_out_rq[0],    31'b0};
+        3'b001: act_out_lj = {act_out_rq[1:0],  30'b0};
+        3'b010: act_out_lj = {act_out_rq[3:0],  28'b0};
+        3'b011: act_out_lj = {act_out_rq[7:0],  24'b0};
+        3'b100: act_out_lj = {act_out_rq[15:0], 16'b0};
+        3'b101: act_out_lj = act_out_rq[31:0];
         default: act_out_lj = 32'b0;
     endcase
 end

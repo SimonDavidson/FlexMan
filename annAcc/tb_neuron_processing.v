@@ -62,6 +62,8 @@ reg [SYN_CURR_SLICE_SZ-1:0]  syn_curr_sz;
 reg [POT_SLICE_SZ-1:0]       pot_sz;
 reg [2:0]                     lut_out_sz;
 reg [2:0]                     act_out_sz;
+reg [4:0]                     bin_point_syn_curr;
+reg [4:0]                     np_out_bin_point;
 reg                     [1:0] thresh_op;
 reg [31:0]                    pot_decay_mult;
 
@@ -105,7 +107,7 @@ reg                           spike_mem_wait;
 wire [`ADDR_SIZE-1:0]         spike_mem_addr;
 wire [`ACT_BITS-1:0]          spike_mem_data;
 
-neuron_processing #(
+ann_neuron_processing #(
     .NEURON_IDX_SZ        (NEURON_IDX_SZ),
     .SYN_CURR_IDX_SZ      (SYN_CURR_IDX_SZ),
     .SYN_CURR_DATA_IDX_SZ (SYN_CURR_DATA_IDX_SZ),
@@ -130,6 +132,8 @@ dut (
     .lut_out_sz_i           (lut_out_sz),
     .act_out_sz_i           (act_out_sz),
     .thresh_op_i            (thresh_op),
+    .bin_point_syn_curr_i   (bin_point_syn_curr),
+    .np_out_bin_point_i     (np_out_bin_point),
     .pot_decay_mult_i       (pot_decay_mult),
     .start_new_block_i      (start_new_block),
     .target_acc_i           (target_acc),
@@ -264,6 +268,8 @@ initial begin
     pot_sz             = 3'b101;    // 32-bit pot write-back
     lut_out_sz         = 3'b101;    // 32-bit LUT entries
     act_out_sz         = 3'b101;    // 32-bit output activations
+    bin_point_syn_curr = 5'd0;
+    np_out_bin_point   = 5'd0;      // requant DISABLED (legacy behaviour)
     thresh_op          = 2'b00;     // RELU
     pot_decay_mult     = 32'h80000000;  // 0.5 in Q0.32
     syn_curr_mem_wait  = 0;
@@ -403,6 +409,73 @@ initial begin
     check_eq(pot_sram[129], decayed(32'd40, 32'h80000000), "T3 pot[1] decayed");
     check_eq(pot_sram[130], decayed(32'd10, 32'h80000000), "T3 pot[2] decayed");
     check_eq(pot_sram[131], 32'd0,                         "T3 pot[3] decayed (0)");
+
+    // ----------------------------------------------------------
+    // Test 4: ABS + output requant — bin point 16 -> 4 (shift 12),
+    // round-half-up, 32-bit output (one value/word, no clamp). syn_curr at
+    // bin-point 16; expected output = round(|syn_curr| / 2^12).
+    //   n0: 0x00050000 = 5.0*2^16   -> 80      (exact)
+    //   n1: 0x00050800 = 80.5*2^12  -> 81      (round-half-up)
+    //   n2: 0x000507FF              -> 80      (just below .5)
+    //   n3: 0                       -> 0
+    // ----------------------------------------------------------
+    $display("Test 4: ABS + requant (shift 12, round-half-up)");
+
+    for (mi = 0; mi < SRAM_DEPTH; mi = mi + 1) begin
+        syn_curr_sram[mi] = 32'd0;
+        pot_sram[mi]      = 32'd0;
+        spike_sram[mi]    = 32'd0;
+    end
+
+    syn_curr_sram[0] = 32'h00050000;
+    syn_curr_sram[1] = 32'h00050800;
+    syn_curr_sram[2] = 32'h000507FF;
+    syn_curr_sram[3] = 32'd0;
+
+    thresh_op          = 2'b10;     // ABS
+    act_out_sz         = 3'b101;    // 32-bit output (per-word checks)
+    bin_point_syn_curr = 5'd16;
+    np_out_bin_point   = 5'd4;      // shift = 16 - 4 = 12 (requant ENABLED)
+
+    start_new_block = 1;
+    @(posedge clk); #1;
+    start_new_block = 0;
+    wait_finished;
+
+    check_eq(spike_sram[192], 32'd80, "T4 requant 5.0 -> 80");
+    check_eq(spike_sram[193], 32'd81, "T4 requant 80.5 -> 81 (round up)");
+    check_eq(spike_sram[194], 32'd80, "T4 requant 80.49 -> 80");
+    check_eq(spike_sram[195], 32'd0,  "T4 requant 0 -> 0");
+
+    // ----------------------------------------------------------
+    // Test 5: ABS + requant SATURATION, 8-bit output. All neurons exceed the
+    // 8-bit range (20.0*16 = 320 > 255) so all clamp to 255; packed 4/word ⇒
+    // spike_sram[192] = 0xFFFFFFFF (order-independent of packer byte order).
+    // ----------------------------------------------------------
+    $display("Test 5: ABS + requant saturation (8-bit)");
+
+    for (mi = 0; mi < SRAM_DEPTH; mi = mi + 1) begin
+        syn_curr_sram[mi] = 32'd0;
+        pot_sram[mi]      = 32'd0;
+        spike_sram[mi]    = 32'd0;
+    end
+
+    syn_curr_sram[0] = 32'h00140000;  // 20.0 @ bp16 -> 320 -> sat 255
+    syn_curr_sram[1] = 32'h00140000;
+    syn_curr_sram[2] = 32'h00140000;
+    syn_curr_sram[3] = 32'h00140000;
+
+    thresh_op          = 2'b10;     // ABS
+    act_out_sz         = 3'b011;    // 8-bit, packed 4/word
+    bin_point_syn_curr = 5'd16;
+    np_out_bin_point   = 5'd4;      // shift 12
+
+    start_new_block = 1;
+    @(posedge clk); #1;
+    start_new_block = 0;
+    wait_finished;
+
+    check_eq(spike_sram[192], 32'hFFFFFFFF, "T5 all neurons saturate to 255 (packed)");
 
     $display("=== tb_neuron_processing: %0d failure(s) ===", errors);
     if (errors == 0) $display("PASS"); else $display("FAIL");

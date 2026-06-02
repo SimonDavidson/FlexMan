@@ -208,6 +208,9 @@ module ann_processor # (
     // Shared config registers
     //----------------------------------------------------------------
     reg                    [4:0] bin_point_syn_curr_r;
+    reg                    [4:0] np_out_bin_point_r;   // output-activation binary point;
+                                                       // requant shift = bin_point_syn_curr - this.
+                                                       // 0 = requant disabled (legacy low bits).
     reg                   [31:0] np_pot_decay_mult_r;
     reg                          sp_skip_neuron_r;     // 1 = skip neuron_processing after spike_processing
 
@@ -236,6 +239,9 @@ module ann_processor # (
     //   8'h3C  np_pot_sz_r                 (reused as act_out_sz)
     //   8'h64  np_spike_base_addr_r
     //   8'hA0  np_thresh_op_r              (annAcc new)
+    //   8'hA4  np_out_bin_point_r          (annAcc new) output-activation bin point;
+    //                                      requant shift = bin_point_syn_curr - this;
+    //                                      0 = requant disabled (legacy low bits)
     //
     //   shared:
     //   8'h40  bin_point_syn_curr_r
@@ -295,6 +301,7 @@ module ann_processor # (
             np_thresh_op_r          <= 2'b0;
             sp_skip_neuron_r        <= 1'b0;
             bin_point_syn_curr_r    <= 5'b0;
+            np_out_bin_point_r      <= 5'b0;
             np_pot_decay_mult_r     <= 32'b0;
         end else if (sys_req_i & addr_match) begin
             case (sys_addr_i[7:0])
@@ -332,6 +339,7 @@ module ann_processor # (
                 8'h40: bin_point_syn_curr_r    <= sys_data_i[4:0];
                 8'h6C: np_pot_decay_mult_r     <= sys_data_i[31:0];
                 8'hA0: np_thresh_op_r          <= sys_data_i[1:0];
+                8'hA4: np_out_bin_point_r      <= sys_data_i[4:0];
                 8'h9C: sp_skip_neuron_r        <= sys_data_i[0];
                 8'h10: sp_skip_neuron_r        <= sys_data_i[0];
                 8'h1C: np_pot_decay_mult_r     <= sys_data_i[31:0];
@@ -543,6 +551,8 @@ module ann_processor # (
         .lut_out_sz_i           (np_bias_curr_sz_r),  // np_bias_curr_sz_r reused
         .act_out_sz_i           (np_pot_sz_r),        // same config reg for act width
         .thresh_op_i            (np_thresh_op_r),
+        .bin_point_syn_curr_i   (bin_point_syn_curr_r),  // requant: input bin point
+        .np_out_bin_point_i     (np_out_bin_point_r),    // requant: output bin point (0=off)
         .pot_decay_mult_i       (np_pot_decay_mult_r[NP_POT_DECAY_BITS-1:0]),
 
         // Scheduler – triggered by spike_processing completion
