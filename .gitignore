@@ -8,6 +8,7 @@
 !*.v
 !*.vh
 !*.bsh
+!*.sh
 !*.tcl
 !*.xdc
 
