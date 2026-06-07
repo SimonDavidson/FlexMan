@@ -89,8 +89,10 @@ reg                  mode_r;
 reg [2:0] mul_total;   /* set at latch time                                */
 reg [2:0] mul_count;   /* counts up during ST_MUL                         */
 
+/* F4/F5 fix (2026-06-07): derive from the LATCHED size esz_z_r so mul_total
+ * is stable through ST_MUL (was elem_sz_z_i, the live input).             */
 always @(*) begin
-    case (elem_sz_z_i)
+    case (esz_z_r)
         3'd4:    mul_total = 3'd2;   /* 16-bit: 2 chunks                   */
         3'd5:    mul_total = 3'd4;   /* 32-bit: 4 chunks                   */
         default: mul_total = 3'd1;   /* 1..8-bit: 1 chunk                  */
@@ -140,11 +142,21 @@ reg signed [WIDE-1:0] r_prev_latch; /* R_prev at internal precision        */
 localparam ACC_BITS = WIDE + DATA_BITS + 4;  /* 84 bits                    */
 reg signed [ACC_BITS-1:0] accumulator;
 
-/* Current 8-bit chunk of Z being processed */
+/* Current 8-bit chunk of Z being processed.
+ * F4/F5 fix (2026-06-07): take LSB-first bytes of the RIGHT-aligned integer
+ * z_val (was the top byte of left-aligned z_r, which zeroed all higher
+ * chunks).  The top chunk carries the sign (two's complement); lower chunks
+ * are unsigned.  The partial product (chunk*amb) is shifted into place; the
+ * accumulator then adds it (previously the WHOLE running sum was shifted
+ * because Verilog '+' binds tighter than '<<').                            */
 wire [7:0] z_chunk;
-assign z_chunk = z_r[DATA_BITS-1 -: 8] >> ({mul_count, 3'b000});
-/* Shift z_r right by (mul_count * 8) to get the current low byte.        */
-/* Since z_r is left-aligned we rotate through MSB-first.                 */
+assign z_chunk = z_val >> ({mul_count, 3'b000});      /* byte mul_count of z_val */
+wire is_top_chunk = (mul_count == mul_total - 1'b1);
+wire signed [ACC_BITS-1:0] chunk_ext = is_top_chunk
+    ? $signed({{(ACC_BITS-8){z_chunk[7]}}, z_chunk})   /* sign-extend top byte   */
+    : $signed({{(ACC_BITS-8){1'b0}},       z_chunk});  /* zero-extend low bytes  */
+wire signed [ACC_BITS-1:0] amb_ext  = $signed({{(ACC_BITS-WIDE){amb[WIDE-1]}}, amb});
+wire signed [ACC_BITS-1:0] partial  = (chunk_ext * amb_ext) << ({mul_count, 3'b000});
 
 /* -------------------------------------------------------------------------
  * Result holding register (ST_WAIT_PAK)
@@ -223,13 +235,9 @@ always @(posedge clk) begin
         ST_MUL: begin
             /* amb was pre-computed in ST_IDLE; no update needed on cycle 0 */
 
-            /* Partial product: current 8-bit chunk of Z * amb, shifted   */
-            /* by (mul_count * 8) to account for chunk position.          */
-            /* z_chunk gives bits [(mul_count+1)*8-1 : mul_count*8] of Z. */
-            accumulator <= accumulator +
-                ($signed({{(ACC_BITS-8){z_chunk[7]}}, z_chunk}) *
-                 $signed({{(ACC_BITS-WIDE){amb[WIDE-1]}}, amb}))
-                << ({mul_count, 3'b000});
+            /* Add the (correctly shifted) partial product. After all
+             * chunks, accumulator = z_val * amb at binary point (bp_z+HALF). */
+            accumulator <= accumulator + partial;
 
             if (mul_count == mul_total - 1'b1) begin
                 /* All chunks done: prepare B and R_prev for ACCUM */
@@ -247,13 +255,16 @@ always @(posedge clk) begin
 
         /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
         ST_ACCUM: begin
-            /* accumulator holds Z*(A-B) at double the internal precision.
-             * Add B and optionally R_prev, both at internal precision.   */
+            /* accumulator holds Z*(A-B) at binary point (bp_z + HALF).
+             * F4/F5 fix (2026-06-07): add B (and R_prev) at the SAME binary
+             * point. b_latch/r_prev_latch are at HALF, so shift by bp_z_r
+             * (was << HALF, which left the multiply term 24 bits too low and
+             * truncated it away).                                          */
             accumulator <= accumulator
                          + ($signed({{(ACC_BITS-WIDE){b_latch[WIDE-1]}}, b_latch})
-                            << (WIDE/2))
+                            << bp_z_r)
                          + (mode_r ? ($signed({{(ACC_BITS-WIDE){r_prev_latch[WIDE-1]}},
-                                               r_prev_latch}) << (WIDE/2))
+                                               r_prev_latch}) << bp_z_r)
                                    : {ACC_BITS{1'b0}});
             state <= ST_TRUNCATE;
         end
@@ -267,11 +278,21 @@ always @(posedge clk) begin
                 reg signed [DATA_BITS-1:0] clamped;
                 reg signed [DATA_BITS-1:0] max_val;
                 reg signed [DATA_BITS-1:0] min_val;
-                reg [5:0] out_shift;
+                integer                    out_shift;   /* signed */
+                reg signed [ACC_BITS-1:0]  round_bias;
 
-                /* Shift accumulator right to bring result to DATA_BITS    */
-                out_shift = WIDE/2 + (WIDE/2 - bp_r_r);
-                shifted   = accumulator >>> out_shift;
+                /* F4/F5 fix (2026-06-07): accumulator is at binary point
+                 * (bp_z + HALF). Shift right by (bp_z + HALF - bp_r) to land
+                 * at bp_r, with round-half-up. (Was WIDE/2 + (WIDE/2 - bp_r),
+                 * i.e. 48 - bp_r, which assumed the multiply term was at 48.) */
+                out_shift = (WIDE/2) + bp_z_r - bp_r_r;
+                if (out_shift > 0) begin
+                    round_bias = {{(ACC_BITS-1){1'b0}}, 1'b1} <<< (out_shift - 1);
+                    shifted    = (accumulator + round_bias) >>> out_shift;
+                end else begin
+                    /* bp_r > bp_z+HALF (atypical): scale up, no rounding */
+                    shifted    = accumulator <<< (-out_shift);
+                end
 
                 /* Element range limits (signed, element bits wide)        */
                 case (esz_r_r)

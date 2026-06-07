@@ -159,9 +159,8 @@ golden would diverge there.
 elements are wider than 8 bits. The existing `tb_hadamard_unit` only exercises
 8-bit elements, so it never caught this. Functionally fine for ≤8-bit Z.
 
-**Status:** OPEN — reported, not auto-fixed (it is an arithmetic-intent decision for
-Simon). The unit test currently PASSES against the as-built RTL; when the chunk
-extraction is fixed, update the golden's `zchunk` line in lockstep.
+**Status:** FIXED 2026-06-07 (with F5, and a deeper Z-scaling root cause). See the
+combined fix note under F5 below.
 
 ---
 
@@ -189,7 +188,37 @@ without also fixing the parenthesisation.
 **Impact:** Latent. Harmless today only because F4 zeroes the higher chunks. Both F4
 and F5 must be fixed together for a correct wide-Z multiply.
 
-**Status:** OPEN — reported alongside F4.
+**Status:** FIXED 2026-06-07, together with F4 and a DEEPER root cause uncovered
+while planning the fix:
+
+**Root cause (bigger than F4/F5):** Z was never aligned to the internal binary
+point (HALF=24) the way A and B are, so `Z*(A-B)` landed at binary point
+`bp_z+24` while B/R_prev were added at 48 and `out_shift` assumed 48 — the
+multiply term was shifted into oblivion. hu_compute effectively output `B
+(+R_prev)`, IGNORING `Z*(A-B)` (directed Z=2,A=5,B=1 gave R=1, not 9). The old
+unit test passed only because its golden was a characterisation model
+(DUT==golden), never checking true arithmetic; `tb_hadamard_unit` only used
+Z=0 / A=B cases, so it never multiplied either.
+
+**Fix (`Hadamard/hu_compute.v`):**
+- F4: chunk the RIGHT-aligned integer `z_val` LSB-first; sign-extend the top
+  chunk only, zero-extend lower chunks (exact two's-complement `z_val*amb`).
+- F5: shift the partial product, not the running sum
+  (`acc + ((chunk*amb) << (mc*8))`).
+- Z-scaling: add B/R_prev at `<< bp_z` (was `<< HALF`) and
+  `out_shift = HALF + bp_z - bp_r` (was `48 - bp_r`).
+- Rounding: round-half-up before the output shift (Simon's choice).
+- Robustness: `mul_total` derived from the latched `esz_z_r`.
+
+**Verification:** `Hadamard/tb_hu_compute.v` golden rewritten to the IDEAL math;
+directed cases now ASSERT the true value (D4=9, D5=127+over, D6=-128+under,
+D7=260, D8=1993, D9=6 at bp=2) plus 4000 random vectors — 20056 checks, 0
+failures. `tb_hadamard_unit` still PASSES (its cases have a zero multiply term).
+
+**Residual (documented, not fixed):** WIDE=48 / ACC=84 hold for tested ranges;
+a large 32-bit element at a small binary point can overflow the 48-bit aligned
+intermediate — a pre-existing width limit, flagged for a future dimensioning
+pass.
 
 ---
 
