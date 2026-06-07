@@ -235,3 +235,33 @@ All six use `verif/checks.vh` (+ `vt_driver.vh` for hu_compute). The three BRAM 
 and shared_pool run at `timescale 10ps/1ps` (matching the RTL); the two Hadamard tbs
 at `1ns/1ps`. No real bugs found in the BRAM primitives, shared_pool, or
 hu_config_regs — those four are clean. hu_compute surfaced F4 + F5 above.
+
+## New tests added (2026-06-07 coverage uplift — snnAcc datapath utils)
+
+| Test | Module | Checks | Note |
+|------|--------|-------:|------|
+| snnAcc/tbPacker (NEW)      | packer                | 8135  | first-ever unit test |
+| snnAcc/tbSliceAlign        | slice_and_align       | 64008 | all 6 sizes × every index |
+| snnAcc/tbDatalineCache     | dataline_cache_with_xy| 5895  | hit/miss, invalidation, mem_wait |
+| snnAcc/tbSynCurrUpdate     | syn_curr_update       | 1408  | full+sparse accumulate, sign bounds |
+| snnAcc/tbActIndexGen       | act_index_generator   | 2250  | random grids + back-pressure |
+| snnAcc/tbWeightGen         | weight_generator      | 88    | full/sparse golden + conv smoke |
+
+## Design observations (non-bugs, worth an RTL comment) — snnAcc datapath
+
+These are latent constraints, not live bugs (current callers respect them), but
+worth documenting in the RTL:
+
+- **D1 `packer` has no write-while-full guard.** `output_buffer` OR-accumulates on
+  `pak_write_i` even when `buffer_full` and the writeback is stalled on `pot_wait`.
+  Safe only because `neuron_processing` gates `result_taken` on `~packer_full`. A
+  defensive internal guard (or a comment) would harden it.
+- **D2 `weight_generator.finished_pass_o` is a one-delta combinational pulse** —
+  must be sampled AT the posedge, not at `#1` after (sampling late intermittently
+  misses the conv pulse). Same hazard class as the `syn_curr_update`/conv
+  `finished_pass`. Recommend documenting as a general rule for these `finished_*`
+  pulses.
+- **D3 `dataline_cache_with_xy` can alias across a slice-size change** — the single
+  entry compares word indices shifted by the *current* `slice_sz_i`, so a stale
+  entry can falsely hit if two requests share a base but differ in slice size.
+  Harmless (slice size is fixed per task), but a latent constraint.
