@@ -120,7 +120,7 @@ wire [`ADDR_SIZE-1:0]       syn_curr_mem_addr;
 wire [`POT_BITS-1:0]        syn_curr_mem_data_wr;
 reg  [`POT_BITS-1:0]        syn_curr_mem_data_rd;
 
-spike_processing #(
+ann_spike_processing #(
     .NUM_TIMESTEPS     (NUM_TIMESTEPS),
     .X_INPUT_SZ        (X_INPUT_SZ),
     .Y_INPUT_SZ        (Y_INPUT_SZ),
