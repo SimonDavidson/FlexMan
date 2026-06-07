@@ -1,15 +1,7 @@
 #! /usr/bin/env bash
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Simon Davidson, University of Manchester
-
-sams_code="/home/davidsos/Sam_code"
-sam_matrix_mul="${sams_code}/convolve/rtl/matrix_mul/src"
-si_code="/home/davidsos/ann_pipeline"
-mult_ctrl="./mult_ctrl"
-act_cache="./act_cache"
-weight_gen="./weight_gen"
-pot_ss="./pot_subsystem"
-
-xrun -sv -timescale 1ns/1ps -access wrc -input restore_buff.tcl -top top \
-    buffer_state_entry.v acc_hw_buffer_tracker.v sch_buffer_state.v tb_sch_buffer_state.v
-
+# (Removed stale `-input restore_buff.tcl` GUI arg — file no longer exists and the
+#  test now runs headless / self-checking.)
+xrun -sv -timescale 1ns/1ps -access wrc -top tb_sch_buffer_state \
+    buffer_state_entry.v acc_hw_buffer_tracker.v sch_buffer_state.v tb_sch_buffer_state.v ${COV_ARGS:-}

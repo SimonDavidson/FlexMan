@@ -1,230 +1,266 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
+// =============================================================================
+// tb_buffer_state_entry  (scheduler — per-buffer {free,full,colour,counter})
+//
+// Authors      : Simon Davidson & Claude
+// Created      : 2026-05-12
+// Last modified: 2026-06-07
+//
+// Aggressive rewrite. Maintains a cycle-accurate SOFTWARE reference model that
+// replicates buffer_state_entry.v's four priority chains EXACTLY, then:
+//   * directed transitions for every strobe class and the free-on-last-consumer
+//     edge (count 1->0), plus the full counter range 0..7,
+//   * a long constrained-random loop driving one strobe-class per cycle and
+//     checking free/full/colour/count against the SW model EVERY cycle.
+//
+// RTL priority chains modelled (highest first), all on posedge clk:
+//   free_r:   reset->1 ; rw_claim->0 ; mark_as_full->0 ; (cnt==1 & consumed)->1 ; new_tgt->0
+//   full_r:   reset->0 ; rw_claim->0 ; (now_full|mark_as_full)->1 ; (cnt==1 & consumed)->0
+//   colour_r: reset->0 ; rw_claim->rw_colour ; new_tgt->new_colour
+//   count_r:  reset->0 ; mark_as_full->mark_usage ; now_full->now_usage ;
+//             new_tgt->new_usage ; consumed->count-1
+// =============================================================================
 `timescale 1ns/1ps
 
-// Testbench for buffer_state_entry.v
-// Covers: reset, new-target, buff-now-full, content-consumed (multi), mark-as-full
-// TGT_COUNT_SZ is declared at file scope in buffer_state_entry.v and is visible
-// to this file when both are compiled in the same Xcelium compilation unit.
+module tb_buffer_state_entry;
 
-module top;
+    localparam integer TGT_COUNT_SZ = 3;
+    localparam integer NRAND        = 8000;
 
-reg        clk, reset;
-reg        mark_as_full_i;
-reg  [2:0] mark_buff_usage_i;
-reg        buff_new_tgt_i;
-reg  [2:0] buff_new_usage_count_i;
-reg        buff_new_colour_i;
-reg        buff_rw_claim_i;
-reg        buff_rw_colour_i;
-reg        buff_now_full_i;
-reg  [2:0] buff_now_usage_count_i;
-reg        buff_content_consumed_i;
+    reg                     clk, reset;
+    reg                     mark_as_full_i;
+    reg  [TGT_COUNT_SZ-1:0] mark_buff_usage_i;
+    reg                     buff_new_tgt_i;
+    reg  [TGT_COUNT_SZ-1:0] buff_new_usage_count_i;
+    reg                     buff_new_colour_i;
+    reg                     buff_rw_claim_i;
+    reg                     buff_rw_colour_i;
+    reg                     buff_now_full_i;
+    reg  [TGT_COUNT_SZ-1:0] buff_now_usage_count_i;
+    reg                     buff_content_consumed_i;
 
-wire [2:0] buff_usage_count_o;
-wire       buff_colour_o;
-wire       buff_free_o;
-wire       buff_full_o;
+    wire [TGT_COUNT_SZ-1:0] buff_usage_count_o;
+    wire                    buff_colour_o;
+    wire                    buff_free_o;
+    wire                    buff_full_o;
 
-initial clk = 1'b0;
-always  #5 clk = ~clk;
+    integer verif_errors, verif_checks, verif_to;
+    `include "../verif/checks.vh"
 
-initial begin
-    $dumpfile("tb_buffer_state_entry.vcd");
-    $dumpvars(0, top);
-end
+    buffer_state_entry #(.TGT_COUNT_SZ(TGT_COUNT_SZ)) dut (
+        .clk(clk), .reset(reset),
+        .mark_as_full_i(mark_as_full_i), .mark_buff_usage_i(mark_buff_usage_i),
+        .buff_new_tgt_i(buff_new_tgt_i),
+        .buff_new_usage_count_i(buff_new_usage_count_i),
+        .buff_new_colour_i(buff_new_colour_i),
+        .buff_rw_claim_i(buff_rw_claim_i), .buff_rw_colour_i(buff_rw_colour_i),
+        .buff_now_full_i(buff_now_full_i),
+        .buff_now_usage_count_i(buff_now_usage_count_i),
+        .buff_content_consumed_i(buff_content_consumed_i),
+        .buff_usage_count_o(buff_usage_count_o),
+        .buff_colour_o(buff_colour_o),
+        .buff_free_o(buff_free_o),
+        .buff_full_o(buff_full_o));
 
-integer errors;
-initial errors = 0;
+    initial clk = 1'b0; always #5 clk = ~clk;
 
-task chk;
-    input        got;
-    input        exp;
-    input [255:0] label;
-    begin
-        if (got !== exp) begin
-            $display("FAIL [%0t] %0s: got=%0b exp=%0b", $time, label, got, exp);
-            errors = errors + 1;
+    // ----------------------------------------------------------------------
+    // Software reference model: holds the EXPECTED registered state.
+    // ----------------------------------------------------------------------
+    reg                     m_free, m_full, m_colour;
+    reg [TGT_COUNT_SZ-1:0]  m_count;
+
+    // Compute next-state from the SW model given the currently-driven inputs.
+    // Mirrors the RTL priority order exactly.  `no_longer_needed` uses the
+    // CURRENT (pre-edge) count, exactly like the RTL combinational wire.
+    task model_step;
+        reg no_longer_needed;
+        reg nf, nfu, nc;
+        reg [TGT_COUNT_SZ-1:0] ncnt;
+        begin
+            no_longer_needed = (m_count == 'b1) & buff_content_consumed_i;
+
+            // free_r
+            if      (reset)            nf = 1'b1;
+            else if (buff_rw_claim_i)  nf = 1'b0;
+            else if (mark_as_full_i)   nf = 1'b0;
+            else if (no_longer_needed) nf = 1'b1;
+            else if (buff_new_tgt_i)   nf = 1'b0;
+            else                       nf = m_free;
+
+            // full_r
+            if      (reset)                              nfu = 1'b0;
+            else if (buff_rw_claim_i)                    nfu = 1'b0;
+            else if (buff_now_full_i | mark_as_full_i)   nfu = 1'b1;
+            else if (no_longer_needed)                   nfu = 1'b0;
+            else                                         nfu = m_full;
+
+            // colour_r
+            if      (reset)           nc = 1'b0;
+            else if (buff_rw_claim_i) nc = buff_rw_colour_i;
+            else if (buff_new_tgt_i)  nc = buff_new_colour_i;
+            else                      nc = m_colour;
+
+            // count_r
+            if      (reset)                   ncnt = 'b0;
+            else if (mark_as_full_i)          ncnt = mark_buff_usage_i;
+            else if (buff_now_full_i)         ncnt = buff_now_usage_count_i;
+            else if (buff_new_tgt_i)          ncnt = buff_new_usage_count_i;
+            else if (buff_content_consumed_i) ncnt = m_count - 'b1;
+            else                              ncnt = m_count;
+
+            m_free   = nf;
+            m_full   = nfu;
+            m_colour = nc;
+            m_count  = ncnt;
         end
-    end
-endtask
+    endtask
 
-task chk_count;
-    input [2:0] got;
-    input [2:0] exp;
-    input [255:0] label;
-    begin
-        if (got !== exp) begin
-            $display("FAIL [%0t] %0s: got=%0d exp=%0d", $time, label, got, exp);
-            errors = errors + 1;
+    // Drive inputs for one cycle, advance both DUT and model over the edge, then
+    // compare all four outputs.  Inputs must already be set before calling.
+    task step_and_check;
+        input [255:0] tag;
+        begin
+            model_step;            // compute expected post-edge state
+            @(posedge clk); #1;    // DUT registers update
+            check_bit(buff_free_o,                  m_free,  {tag, " free"});
+            check_bit(buff_full_o,                  m_full,  {tag, " full"});
+            check_bit(buff_colour_o,                m_colour,{tag, " colour"});
+            check_eq ($unsigned(buff_usage_count_o),
+                      $unsigned(m_count),                    {tag, " count"});
         end
+    endtask
+
+    task clear_inputs;
+        begin
+            mark_as_full_i=0; mark_buff_usage_i=0;
+            buff_new_tgt_i=0; buff_new_usage_count_i=0; buff_new_colour_i=0;
+            buff_rw_claim_i=0; buff_rw_colour_i=0;
+            buff_now_full_i=0; buff_now_usage_count_i=0;
+            buff_content_consumed_i=0;
+        end
+    endtask
+
+    integer it, klass;
+
+    initial begin
+        verif_errors=0; verif_checks=0;
+        clear_inputs; reset=1'b1;
+        // hold reset a few cycles, model tracks it
+        repeat(3) begin model_step; @(posedge clk); #1; end
+        reset=1'b0;
+        $display("=== tb_buffer_state_entry (scheduler) ===");
+        check_bit(buff_free_o,   1'b1, "post-reset free");
+        check_bit(buff_full_o,   1'b0, "post-reset full");
+        check_bit(buff_colour_o, 1'b0, "post-reset colour");
+        // sync model to confirmed post-reset state
+        m_free=1; m_full=0; m_colour=0; m_count=0;
+
+        // ---- directed: producer target -> full -> drain to free ----
+        clear_inputs;
+        buff_new_tgt_i=1; buff_new_usage_count_i=3'd2; buff_new_colour_i=1'b1;
+        step_and_check("D-newtgt");
+        clear_inputs;
+        buff_now_full_i=1; buff_now_usage_count_i=3'd2;
+        step_and_check("D-nowfull");
+        clear_inputs;
+        buff_content_consumed_i=1; step_and_check("D-consume 2->1");
+        buff_content_consumed_i=1; step_and_check("D-consume 1->0 free edge");
+        clear_inputs; step_and_check("D-idle after free");
+
+        // ---- directed: mark_as_full then full drain over all counts ----
+        clear_inputs;
+        buff_new_tgt_i=1; buff_new_usage_count_i=3'd7; buff_new_colour_i=1'b0;
+        step_and_check("D-newtgt cnt7");
+        clear_inputs;
+        buff_now_full_i=1; buff_now_usage_count_i=3'd7;
+        step_and_check("D-nowfull cnt7");
+        for (it=0; it<7; it=it+1) begin
+            clear_inputs; buff_content_consumed_i=1;
+            step_and_check("D-drain7");
+        end
+        clear_inputs; step_and_check("D-drained7 idle");
+
+        // ---- directed: RW claim (full->busy), refill ----
+        clear_inputs;
+        mark_as_full_i=1; mark_buff_usage_i=3'd3;
+        step_and_check("D-markfull3");
+        clear_inputs;
+        buff_rw_claim_i=1; buff_rw_colour_i=1'b1;
+        step_and_check("D-rwclaim busy");
+        clear_inputs;
+        buff_now_full_i=1; buff_now_usage_count_i=3'd1;
+        step_and_check("D-rw refill cnt1");
+        clear_inputs;
+        buff_content_consumed_i=1;
+        step_and_check("D-rw final consume free");
+
+        // ---- directed: simultaneous now_full + consumed on count==1 ----
+        // RTL: now_full has priority over no_longer_needed for full_r; count is
+        // reloaded by now_full (consume branch lower priority). free unaffected.
+        clear_inputs;
+        buff_new_tgt_i=1; buff_new_usage_count_i=3'd1;
+        step_and_check("D-precond newtgt1");
+        clear_inputs;
+        buff_now_full_i=1; buff_now_usage_count_i=3'd1;
+        step_and_check("D-precond nowfull1");
+        clear_inputs;
+        buff_now_full_i=1; buff_now_usage_count_i=3'd4; buff_content_consumed_i=1;
+        step_and_check("D-nowfull+consume @cnt1 (now_full wins)");
+
+        // ---- directed: consume when count==0 (underflow wraps; matches RTL) ----
+        clear_inputs;
+        buff_new_tgt_i=1; buff_new_usage_count_i=3'd0;
+        step_and_check("D-newtgt cnt0");
+        clear_inputs;
+        buff_now_full_i=1; buff_now_usage_count_i=3'd0;
+        step_and_check("D-nowfull cnt0");
+        clear_inputs; buff_content_consumed_i=1;
+        step_and_check("D-consume @cnt0 (no_longer_needed=0, wraps)");
+
+        // ---- constrained-random: one strobe-class per cycle ----
+        // Re-establish a clean known state via a reset pulse first.
+        clear_inputs; reset=1'b1; model_step; @(posedge clk); #1; reset=1'b0;
+        m_free=1; m_full=0; m_colour=0; m_count=0;
+
+        void'($urandom(32'hB0FF_5747));
+        for (it=0; it<NRAND; it=it+1) begin
+            clear_inputs;
+            klass = $urandom_range(0,6);
+            case (klass)
+                0: ; // idle
+                1: begin
+                       buff_new_tgt_i=1;
+                       buff_new_usage_count_i=$urandom_range(0,7);
+                       buff_new_colour_i=$urandom & 1'b1;
+                   end
+                2: begin
+                       buff_now_full_i=1;
+                       buff_now_usage_count_i=$urandom_range(0,7);
+                   end
+                3: begin
+                       buff_rw_claim_i=1;
+                       buff_rw_colour_i=$urandom & 1'b1;
+                   end
+                4: begin
+                       mark_as_full_i=1;
+                       mark_buff_usage_i=$urandom_range(0,7);
+                   end
+                5: buff_content_consumed_i=1;
+                6: begin
+                       // occasional rare reset to exercise the reset branch mid-stream
+                       if ($urandom_range(0,9)==0) reset=1'b1;
+                       else                          buff_content_consumed_i=1;
+                   end
+            endcase
+            step_and_check("rand");
+            reset=1'b0;
+        end
+
+        `VERIF_EPILOGUE("tb_buffer_state_entry")
     end
-endtask
 
-buffer_state_entry dut (
-    .clk(clk),
-    .reset(reset),
-    .mark_as_full_i(mark_as_full_i),
-    .mark_buff_usage_i(mark_buff_usage_i),
-    .buff_new_tgt_i(buff_new_tgt_i),
-    .buff_new_usage_count_i(buff_new_usage_count_i),
-    .buff_new_colour_i(buff_new_colour_i),
-    .buff_rw_claim_i(buff_rw_claim_i),
-    .buff_rw_colour_i(buff_rw_colour_i),
-    .buff_now_full_i(buff_now_full_i),
-    .buff_now_usage_count_i(buff_now_usage_count_i),
-    .buff_content_consumed_i(buff_content_consumed_i),
-    .buff_usage_count_o(buff_usage_count_o),
-    .buff_colour_o(buff_colour_o),
-    .buff_free_o(buff_free_o),
-    .buff_full_o(buff_full_o)
-);
-
-initial begin
-    reset                   = 1'b1;
-    mark_as_full_i          = 1'b0;
-    mark_buff_usage_i       = 3'd0;
-    buff_new_tgt_i          = 1'b0;
-    buff_new_usage_count_i  = 3'd0;
-    buff_new_colour_i       = 1'b0;
-    buff_rw_claim_i         = 1'b0;
-    buff_rw_colour_i        = 1'b0;
-    buff_now_full_i         = 1'b0;
-    buff_now_usage_count_i  = 3'd0;
-    buff_content_consumed_i = 1'b0;
-
-    repeat(3) @(posedge clk); #1;
-    reset = 1'b0;
-    @(negedge clk);
-
-    // ------------------------------------------------------------------
-    // Test 1: post-reset state
-    // ------------------------------------------------------------------
-    chk(buff_free_o,   1'b1, "reset: free=1");
-    chk(buff_full_o,   1'b0, "reset: full=0");
-    chk(buff_colour_o, 1'b0, "reset: colour=0");
-
-    // ------------------------------------------------------------------
-    // Test 2: new target allocation (task dispatched, this is tgt buffer)
-    // ------------------------------------------------------------------
-    @(posedge clk); #1;
-    buff_new_tgt_i          = 1'b1;
-    buff_new_usage_count_i  = 3'd2;
-    buff_new_colour_i       = 1'b1;
-    @(posedge clk); #1;
-    buff_new_tgt_i          = 1'b0;
-    @(negedge clk);
-    chk(buff_free_o,          1'b0, "new_tgt: free→0");
-    chk(buff_full_o,          1'b0, "new_tgt: full stays 0");
-    chk(buff_colour_o,        1'b1, "new_tgt: colour latched");
-    chk_count(buff_usage_count_o, 3'd2, "new_tgt: usage_count=2");
-
-    // ------------------------------------------------------------------
-    // Test 3: producing task completes → buffer becomes full with count=2
-    // ------------------------------------------------------------------
-    @(posedge clk); #1;
-    buff_now_usage_count_i = 3'd2;
-    buff_now_full_i = 1'b1;
-    @(posedge clk); #1;
-    buff_now_full_i = 1'b0;
-    @(negedge clk);
-    chk(buff_free_o, 1'b0, "now_full: free stays 0");
-    chk(buff_full_o, 1'b1, "now_full: full→1");
-
-    // ------------------------------------------------------------------
-    // Test 4: first consumer takes from buffer (usage_count 2→1)
-    // ------------------------------------------------------------------
-    @(posedge clk); #1;
-    buff_content_consumed_i = 1'b1;
-    @(posedge clk); #1;
-    buff_content_consumed_i = 1'b0;
-    @(negedge clk);
-    chk_count(buff_usage_count_o, 3'd1, "consume1: count→1");
-    chk(buff_free_o, 1'b0, "consume1: still not free");
-    chk(buff_full_o, 1'b1, "consume1: still full");
-
-    // ------------------------------------------------------------------
-    // Test 5: last consumer → buffer freed
-    // ------------------------------------------------------------------
-    @(posedge clk); #1;
-    buff_content_consumed_i = 1'b1;
-    @(posedge clk); #1;
-    buff_content_consumed_i = 1'b0;
-    @(negedge clk);
-    chk(buff_free_o, 1'b1, "consume2: free→1");
-    chk(buff_full_o, 1'b0, "consume2: full→0");
-
-    // ------------------------------------------------------------------
-    // Test 6: mark_as_full (external data pre-load, 3 consumers)
-    // ------------------------------------------------------------------
-    @(posedge clk); #1;
-    mark_as_full_i    = 1'b1;
-    mark_buff_usage_i = 3'd3;
-    @(posedge clk); #1;
-    mark_as_full_i = 1'b0;
-    @(negedge clk);
-    chk(buff_free_o,         1'b0, "mark_full: free→0");
-    chk(buff_full_o,         1'b1, "mark_full: full→1");
-    chk_count(buff_usage_count_o, 3'd3, "mark_full: count=3");
-
-    // ------------------------------------------------------------------
-    // Test 7: three consecutive consumers free the externally-loaded buffer
-    // ------------------------------------------------------------------
-    repeat(3) begin
-        @(posedge clk); #1;
-        buff_content_consumed_i = 1'b1;
-        @(posedge clk); #1;
-        buff_content_consumed_i = 1'b0;
-    end
-    @(negedge clk);
-    chk(buff_free_o, 1'b1, "3x consume: free→1");
-    chk(buff_full_o, 1'b0, "3x consume: full→0");
-
-    // ------------------------------------------------------------------
-    // Test 8: RW claim – buffer is full, task claims it: full→0, free→0 (busy)
-    //         Then task completes: full→1 with new usage count.
-    // ------------------------------------------------------------------
-    @(posedge clk); #1;
-    mark_as_full_i    = 1'b1;
-    mark_buff_usage_i = 3'd2;
-    @(posedge clk); #1;
-    mark_as_full_i = 1'b0;
-    @(negedge clk);
-    chk(buff_full_o, 1'b1, "RW setup: full=1");
-    chk(buff_free_o, 1'b0, "RW setup: free=0");
-
-    @(posedge clk); #1;
-    buff_rw_claim_i  = 1'b1;
-    buff_rw_colour_i = 1'b1;
-    @(posedge clk); #1;
-    buff_rw_claim_i = 1'b0;
-    @(negedge clk);
-    chk(buff_full_o,   1'b0, "RW claim: full→0 (busy)");
-    chk(buff_free_o,   1'b0, "RW claim: free stays 0");
-    chk(buff_colour_o, 1'b1, "RW claim: colour latched");
-
-    @(posedge clk); #1;
-    buff_now_full_i        = 1'b1;
-    buff_now_usage_count_i = 3'd3;
-    @(posedge clk); #1;
-    buff_now_full_i = 1'b0;
-    @(negedge clk);
-    chk(buff_full_o,           1'b1, "RW done: full→1");
-    chk_count(buff_usage_count_o, 3'd3, "RW done: new count=3");
-
-    // ------------------------------------------------------------------
-    @(posedge clk);
-    if (errors == 0)
-        $display("PASS – buffer_state_entry: all tests passed.");
-    else
-        $display("FAIL – buffer_state_entry: %0d error(s).", errors);
-    $finish;
-end
-
-initial begin
-    #5000;
-    $display("TIMEOUT – buffer_state_entry");
-    $finish;
-end
+    `VERIF_WATCHDOG(2000000)
 
 endmodule

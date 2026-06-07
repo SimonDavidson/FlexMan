@@ -1,5 +1,9 @@
+#! /usr/bin/env bash
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Simon Davidson, University of Manchester
-xrun -sv -timescale 1ns/1ps -access wrc -input restore.tcl -top top \
+# This script used to run the obsolete tb_scheduler_prog.v (now archived under
+# old_tb/) and a missing `-input restore.tcl` GUI script. It is repointed at the
+# current self-checking scheduler integration testbench (tb_scheduler.v).
+xrun -sv -timescale 1ns/1ps -access wrc -top top \
     sch_entry.v sch_table.v buffer_state_entry.v acc_hw_buffer_tracker.v \
-    sch_buffer_state.v prog_cache.v scheduler.v tb_scheduler_prog.v
+    sch_buffer_state.v prog_cache.v scheduler.v tb_scheduler.v ${COV_ARGS:-}

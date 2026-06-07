@@ -1,5 +1,7 @@
 #! /usr/bin/env bash
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Simon Davidson, University of Manchester
+# prog_cache.v and tb_prog_cache.v both `include "../shared/constants.v"
+# themselves, so the (mis-pathed) bare `constants.v` source is dropped here.
 xrun -sv -timescale 1ns/1ps -access wrc -top top \
-    constants.v prog_cache.v tb_prog_cache.v
+    prog_cache.v tb_prog_cache.v ${COV_ARGS:-}

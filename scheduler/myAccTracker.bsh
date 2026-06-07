@@ -1,5 +1,5 @@
 #! /usr/bin/env bash
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Simon Davidson, University of Manchester
-xrun -sv -timescale 1ns/1ps -access wrc -top top \
-    acc_hw_buffer_tracker.v tb_acc_hw_buffer_tracker.v
+xrun -sv -timescale 1ns/1ps -access wrc -top tb_acc_hw_buffer_tracker \
+    acc_hw_buffer_tracker.v tb_acc_hw_buffer_tracker.v ${COV_ARGS:-}

@@ -1,235 +1,179 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
+// =============================================================================
+// tb_acc_hw_buffer_tracker  (scheduler — per-accelerator slot latch + acc_free)
+//
+// Authors      : Simon Davidson & Claude
+// Created      : 2026-05-12
+// Last modified: 2026-06-07
+//
+// Aggressive rewrite with a cycle-accurate SW reference model of the tracker:
+//   slot_*_r : reset->0 ; new_task->latch slot_*_i ; else hold
+//   acc_free : reset->1 ; new_task->0 ; task_finished->1 ; else hold
+//             (new_task has priority over task_finished in acc_free_nxt)
+// Directed: latch-on-dispatch, replay/retain-on-finish, acc_free clear/set, and
+// the new_task+task_finished same-cycle priority case. Plus a constrained-random
+// loop driving new_task / task_finished with random slot payloads, checking
+// acc_free and all six slot triples every cycle vs the model.
+// =============================================================================
 `timescale 1ns/1ps
 
-// Testbench for acc_hw_buffer_tracker.v
-// Covers: reset, new-task (busy + slot capture), task-finished, back-to-back tasks
+module tb_acc_hw_buffer_tracker;
 
-module top;
+    localparam integer NUM_SLOTS    = 6;
+    localparam integer BUFF_INDX_SZ = 4;
+    localparam integer TGT_COUNT_SZ = 3;
+    localparam integer MODE_SZ      = 2;
+    localparam integer NRAND        = 6000;
 
-localparam NUM_SLOTS    = 6;
-localparam BUFF_INDX_SZ = 4;
-localparam TGT_COUNT_SZ = 3;
-localparam MODE_SZ      = 2;
+    reg                                clk, reset;
+    reg                                new_task_i;
+    reg  [NUM_SLOTS*BUFF_INDX_SZ-1:0]  slot_buff_i;
+    reg  [NUM_SLOTS*MODE_SZ-1:0]       slot_mode_i;
+    reg  [NUM_SLOTS*TGT_COUNT_SZ-1:0]  slot_ntgt_i;
+    reg                                task_finished_i;
 
-localparam MODE_UNUSED = 2'b00;
-localparam MODE_SRC    = 2'b01;
-localparam MODE_RW     = 2'b10;
-localparam MODE_TGT    = 2'b11;
+    wire                               acc_free_o;
+    wire [NUM_SLOTS*BUFF_INDX_SZ-1:0]  slot_buff_o;
+    wire [NUM_SLOTS*MODE_SZ-1:0]       slot_mode_o;
+    wire [NUM_SLOTS*TGT_COUNT_SZ-1:0]  slot_ntgt_o;
 
-reg clk, reset;
-initial clk = 1'b0;
-always  #5 clk = ~clk;
+    integer verif_errors, verif_checks, verif_to;
+    `include "../verif/checks.vh"
 
-initial begin
-    $dumpfile("tb_acc_hw_buffer_tracker.vcd");
-    $dumpvars(0, top);
-end
+    acc_hw_buffer_tracker #(
+        .NUM_SLOTS(NUM_SLOTS), .BUFF_INDX_SZ(BUFF_INDX_SZ),
+        .TGT_COUNT_SZ(TGT_COUNT_SZ), .MODE_SZ(MODE_SZ)) dut (
+        .clk(clk), .reset(reset),
+        .new_task_i(new_task_i),
+        .slot_buff_i(slot_buff_i), .slot_mode_i(slot_mode_i), .slot_ntgt_i(slot_ntgt_i),
+        .task_finished_i(task_finished_i),
+        .acc_free_o(acc_free_o),
+        .slot_buff_o(slot_buff_o), .slot_mode_o(slot_mode_o), .slot_ntgt_o(slot_ntgt_o));
 
-integer errors;
-initial errors = 0;
+    initial clk = 1'b0; always #5 clk = ~clk;
 
-reg                                  new_task_i;
-reg  [NUM_SLOTS*BUFF_INDX_SZ-1:0]   slot_buff_i;
-reg  [NUM_SLOTS*MODE_SZ-1:0]         slot_mode_i;
-reg  [NUM_SLOTS*TGT_COUNT_SZ-1:0]    slot_ntgt_i;
-reg                                  task_finished_i;
+    // SW reference model
+    reg                                m_free;
+    reg [NUM_SLOTS*BUFF_INDX_SZ-1:0]   m_buff;
+    reg [NUM_SLOTS*MODE_SZ-1:0]        m_mode;
+    reg [NUM_SLOTS*TGT_COUNT_SZ-1:0]   m_ntgt;
 
-wire                                 acc_free_o;
-wire [NUM_SLOTS*BUFF_INDX_SZ-1:0]   slot_buff_o;
-wire [NUM_SLOTS*MODE_SZ-1:0]         slot_mode_o;
-wire [NUM_SLOTS*TGT_COUNT_SZ-1:0]    slot_ntgt_o;
-
-acc_hw_buffer_tracker #(
-    .NUM_SLOTS(NUM_SLOTS),
-    .BUFF_INDX_SZ(BUFF_INDX_SZ),
-    .TGT_COUNT_SZ(TGT_COUNT_SZ),
-    .MODE_SZ(MODE_SZ)
-) dut (
-    .clk(clk),
-    .reset(reset),
-    .new_task_i(new_task_i),
-    .slot_buff_i(slot_buff_i),
-    .slot_mode_i(slot_mode_i),
-    .slot_ntgt_i(slot_ntgt_i),
-    .task_finished_i(task_finished_i),
-    .acc_free_o(acc_free_o),
-    .slot_buff_o(slot_buff_o),
-    .slot_mode_o(slot_mode_o),
-    .slot_ntgt_o(slot_ntgt_o)
-);
-
-// Helpers
-task chk_bit;
-    input        got;
-    input        exp;
-    input [255:0] label;
-    begin
-        if (got !== exp) begin
-            $display("FAIL [%0t] %0s: got=%0b exp=%0b", $time, label, got, exp);
-            errors = errors + 1;
+    task model_step;
+        reg nf;
+        begin
+            // acc_free
+            if      (reset)           nf = 1'b1;
+            else if (new_task_i)      nf = 1'b0;   // priority over finished
+            else if (task_finished_i) nf = 1'b1;
+            else                      nf = m_free;
+            m_free = nf;
+            // slot registers
+            if (reset) begin
+                m_buff = 'b0; m_mode = 'b0; m_ntgt = 'b0;
+            end else if (new_task_i) begin
+                m_buff = slot_buff_i; m_mode = slot_mode_i; m_ntgt = slot_ntgt_i;
+            end
         end
-    end
-endtask
+    endtask
 
-task chk_idx;
-    input [3:0]  got;
-    input [3:0]  exp;
-    input [255:0] label;
-    begin
-        if (got !== exp) begin
-            $display("FAIL [%0t] %0s: got=%0d exp=%0d", $time, label, got, exp);
-            errors = errors + 1;
+    task step_and_check;
+        input [255:0] tag;
+        begin
+            model_step;
+            @(posedge clk); #1;
+            check_bit (acc_free_o,             m_free, {tag, " acc_free"});
+            check_eq_u(slot_buff_o,            m_buff, {tag, " slot_buff"});
+            check_eq_u(slot_mode_o,            m_mode, {tag, " slot_mode"});
+            check_eq_u(slot_ntgt_o,            m_ntgt, {tag, " slot_ntgt"});
         end
-    end
-endtask
+    endtask
 
-task chk_mode;
-    input [1:0]  got;
-    input [1:0]  exp;
-    input [255:0] label;
-    begin
-        if (got !== exp) begin
-            $display("FAIL [%0t] %0s: got=%0b exp=%0b", $time, label, got, exp);
-            errors = errors + 1;
+    task clear_inputs;
+        begin
+            new_task_i=0; task_finished_i=0;
+            slot_buff_i=0; slot_mode_i=0; slot_ntgt_i=0;
         end
+    endtask
+
+    task set_slot;
+        input integer s;
+        input [MODE_SZ-1:0]      md;
+        input [BUFF_INDX_SZ-1:0] bid;
+        input [TGT_COUNT_SZ-1:0] nt;
+        begin
+            slot_mode_i[s*MODE_SZ      +: MODE_SZ]      = md;
+            slot_buff_i[s*BUFF_INDX_SZ +: BUFF_INDX_SZ] = bid;
+            slot_ntgt_i[s*TGT_COUNT_SZ +: TGT_COUNT_SZ] = nt;
+        end
+    endtask
+
+    integer it, s;
+
+    initial begin
+        verif_errors=0; verif_checks=0;
+        clear_inputs; reset=1'b1;
+        repeat(3) begin model_step; @(posedge clk); #1; end
+        reset=1'b0;
+        $display("=== tb_acc_hw_buffer_tracker (scheduler) ===");
+        m_free=1; m_buff=0; m_mode=0; m_ntgt=0;
+        check_bit(acc_free_o, 1'b1, "post-reset acc_free");
+
+        // ---- directed: dispatch latches slots, clears free ----
+        clear_inputs;
+        new_task_i=1;
+        set_slot(0, 2'b01, 4'd3, 3'd0);
+        set_slot(1, 2'b01, 4'd5, 3'd0);
+        set_slot(3, 2'b11, 4'd7, 3'd1);
+        step_and_check("D-newtask latch");
+        // busy held while idle, slots retained
+        clear_inputs;
+        repeat(4) step_and_check("D-mid-task hold");
+        // finish: free set, slots retained (replay-on-finish)
+        clear_inputs; task_finished_i=1;
+        step_and_check("D-finish free+retain");
+        clear_inputs;
+        step_and_check("D-post-finish idle");
+
+        // ---- directed: second task overwrites latch ----
+        clear_inputs;
+        new_task_i=1;
+        set_slot(4, 2'b10, 4'd12, 3'd2);
+        set_slot(5, 2'b11, 4'd9,  3'd1);
+        step_and_check("D-task2 latch");
+        clear_inputs; task_finished_i=1; step_and_check("D-task2 finish");
+
+        // ---- directed: same-cycle new_task + task_finished (new_task wins) ----
+        clear_inputs;
+        new_task_i=1; task_finished_i=1;
+        set_slot(2, 2'b01, 4'd6, 3'd0);
+        step_and_check("D-newtask+finish (busy wins)");
+        clear_inputs; step_and_check("D-after collide");
+
+        // ---- directed: finish with no outstanding task (free stays/returns 1) ----
+        clear_inputs; task_finished_i=1; step_and_check("D-finish while free");
+
+        // ---- constrained-random ----
+        clear_inputs; reset=1'b1; model_step; @(posedge clk); #1; reset=1'b0;
+        m_free=1; m_buff=0; m_mode=0; m_ntgt=0;
+
+        void'($urandom(32'hACC0_7BAF));
+        for (it=0; it<NRAND; it=it+1) begin
+            clear_inputs;
+            new_task_i      = ($urandom_range(0,99) < 25);
+            task_finished_i = ($urandom_range(0,99) < 25);
+            if (new_task_i)
+                for (s=0; s<NUM_SLOTS; s=s+1)
+                    set_slot(s, $urandom_range(0,3), $urandom_range(0,15),
+                                $urandom_range(0,7));
+            if ($urandom_range(0,199)==0) reset=1'b1;   // rare reset
+            step_and_check("rand");
+            reset=1'b0;
+        end
+
+        `VERIF_EPILOGUE("tb_acc_hw_buffer_tracker")
     end
-endtask
 
-task set_slot;
-    input integer          s;
-    input [MODE_SZ-1:0]    md;
-    input [BUFF_INDX_SZ-1:0] bid;
-    input [TGT_COUNT_SZ-1:0] ntgt;
-    begin
-        slot_mode_i[s*MODE_SZ      +: MODE_SZ]      = md;
-        slot_buff_i[s*BUFF_INDX_SZ +: BUFF_INDX_SZ] = bid;
-        slot_ntgt_i[s*TGT_COUNT_SZ +: TGT_COUNT_SZ] = ntgt;
-    end
-endtask
-
-task clear_slots;
-    integer s;
-    begin
-        for (s = 0; s < NUM_SLOTS; s = s + 1)
-            set_slot(s, MODE_UNUSED, 4'd0, 3'd0);
-    end
-endtask
-
-// Shorthand slot reads from output:
-function [BUFF_INDX_SZ-1:0] out_buff;
-    input integer s;
-    out_buff = slot_buff_o[s*BUFF_INDX_SZ +: BUFF_INDX_SZ];
-endfunction
-
-function [MODE_SZ-1:0] out_mode;
-    input integer s;
-    out_mode = slot_mode_o[s*MODE_SZ +: MODE_SZ];
-endfunction
-
-function [TGT_COUNT_SZ-1:0] out_ntgt;
-    input integer s;
-    out_ntgt = slot_ntgt_o[s*TGT_COUNT_SZ +: TGT_COUNT_SZ];
-endfunction
-
-initial begin
-    reset           = 1'b1;
-    new_task_i      = 1'b0;
-    task_finished_i = 1'b0;
-    clear_slots;
-
-    repeat(3) @(posedge clk); #1;
-    reset = 1'b0;
-    @(negedge clk);
-
-    // ------------------------------------------------------------------
-    // Test 1: after reset accelerator is free
-    // ------------------------------------------------------------------
-    chk_bit(acc_free_o, 1'b1, "reset: acc_free");
-
-    // ------------------------------------------------------------------
-    // Test 2: new_task clears acc_free and captures all slot data
-    //   Slot 0: source buff3
-    //   Slot 1: source buff5
-    //   Slot 3: target buff7 (ntgt=1)
-    // ------------------------------------------------------------------
-    @(posedge clk); #1;
-    new_task_i = 1'b1;
-    set_slot(0, MODE_SRC, 4'd3, 3'd0);
-    set_slot(1, MODE_SRC, 4'd5, 3'd0);
-    set_slot(3, MODE_TGT, 4'd7, 3'd1);
-    @(posedge clk); #1;
-    new_task_i = 1'b0;
-    @(negedge clk);
-    chk_bit(acc_free_o,         1'b0,       "new_task: acc_free→0");
-    chk_idx(out_buff(0),        4'd3,        "new_task: slot0 buff");
-    chk_mode(out_mode(0),       MODE_SRC,    "new_task: slot0 mode=src");
-    chk_idx(out_buff(1),        4'd5,        "new_task: slot1 buff");
-    chk_mode(out_mode(1),       MODE_SRC,    "new_task: slot1 mode=src");
-    chk_idx(out_buff(3),        4'd7,        "new_task: slot3 buff");
-    chk_mode(out_mode(3),       MODE_TGT,    "new_task: slot3 mode=tgt");
-    chk_idx(out_ntgt(3),        3'd1,        "new_task: slot3 ntgt=1");
-
-    // ------------------------------------------------------------------
-    // Test 3: acc stays busy while task is running
-    // ------------------------------------------------------------------
-    repeat(4) @(posedge clk);
-    @(negedge clk);
-    chk_bit(acc_free_o, 1'b0, "mid-task: still busy");
-
-    // ------------------------------------------------------------------
-    // Test 4: task_finished restores acc_free (slot data retained)
-    // ------------------------------------------------------------------
-    @(posedge clk); #1;
-    task_finished_i = 1'b1;
-    @(posedge clk); #1;
-    task_finished_i = 1'b0;
-    @(negedge clk);
-    chk_bit(acc_free_o,   1'b1, "task_finished: acc_free→1");
-    chk_idx(out_buff(3),  4'd7, "task_finished: slot data retained");
-
-    // ------------------------------------------------------------------
-    // Test 5: second task with RW slot immediately after finish
-    //   Slot 4: RW buff12 (ntgt=2); Slot 5: target buff9 (ntgt=1)
-    // ------------------------------------------------------------------
-    @(posedge clk); #1;
-    clear_slots;
-    new_task_i = 1'b1;
-    set_slot(4, MODE_RW,  4'd12, 3'd2);
-    set_slot(5, MODE_TGT, 4'd9,  3'd1);
-    @(posedge clk); #1;
-    new_task_i = 1'b0;
-    @(negedge clk);
-    chk_bit(acc_free_o,     1'b0,      "task2: busy");
-    chk_mode(out_mode(4),   MODE_RW,   "task2: slot4 mode=rw");
-    chk_idx(out_buff(4),    4'd12,     "task2: slot4 buff");
-    chk_idx(out_ntgt(4),    3'd2,      "task2: slot4 ntgt=2");
-    chk_mode(out_mode(5),   MODE_TGT,  "task2: slot5 mode=tgt");
-    chk_idx(out_buff(5),    4'd9,      "task2: slot5 buff");
-    chk_idx(out_ntgt(5),    3'd1,      "task2: slot5 ntgt=1");
-    // unused slots should be zero:
-    chk_mode(out_mode(0),   MODE_UNUSED, "task2: slot0 unused");
-
-    @(posedge clk); #1;
-    task_finished_i = 1'b1;
-    @(posedge clk); #1;
-    task_finished_i = 1'b0;
-    @(negedge clk);
-    chk_bit(acc_free_o, 1'b1, "task2 done: free");
-
-    // ------------------------------------------------------------------
-    @(posedge clk);
-    if (errors == 0)
-        $display("PASS – acc_hw_buffer_tracker: all tests passed.");
-    else
-        $display("FAIL – acc_hw_buffer_tracker: %0d error(s).", errors);
-    $finish;
-end
-
-initial begin
-    #5000;
-    $display("TIMEOUT – acc_hw_buffer_tracker");
-    $finish;
-end
+    `VERIF_WATCHDOG(2000000)
 
 endmodule
