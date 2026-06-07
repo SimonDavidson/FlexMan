@@ -67,10 +67,14 @@ or a genuine uninitialised-register bug on the ipSnnAcc spike path. Project memo
 claims ipSnnAcc tests passed 2026-05-08; this is the first run since under the new
 regression harness.
 
-**Status:** OPEN — to be diagnosed in Phase 4 by rewriting the test with the
-pipeline-depth-agnostic `VT_CONSUME` driver + `np_ref_lif` golden. If the RTL is
-correct it will pass; if not, it pins a real ipSnnAcc bug. The same X propagates
-into `ipSnnAcc/tb_neuron_processing` (baseline FAIL: `pot_sram[128] got X`).
+**Status:** RESOLVED 2026-06-07 — NOT an RTL bug. The new
+`ipSnnAcc/tb_update_state_for_neuron` (pipeline-depth-agnostic `VT_CONSUME`
+driver + `np_ref_lif` golden) PASSES: 9012 checks, 0 failures over 3000 random
+vectors; `tb_neuron_processing` PASSES too (282 checks). The 2-cycle pipeline is
+functionally correct. The old failure was a STALE-TEST timing bug — fixed-cycle
+sampling read `potential_o` one edge after `neuron_valid` (before `result_valid`
+on the spike path), so it latched X. The polling driver samples at the right
+instant.
 
 ---
 
@@ -113,3 +117,121 @@ The 7 failures, by category:
 The four stale-.bsh failures are test-infrastructure rot and will be repaired as their
 modules are reworked (scheduler in Phase 2C, annAcc spike in Phase 4). F2/F3 are
 reported for decision.
+
+---
+
+## F4 — hu_compute only multiplies the TOP BYTE of Z for 16/32-bit elements
+
+**Where:** `Hadamard/hu_compute.v`, `z_chunk` extraction + the ST_MUL recurrence.
+
+**What:** The iterative multiply is meant to process Z in 8-bit chunks (1 cycle for
+≤8-bit, 2 for 16-bit, 4 for 32-bit). But the chunk source is:
+```verilog
+wire [7:0] z_chunk;
+assign z_chunk = z_r[DATA_BITS-1 -: 8] >> ({mul_count, 3'b000});
+```
+`z_r[31:24]` is only the **top byte** of Z; right-shifting that 8-bit value by
+`mul_count*8` yields **0** for every `mul_count ≥ 1`. So in 16-bit and 32-bit Z
+modes, chunks 1..(mul_total-1) are all zero and **only the top byte of Z** ever
+multiplies `amb`. A 32-bit Z therefore contributes at most its high 8 bits; the low
+24 bits are silently dropped. (For ≤8-bit Z, mul_total==1 and the single chunk is
+correct, so 1..8-bit modes are unaffected.)
+
+To get the chunk at position `mul_count` the code should index the *full* `z_r`,
+e.g. `z_r >> (DATA_BITS - 8 - mul_count*8)` (left-aligned) and mask to 8 bits — not
+shift the already-isolated top byte.
+
+**Evidence:** `Hadamard/tb_hu_compute.v` (2026-06-07). The SW golden deliberately
+reproduces this exact expression and the DUT matches **bit-for-bit over 20045
+checks** including directed 16-bit/32-bit cases (D7/D8) and thousands of random
+vectors with `elem_sz_z ∈ {0..5}`. The match across 16/32-bit sizes is itself the
+proof that the high chunks contribute nothing — an idealised full-width multiply
+golden would diverge there.
+
+**Impact:** Hadamard results are wrong (loss of Z precision / magnitude) whenever Z
+elements are wider than 8 bits. The existing `tb_hadamard_unit` only exercises
+8-bit elements, so it never caught this. Functionally fine for ≤8-bit Z.
+
+**Status:** OPEN — reported, not auto-fixed (it is an arithmetic-intent decision for
+Simon). The unit test currently PASSES against the as-built RTL; when the chunk
+extraction is fixed, update the golden's `zchunk` line in lockstep.
+
+---
+
+## F5 — hu_compute accumulator shift applies to the WHOLE running sum (operator precedence)
+
+**Where:** `Hadamard/hu_compute.v`, ST_MUL accumulator update.
+
+**What:** The partial-product accumulate is written:
+```verilog
+accumulator <= accumulator + (z_chunk_sext * amb_sext) << ({mul_count, 3'b000});
+```
+In Verilog, `+` binds **tighter** than `<<`, so this parses as
+`(accumulator + (z_chunk*amb)) << (mul_count*8)` — the entire running sum is shifted
+left each ST_MUL cycle, not just the new partial product. The evident intent (a
+chunked multiply that shifts each partial product into place) would need
+`accumulator + ((z_chunk*amb) << (mul_count*8))`. Combined with F4 (higher chunks
+are zero), the only cycle that matters is `mul_count==0` (shift 0), so for the
+current single-effective-chunk behaviour the result still comes out as `z_top*amb`;
+the mis-shift is latent but would corrupt results immediately if F4 were fixed
+without also fixing the parenthesisation.
+
+**Evidence:** modelled exactly in `tb_hu_compute.v`'s golden (`(acc + chunk*amb) <<
+(mc*8)`); 20045/20045 checks pass, confirming the as-built precedence.
+
+**Impact:** Latent. Harmless today only because F4 zeroes the higher chunks. Both F4
+and F5 must be fixed together for a correct wide-Z multiply.
+
+**Status:** OPEN — reported alongside F4.
+
+---
+
+## F6 — full-mode spike_processing accumulates with ALL-ZERO activations (spike gating ineffective)
+
+**Where:** `snnAcc/spike_processing.v` — `act_data_gated_valid = act_data_valid &
+act_data_out[ACT_BITS-1]` and the act-index "ignore non-spike" path.
+
+**What:** With every activation bit set to 0 (no input spikes), full-mode
+spike_processing still accumulates the weights into syn_curr as if all inputs
+spiked. On a fresh-reset 2×2→2×2 run with uniform weight w=5, every output
+syn_curr became 20 (= 4·w) instead of 0.
+
+**Evidence (`snnAcc/tb_spike_processing.v`, 2026-06-07):** the all-spike golden
+`syn_curr[j] = init[j] + nin·w` matches the DUT bit-for-bit across grids/widths
+(820 checks). The dedicated no-spike probe shows the DUT accumulating `nin·w`
+with all-zero activations (reproducible after reset + read-data reg init). The
+old `tb_spike_processing` used all-1 activations, so the spike value never varied
+and this was never exercised.
+
+**Open question:** bug, or intended "full = dense, process every input" semantics
+(where the activation gate is only meant to matter in sparse/event mode)? The RTL
+top-level gating reads as if it should suppress zero activations in all modes.
+
+**Impact:** If a dense layer is ever fed genuinely sparse (mostly-zero) binary
+activations expecting event-driven suppression, every input would be processed
+regardless. Needs Simon's intent confirmation.
+
+**Status:** OPEN — reported as a non-fatal NOTE in the test (kept green pending
+decision). Surfaced via partial spike patterns having no effect, then confirmed
+with the all-zero probe.
+
+---
+
+## New tests added (2026-06-07 coverage uplift — shared/ + Hadamard/)
+
+First-ever unit tests for six previously-untested modules; all PASS against
+as-built RTL:
+
+| Test | Module | Checks | SW-golden approach |
+|------|--------|-------:|--------------------|
+| shared/tbBramSp     | bram_sp     |  4009 | read-first `model[]` array, OLD value sampled pre-write each cycle |
+| shared/tbBramSdp    | bram_sdp    |  4005 | independent r/w addr; collision (raddr==waddr) returns OLD |
+| shared/tbBramTdp    | bram_tdp    |  8009 | two ports, both OLD reads sampled before either write commits; en-gated dout HOLD modelled; same-addr dual-write avoided (HW race) |
+| shared/tbSharedPool | shared_pool | 66077 | full priority-arbiter replica + 1-cycle registered rdsel read-return; banks modelled w/ bank_wait gating |
+| Hadamard/tbHuCompute| hu_compute  | 20045 | 84-bit bit-exact datapath model incl. F4/F5 quirks; directed clamp/binpoint + random |
+| Hadamard/tbHuConfigRegs | hu_config_regs | 62 | per-offset write/readback + width-trunc, combinational ack, addr-match gating, reset values |
+
+All six use `verif/checks.vh` (+ `vt_driver.vh` for hu_compute). The three BRAM tbs
+and shared_pool run at `timescale 10ps/1ps` (matching the RTL); the two Hadamard tbs
+at `1ns/1ps`. No real bugs found in the BRAM primitives, shared_pool, or
+hu_config_regs — those four are clean. hu_compute surfaced F4 + F5 above.

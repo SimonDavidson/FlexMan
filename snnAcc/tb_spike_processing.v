@@ -193,7 +193,7 @@ module tb_spike_processing;
         end
     endtask
 
-    // F4 probe: all-zero activations -> does full mode still accumulate?
+    // F6 probe: all-zero activations -> does full mode still accumulate?
     task run_nospike_probe;
         begin
             reset=1; repeat(2) @(posedge clk); #1; reset=0; @(posedge clk); #1;
@@ -210,11 +210,11 @@ module tb_spike_processing;
             repeat (8) @(posedge clk); #1;
             if (syn_sram[SYN_BASE] !== 32'd0 || syn_sram[SYN_BASE+1] !== 32'd0 ||
                 syn_sram[SYN_BASE+2] !== 32'd0 || syn_sram[SYN_BASE+3] !== 32'd0)
-                $display("NOTE F4: full mode accumulates with ALL-ZERO activations (spike gating has no effect) -- syn[0..3]=%0d %0d %0d %0d (expected 0). Bug or intended dense semantics? -> Simon.",
+                $display("NOTE F6: full mode accumulates with ALL-ZERO activations (spike gating has no effect) -- syn[0..3]=%0d %0d %0d %0d (expected 0). Bug or intended dense semantics? -> Simon.",
                          $signed(syn_sram[SYN_BASE]), $signed(syn_sram[SYN_BASE+1]),
                          $signed(syn_sram[SYN_BASE+2]), $signed(syn_sram[SYN_BASE+3]));
             else
-                $display("NOTE F4: full mode correctly suppresses accumulation for zero activations.");
+                $display("NOTE F6: full mode correctly suppresses accumulation for zero activations.");
         end
     endtask
 
@@ -240,7 +240,7 @@ module tb_spike_processing;
         for (trial=0; trial<20; trial=trial+1)
             run_trial(2,2, 2,2, 2,2, 3'b100, 16, 1'b1, (trial%4==3), "T16b");
 
-        // F4 probe: with ALL-ZERO activations, full mode still accumulates
+        // F6 probe: with ALL-ZERO activations, full mode still accumulates
         // (the spike value has no gating effect here). Reported as a NOTE
         // pending Simon's decision (bug vs intended dense semantics).
         run_nospike_probe;
