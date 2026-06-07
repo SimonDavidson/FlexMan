@@ -133,7 +133,10 @@ module update_state_for_neuron # (
         ? {{(MUL_B_BITS-POT_DECAY_BITS){1'b0}}, potential_decay_mult_i}
         : {{(MUL_B_BITS-SYN_DECAY_BITS){1'b0}}, syn_curr_decay_mult_i};
 
-    assign mul_result = mul_a * mul_b;
+    // F1 fix (2026-06-07): signed*signed decay. The bare `mul_a * mul_b` was
+    // evaluated UNSIGNED (mul_b is unsigned), corrupting decay of negative
+    // operands. Zero-extend mul_b and cast both signed, matching fmiSnnAcc.
+    assign mul_result = $signed(mul_a) * $signed({1'b0, mul_b});
 
     // Decayed syn_curr: registered on IDLE→C1 edge (multiply ran in ST_IDLE).
     // Extract high SYN_CURR_SLICE_BITS bits above the SYN_DECAY_BITS fraction.

@@ -112,7 +112,10 @@ module ann_update_state_for_neuron # (
 
     assign mul_a      = act_out_r;
     assign mul_b      = potential_decay_mult_i;
-    assign mul_result = mul_a * mul_b;
+    // F1 fix (2026-06-07): signed*signed decay (was signed*unsigned). Matches
+    // fmiSnnAcc. (act_out is non-negative here, so behaviour is unchanged in
+    // practice, but kept consistent with the snn/ipsnn fix.)
+    assign mul_result = $signed(mul_a) * $signed({1'b0, mul_b});
 
     reg [POT_SLICE_BITS-1:0] decayed_act_r;
 

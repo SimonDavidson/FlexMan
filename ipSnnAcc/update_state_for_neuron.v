@@ -132,7 +132,9 @@ assign mul_b = (state_cycle2_r)
     ? {{(MUL_B_BITS-POT_DECAY_BITS){1'b0}}, potential_decay_mult_i}
     : {{(MUL_B_BITS-SYN_DECAY_BITS){1'b0}}, syn_curr_decay_mult_i};
 
-assign mul_result = mul_a * mul_b;
+// F1 fix (2026-06-07): signed*signed decay (was signed*unsigned, evaluated
+// unsigned and corrupting negative operands). Matches the fmiSnnAcc form.
+assign mul_result = $signed(mul_a) * $signed({1'b0, mul_b});
 
 // This is only valid on second cycle:
 // Extract high POT_SLICE_BITS bits above the POT_DECAY_BITS fraction.

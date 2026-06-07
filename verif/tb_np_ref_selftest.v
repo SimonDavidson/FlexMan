@@ -131,23 +131,16 @@ module tb_np_ref_selftest;
         run_neuron(32'h0000_0001, 32'h7FFF_FFFE, 32'h0000_0001, 32'h7FFF_FFFF,
                    32'h8000_0000, 32'h8000_0000, 1'b0, d_pot, d_syn, d_spk);
         check_eq(d_pot, g_pot, "quirk: DUT == golden");
-        // golden's psat is 0x80000000; decayed by 0.5 (unsigned mult of the
-        // 0x80000000 bit pattern) -> 0x40000000. Assert the concrete value:
-        check_eq(g_pot, 32'sh4000_0000, "quirk: decayed clamp value");
+        // psat clamps to 0x80000000 (= -2^31); F1-fixed signed decay by 0.5
+        // gives -2^30 = 0xC0000000. Assert the concrete value:
+        check_eq(g_pot, 32'shC000_0000, "quirk: decayed clamp value");
 
-        // -------- spec-intent NOTE: negative syn decay (signed vs unsigned) -
-        // snnAcc decays syn with a signed*UNSIGNED multiply. For a negative syn
-        // this DIFFERS from the ideal signed decay. Surface it (not a failure
-        // here -- it is a finding to discuss, captured in Phase 2A).
+        // -------- F1 (FIXED): negative syn decay must be signed-correct ------
         run_neuron(-32'sd1000, 32'd0, 32'd0, 32'h7FFF_FFFF,
                    32'h8000_0000 /*0.5*/, 32'h8000_0000, 1'b0,
                    d_pot, d_syn, d_spk);
         ideal_syn = np_decay_signed(-32'sd1000, 32'h8000_0000);  // = -500
-        if (d_syn !== ideal_syn)
-            $display("NOTE negative-syn decay: DUT syn_curr_o=%0d (0x%08h) but ideal signed=%0d (0x%08h) -- signed*unsigned multiply divergence",
-                     d_syn, d_syn, ideal_syn, ideal_syn);
-        else
-            $display("NOTE negative-syn decay matches ideal signed (%0d)", d_syn);
+        check_eq(d_syn, ideal_syn, "F1 fixed: negative-syn decay signed-correct (-500)");
 
         `VERIF_EPILOGUE("tb_np_ref_selftest")
     end

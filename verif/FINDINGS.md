@@ -42,9 +42,16 @@ the FMI form: `mul_result = $signed(mul_a) * $signed({1'b0, mul_b});` (or declar
 `mul_b` so the product is evaluated signed). Needs Simon's sign-off — flagged, not
 auto-fixed.
 
-**Status:** OPEN — reported, awaiting decision. Captured as a directed "spec-intent"
-NOTE in the self-test; will become a hard directed FAIL in the Phase-2A
-`tb_update_state_for_neuron` once the fix is agreed.
+**Status:** FIXED 2026-06-07. Applied the fmiSnnAcc form in all three modules:
+`assign mul_result = $signed(mul_a) * $signed({1'b0, mul_b});`
+(`snnAcc`/`ipSnnAcc`/`annAcc` update_state). The goldens (`np_ref_lif`,
+`np_ann_decay`) now use `np_decay_signed`, and the directed negative-decay probe
+is a HARD check (`decay(-1000,0.5) == -500`). Side-effect: the saturation-quirk
+decayed value legitimately changes from `+2^30` to `-2^30` (decaying the clamped
+`0x80000000` signed) — test expectations updated. Verified: all neuron unit tests
+(snn/ipsnn/ann/fmi) and all four accelerator-level integration tests PASS.
+annAcc is functionally unchanged (its `act_out` is non-negative) but kept
+consistent. Positive-operand behaviour is unchanged everywhere.
 
 ---
 

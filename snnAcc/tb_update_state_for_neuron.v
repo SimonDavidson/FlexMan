@@ -107,7 +107,9 @@ module tb_update_state_for_neuron;
         // sum = 0x7FFFFFFE + 1 + 1 = 0x80000000 -> clamps to 0x80000000, decays to 0x40000000
         drive_and_check(32'h00000001, 32'h7FFFFFFE, 32'h00000001, 32'h7FFFFFFF,
                         32'h80000000, 32'h80000000, 1'b0, "D7 sat quirk");
-        check_eq(g_pot, 32'sh4000_0000, "D7 quirk decayed clamp == 0x40000000");
+        // psat clamps to 0x80000000 (= -2^31); F1-fixed signed decay by 0.5
+        // gives -2^30 = 0xC0000000 (was +0x40000000 under the old unsigned bug).
+        check_eq(g_pot, 32'shC000_0000, "D7 quirk decayed clamp == -2^30");
 
         // ---- constrained-random vs golden (mirror must match exactly) ----
         void'($urandom(32'hD5DA_7E01));
@@ -115,14 +117,11 @@ module tb_update_state_for_neuron;
             drive_and_check($urandom(), $urandom(), $urandom(), $urandom(),
                             $urandom(), $urandom(), $urandom()&1'b1, "rand");
 
-        // ---- F1 spec-intent probe: negative syn decay (signed vs unsigned) ----
-        // Non-fatal NOTE until the RTL decision is made (see verif/FINDINGS.md F1).
+        // ---- F1 (FIXED 2026-06-07): negative syn decay must be signed-correct ----
         run_neuron(-32'sd1000, 32'd0, 32'd0, 32'h7FFFFFFF,
                    32'h80000000, 32'h80000000, 1'b0);
         ideal_syn = np_decay_signed(-32'sd1000, 32'h80000000);   // = -500
-        if (d_syn !== ideal_syn)
-            $display("NOTE F1 negative-syn decay: DUT=%0d (0x%08h) ideal_signed=%0d (0x%08h) -- signed*unsigned divergence",
-                     d_syn, d_syn, ideal_syn, ideal_syn);
+        check_eq(d_syn, ideal_syn, "F1 fixed: negative-syn decay signed-correct (-500)");
 
         `VERIF_EPILOGUE("tb_update_state_for_neuron")
     end

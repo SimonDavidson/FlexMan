@@ -31,13 +31,13 @@
 //     stimulus loop comparing DUT-vs-golden tracks the datapath/pipeline/memory
 //     integration WITHOUT raising false arithmetic failures.  Use these for the
 //     constrained-random loops.
-//   * IDEAL   (np_decay_signed, again) is the mathematically-correct signed
-//     Q0.32 decay.  Use it in DIRECTED "spec-intent" checks (e.g. decaying a
-//     NEGATIVE synaptic current).  snnAcc/annAcc decay a negative operand with
-//     a signed*UNSIGNED multiply (np_decay_unsigned) which DIFFERS from the
-//     ideal signed result; a directed check that asserts the ideal value will
-//     therefore FLAG that behaviour.  If such a check fails it is a FINDING to
-//     raise with Simon, not something to silently paper over.
+//   * IDEAL   (np_decay_signed) is the mathematically-correct signed Q0.32 decay.
+//
+// F1 FIXED (2026-06-07): snnAcc/ipSnnAcc/annAcc update_state now use the signed
+// decay form (matching fmiSnnAcc), so np_ref_lif and np_ann_decay use
+// np_decay_signed and the DUTs are signed-correct for negative operands.
+// `np_decay_unsigned` below is retained ONLY to document the pre-fix behaviour
+// (it is no longer referenced by the goldens).
 //
 // RTL sources mirrored (verified 2026-06-07):
 //   snnAcc/update_state_for_neuron.v        (LIF, 3-operand membrane sat)
@@ -137,13 +137,10 @@ endfunction
 function automatic [31:0] np_ann_decay;
     input [31:0] act_out;
     input [31:0] decay;
-    reg signed [31:0] a;
-    reg        [31:0] b;
     reg signed [63:0] p;
     begin
-        a = act_out;
-        b = decay;
-        p = a * b;
+        // F1-fixed signed form (act_out is non-negative, so identical in value).
+        p = $signed(act_out) * $signed({1'b0, decay});
         np_ann_decay = p[63:32];
     end
 endfunction
@@ -203,10 +200,10 @@ task automatic np_ref_lif;
                 + $signed({{2{syn[31]}},  syn});
         psat    = np_sat34_lif(sum34);
         spike_o = (psat >= thresh);
-        dec_pot = np_decay_unsigned(psat, pot_dcy);
+        dec_pot = np_decay_signed(psat, pot_dcy);     // F1-fixed: signed decay
         pot_o   = spike_o ? (sub_on_fire ? (dec_pot - thresh) : 32'sd0)
                           : dec_pot;
-        syn_o   = np_decay_unsigned(syn, syn_dcy);
+        syn_o   = np_decay_signed(syn, syn_dcy);       // F1-fixed: signed decay
     end
 endtask
 
