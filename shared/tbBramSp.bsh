@@ -1,0 +1,5 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+xrun -sv -timescale 10ps/1ps -access wrc -top tb_bram_sp \
+  bram_sp.v tb_bram_sp.v ${COV_ARGS:-}
