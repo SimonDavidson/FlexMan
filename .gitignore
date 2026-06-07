@@ -6,6 +6,7 @@
 
 # Hardware design files
 !*.v
+!*.vh
 !*.bsh
 !*.tcl
 !*.xdc

@@ -1,0 +1,9 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude  |  Created 2026-06-07  |  Modified 2026-06-07
+# Phase-0 self-test: validates verif/ library + np_ref golden vs real snnAcc DUT.
+# Run from the verif/ directory.
+xrun -sv -timescale 1ns/1ps -access wrc -top tb_np_ref_selftest \
+  ../snnAcc/update_state_for_neuron.v \
+  tb_np_ref_selftest.v ${COV_ARGS:-}
