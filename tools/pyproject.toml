@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT
+# Author: Simon Davidson & Claude
+# Created: 2026-06-08
+# Last modified: 2026-06-08
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flexman-backend"
+version = "0.1.0"
+description = "Unified hardware-defined deployment back-end for the FlexMan accelerator"
+requires-python = ">=3.9"
+# Intentionally NO dependencies: the back-end is pure-Python and torch-free so it
+# is unit-testable without a deep-learning stack. Front-ends own torch/numpy.
+dependencies = []
+
+[tool.setuptools]
+packages = ["flexman_backend"]

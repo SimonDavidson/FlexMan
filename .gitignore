@@ -21,5 +21,10 @@ vivado/
 !LICENSE
 !LICENSE.*
 
+# Python deployment toolchain (tools/) — back-end source + packaging only.
+# egg-info / __pycache__ / *.pyc stay ignored (they are not .py/.toml).
+!tools/**/*.py
+!tools/**/*.toml
+
 # Claude Code development files
 CLAUDE.md
