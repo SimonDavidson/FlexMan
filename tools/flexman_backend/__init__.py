@@ -13,6 +13,6 @@
 # =============================================================================
 from __future__ import annotations
 
-from . import isa, regmap, quant, emit, mempool, lut
+from . import isa, regmap, quant, emit, mempool, lut, cfgmem
 
-__all__ = ["isa", "regmap", "quant", "emit", "mempool", "lut"]
+__all__ = ["isa", "regmap", "quant", "emit", "mempool", "lut", "cfgmem"]
