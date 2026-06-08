@@ -215,17 +215,24 @@ module tb_neuron_processing;
 
     // Run one layer of N neurons (all caches 32-bit: one element per word).
     //   ha     = has_ada
-    //   clrpot = clear_pot   (golden is fed pot=0 to mirror DUT)
+    //   clrpot = clear_pot       (golden is fed pot=0 to mirror DUT)
     //   bp     = inject read back-pressure on the read-only memories
+    //   binpt  = bin_point_syn_curr value (0..30). syn_sram is loaded with
+    //           in_syn[n] << binpt (memory scale); the golden is called with
+    //           in_syn[n] (neuron scale); the writeback compares against
+    //           g_syn[n] << binpt. Other inputs (pot, thresh, b_eff, ada) live
+    //           at neuron scale on both sides — they are not shifted in the RTL.
     task run_block;
         input integer N;
         input         ha;
         input         clrpot;
         input         bp;
+        input integer binpt;
         input [255:0] tag;
         integer wi;
         reg [31:0] ew;
         reg signed [31:0] gp_in_s;
+        reg signed [31:0] expected_syn_wb;
         begin
             // init memories + inputs + golden
             `SRAM_CLEAR(syn_sram) `SRAM_CLEAR(thr_sram) `SRAM_CLEAR(pot_sram)
@@ -248,7 +255,11 @@ module tb_neuron_processing;
                 // populate SRAMs (golden is signed; SRAM stores raw 32-bit).
                 // Every cache is 32-bit, so one neuron per word — read and
                 // write-back never collide in the shared syn_curr/pot arrays.
-                syn_sram[syn_curr_base + n]    = in_syn[n];
+                //
+                // syn_curr lives in SRAM at memory scale (in_syn << binpt) so
+                // that the RTL right-shift recovers the neuron-scale value the
+                // golden was called with. Other inputs are unshifted.
+                syn_sram[syn_curr_base + n]    = in_syn[n] <<< binpt;
                 pot_sram[pot_base + n]         = in_pot[n];
                 thr_sram[thresh_base + n]      = in_thr[n];
                 dcy_syn_sram[dcy_syn_base + n] = in_dsyn[n];
@@ -269,6 +280,7 @@ module tb_neuron_processing;
             last_neuron_idx = N - 1;
             sub_on_fire = 1'b0; clear_pot = clrpot; has_ada = ha;
             syn_curr_sz = SZ32; pot_sz = SZ32; bp_en = bp;
+            bin_point_syn_curr = binpt[4:0];
 
             `VT_PULSE(start_new_block)
             `VT_WAIT_FINISH(neuron_proc_finished, 6000)
@@ -276,9 +288,11 @@ module tb_neuron_processing;
             bp_en = 0;
 
             // check syn_curr + pot write-backs (full 32-bit per neuron)
+            // syn writeback is at memory scale (g_syn << binpt); pot stays at neuron scale.
             for (n = 0; n < N; n = n + 1) begin
-                check_eq($signed(syn_sram[syn_curr_base + n]), g_syn[n], {tag, " syn_wb"});
-                check_eq($signed(pot_sram[pot_base + n]),      g_pot[n], {tag, " pot_wb"});
+                expected_syn_wb = g_syn[n] <<< binpt;
+                check_eq($signed(syn_sram[syn_curr_base + n]), expected_syn_wb, {tag, " syn_wb"});
+                check_eq($signed(pot_sram[pot_base + n]),      g_pot[n],         {tag, " pot_wb"});
             end
             // check packed spike words (1-bit, 32 neurons/word)
             for (wi = 0; wi*32 < N; wi = wi + 1) begin
@@ -316,27 +330,39 @@ module tb_neuron_processing;
         void'($urandom(32'h4E20_F1A1));
 
         // ---- has_ada = 0 (plain LIF, 2-cycle FSM) --------------------------
-        run_block(16, 1'b0, 1'b0, 1'b0, "B1 N16 plain");
-        run_block(33, 1'b0, 1'b0, 1'b0, "B2 N33 plain two-spike-words");
-        run_block(16, 1'b0, 1'b1, 1'b0, "B3 plain clear_pot");
-        run_block(20, 1'b0, 1'b0, 1'b1, "B4 plain backpressure");
-        run_block(32, 1'b0, 1'b0, 1'b1, "B5 plain N32 boundary + bp");
+        run_block(16, 1'b0, 1'b0, 1'b0, 0, "B1 N16 plain");
+        run_block(33, 1'b0, 1'b0, 1'b0, 0, "B2 N33 plain two-spike-words");
+        run_block(16, 1'b0, 1'b1, 1'b0, 0, "B3 plain clear_pot");
+        run_block(20, 1'b0, 1'b0, 1'b1, 0, "B4 plain backpressure");
+        run_block(32, 1'b0, 1'b0, 1'b1, 0, "B5 plain N32 boundary + bp");
 
         // ---- has_ada = 1 (adaptive, 3-cycle FSM) ---------------------------
-        run_block(16, 1'b1, 1'b0, 1'b0, "B6 N16 ada");
-        run_block(33, 1'b1, 1'b0, 1'b0, "B7 N33 ada two-spike-words");
-        run_block(20, 1'b1, 1'b0, 1'b1, "B8 ada backpressure");
-        run_block(16, 1'b1, 1'b1, 1'b0, "B9 ada clear_pot");
-        run_block(32, 1'b1, 1'b0, 1'b1, "B10 ada N32 boundary + bp");
+        run_block(16, 1'b1, 1'b0, 1'b0, 0, "B6 N16 ada");
+        run_block(33, 1'b1, 1'b0, 1'b0, 0, "B7 N33 ada two-spike-words");
+        run_block(20, 1'b1, 1'b0, 1'b1, 0, "B8 ada backpressure");
+        run_block(16, 1'b1, 1'b1, 1'b0, 0, "B9 ada clear_pot");
+        run_block(32, 1'b1, 1'b0, 1'b1, 0, "B10 ada N32 boundary + bp");
+
+        // ---- bin_point_syn_curr non-zero: verify the syn_curr scale shift --
+        // Plain: small/medium/large bin_point with both signs of in_syn.
+        run_block(16, 1'b0, 1'b0, 1'b0,  1, "BP1 plain binpt=1");
+        run_block(20, 1'b0, 1'b0, 1'b0,  4, "BP2 plain binpt=4");
+        run_block(33, 1'b0, 1'b0, 1'b0,  7, "BP3 plain binpt=7 (FMI target)");
+        run_block(20, 1'b0, 1'b0, 1'b1,  7, "BP4 plain binpt=7 + bp");
+        run_block(16, 1'b0, 1'b1, 1'b0,  7, "BP5 plain binpt=7 clear_pot");
+        // Adaptive with non-zero shift: ada_corr stays at neuron scale (no shift).
+        run_block(16, 1'b1, 1'b0, 1'b0,  7, "BP6 ada binpt=7");
+        run_block(33, 1'b1, 1'b0, 1'b1,  7, "BP7 ada binpt=7 + bp");
 
         // ---- constrained-random loop: alternate has_ada + bp each pass -----
         for (n = 0; n < 16; n = n + 1) begin : rnd_loop
             reg ha_r, bp_r;
-            integer nn;
-            ha_r = $urandom_range(0,1);
-            bp_r = $urandom_range(0,1);
-            nn   = $urandom_range(16,33);   // cross the 32-neuron boundary
-            run_block(nn, ha_r, 1'b0, bp_r, "BR rand");
+            integer nn, binpt_r;
+            ha_r    = $urandom_range(0,1);
+            bp_r    = $urandom_range(0,1);
+            binpt_r = $urandom_range(0,8);  // random shift up to 8 bits
+            nn      = $urandom_range(16,33);   // cross the 32-neuron boundary
+            run_block(nn, ha_r, 1'b0, bp_r, binpt_r, "BR rand");
         end
 
         `VERIF_EPILOGUE("tb_neuron_processing")

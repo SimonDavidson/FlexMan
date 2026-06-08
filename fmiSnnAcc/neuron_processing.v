@@ -8,6 +8,11 @@
 //   - Per-neuron membrane decay  (dcy_mem_mem)
 //   - Optional adaptive threshold state (ada_mem, b_eff_mem, dcy_ada_mem, scl_ada_mem)
 //     controlled by has_ada_i config.
+//   - bin_point_syn_curr: arithmetic right-shift of syn_curr from memory scale
+//     (K_mem fractional bits, sized for weight accumulation headroom) to
+//     neuron-dynamics scale (K_neuron = K_mem - bin_point_syn_curr), with
+//     compensating left-shift on writeback. b_eff hex must be regenerated at
+//     K_neuron scale (not Q0.32) for ada_corr to match the post-shift syn_curr.
 //
 // All new per-neuron parameter memories are always 32-bit wide (slice_sz = 3'b101).
 // The ada_mem is read AND written back each timestep (same pattern as pot_mem).
@@ -162,6 +167,7 @@ module neuron_processing # (
     wire                      spike;
     wire [POT_SLICE_BITS-1:0] updated_potential;
     wire [SYN_CURR_SLICE_BITS-1:0] updated_syn_curr;
+    wire signed [SYN_CURR_SLICE_BITS-1:0] updated_syn_curr_wb;
     wire [31:0]               updated_ada;
     wire                      packer_busy, packer_finish, packer_full;
 
@@ -514,6 +520,24 @@ module neuron_processing # (
     assign pot_input = clear_pot_i ? {POT_SLICE_BITS{1'b0}} : $signed(pot_data_out);
 
     // =========================================================================
+    // bin_point_syn_curr scaling
+    //
+    // syn_curr and weights are stored in memory at K_mem fractional bits so
+    // weight accumulation has headroom. Neuron dynamics (decay, threshold
+    // comparison, ada correction) run at K_neuron = K_mem - bin_point_syn_curr
+    // fractional bits so the int32 datapath does not overflow.
+    //
+    //   syn_curr_scaled    = syn_curr_data_out >>> bin_point_syn_curr_i   (mem -> neuron scale)
+    //   updated_syn_curr_wb = updated_syn_curr  <<  bin_point_syn_curr_i   (neuron -> mem scale)
+    //
+    // b_eff hex must be regenerated at K_neuron scale (not Q0.32) for the
+    // ada_corr arithmetic to match syn_curr after the right-shift.
+    // =========================================================================
+    wire signed [SYN_CURR_SLICE_BITS-1:0] syn_curr_scaled;
+    assign syn_curr_scaled    = $signed(syn_curr_data_out) >>> bin_point_syn_curr_i;
+    assign updated_syn_curr_wb = $signed(updated_syn_curr) <<< bin_point_syn_curr_i;
+
+    // =========================================================================
     // update_state_for_neuron instantiation
     // =========================================================================
     update_state_for_neuron #(
@@ -524,7 +548,7 @@ module neuron_processing # (
         .clk              (clk),
         .reset            (reset),
         .neuron_valid_i   (neuron_valid),
-        .syn_curr_i       ($signed(syn_curr_data_out)),
+        .syn_curr_i       (syn_curr_scaled),
         .potential_i      (pot_input),
         .threshold_i      ($signed(thresh_data_out)),
         .syn_dcy_i        (dcy_syn_data_out),
@@ -553,12 +577,12 @@ module neuron_processing # (
 
     always @(*) begin
         case (syn_curr_sz_i)
-            3'b000: syn_curr_wb_lj = {updated_syn_curr[0],    31'b0};
-            3'b001: syn_curr_wb_lj = {updated_syn_curr[1:0],  30'b0};
-            3'b010: syn_curr_wb_lj = {updated_syn_curr[3:0],  28'b0};
-            3'b011: syn_curr_wb_lj = {updated_syn_curr[7:0],  24'b0};
-            3'b100: syn_curr_wb_lj = {updated_syn_curr[15:0], 16'b0};
-            3'b101: syn_curr_wb_lj = updated_syn_curr[31:0];
+            3'b000: syn_curr_wb_lj = {updated_syn_curr_wb[0],    31'b0};
+            3'b001: syn_curr_wb_lj = {updated_syn_curr_wb[1:0],  30'b0};
+            3'b010: syn_curr_wb_lj = {updated_syn_curr_wb[3:0],  28'b0};
+            3'b011: syn_curr_wb_lj = {updated_syn_curr_wb[7:0],  24'b0};
+            3'b100: syn_curr_wb_lj = {updated_syn_curr_wb[15:0], 16'b0};
+            3'b101: syn_curr_wb_lj = updated_syn_curr_wb[31:0];
             default: syn_curr_wb_lj = 32'b0;
         endcase
     end
