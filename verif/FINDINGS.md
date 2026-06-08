@@ -301,3 +301,74 @@ worth documenting in the RTL:
   entry compares word indices shifted by the *current* `slice_sz_i`, so a stale
   entry can falsely hit if two requests share a base but differ in slice size.
   Harmless (slice size is fixed per task), but a latent constraint.
+
+---
+
+## F7 — hadamard_unit output addressing is broken for multi-word and 32-bit streams (CONFIRMED)
+
+**Where:** `Hadamard/hadamard_unit.v` (packer element-index wiring) +
+`Hadamard/dataline_cache_with_xy.v` (`slice_idx` case).
+
+**What:** `hadamard_unit.v` feeds the output `packer` the CACHE's per-word slice index
+as the element index:
+```verilog
+assign elem_index = {{(PIN_BITS-5){1'b0}}, a_idx};   // a_idx = slice index WITHIN a 32-bit word
+```
+The packer derives the output word address from this index (`offset = idx >> (5-out_sz)`).
+Two consequences:
+- **(a) Multi-word output overwrites word 0.** `a_idx` counts 0..(elems_per_word-1) and
+  RESETS at each new input word, so every output word computes the same low offset —
+  a stream spanning >1 output word writes all words to base+0; only the last survives.
+- **(b) 32-bit elements emit an X address.** `dataline_cache_with_xy.v`'s `slice_idx`
+  case (lines ~204-217) has entries for 1/2/4/8/16-bit but **no 32-bit (`'b101`) case**,
+  so `slice_idx` defaults to `'hx`; that X flows through `a_idx` into the packer address.
+
+**Why it matters:** The compute datapath is correct (F4/F5 fixed; `tb_hu_compute` D8 =
+1993 verifies 32-bit multiply at unit level). But the ACCELERATOR only produces correct
+output for a single output word of ≤16-bit elements. snnAcc avoids both by feeding the
+packer its GLOBAL `neuron_counter_r`, not the cache slice index.
+
+**Fix:** drive the packer's `pak_index_i` from a global stream-element counter (0..
+stream_len-1), like snnAcc — not from `a_idx`. Also add the `'b101` case to
+`dataline_cache_with_xy`'s `slice_idx` (=> 0 for 32-bit).
+
+**Evidence:** `Hadamard/tb_hadamard_unit.v` (2026-06-08) verifies real multiplies
+(R=Z*(A-B)+B+mode*R_prev: directed 17/±clamp/mode1/bp/16-bit + 60 random), 1511 checks,
+0 failures — but ONLY because every task is sized to one output word and elem_sz=5 is
+excluded from scoring (the test header documents how to lift those caps once F7 is fixed).
+
+**Status:** OPEN — reported, not auto-fixed (RTL change to hadamard_unit + cache).
+
+---
+
+## F8 — fmiSnnAcc neuron_processing sub-32-bit slice writeback corrupts fields (SUSPECTED)
+
+**Where:** `fmiSnnAcc/neuron_processing.v` multi-packer writeback path (and the shared
+`packer.v`); very likely also `snnAcc`/`annAcc` neuron_processing (same structure).
+
+**What:** With 16-bit `syn_curr`/`pot` slices, the per-neuron write-backs corrupt at the
+field level. The spike packer fills one word every 32 neurons while the syn_curr/pot
+packers fill one every 2 neurons; at these mismatched cadences a neuron's value appears
+to land in the wrong field/word. The fmiSnnAcc agent ruled out two testbench artifacts
+(identical paired neurons in a word still fails; fully decoupled frozen-read / write-
+capture arrays still fail), which points at the RTL — but it is not yet confirmed vs a
+golden-prediction subtlety at mixed cadences.
+
+**Why untested before:** every neuron_processing unit/integration test (all variants)
+only ever used **32-bit slices** (1 element/word, where the packers never interleave).
+
+**Status:** SUSPECTED — the committed fmiSnnAcc unit test runs on the 32-bit path (793
+checks, 0 failures — the path the FMI models actually use). Needs a dedicated
+packer-cadence test + RTL investigation before being called a confirmed bug.
+
+---
+
+## Notes (annAcc neuron_processing test, not bugs)
+
+- **N1 LUT activation uses the full LUT slice width, not 8 bits.** With `LUT_SLICE_BITS=32`,
+  `ann_update_state_for_neuron` zero-extends the entire 32-bit LUT word as the activation,
+  not just the low 8 bits. A true 8-bit LUT must set `LUT_SLICE_BITS=8` (or guarantee
+  entries ≤ 8 bits), else high bits leak into the activation.
+- **N2 `acc_busy_o` overlaps the finish pulse by one cycle.** `acc_finished_o`/
+  `neuron_proc_finished_o` pulse while `acc_busy_o` (running_r) is still high; busy clears
+  the next edge. Relevant to scheduler integration (finish and busy overlap for one cycle).
