@@ -176,7 +176,10 @@ module tb_dataline_cache_with_xy;
                 verif_errors = verif_errors + 1;
             end else begin
                 check_eq_u(slice_data,     g_slice(sz, off, exp_word), tag);
-                check_eq_u(slice_data_idx, off,                        "cache slice_data_idx_o");
+                // slice_data_idx_o returns the WHOLE element index (= sys_addr_i,
+                // truncated to SLICE_DATA_IDX_SZ) — the consumer needs the
+                // input-neuron number, not the within-word offset.
+                check_eq_u(slice_data_idx, addr[SLICE_DATA_IDX_SZ-1:0], "cache slice_data_idx_o");
             end
             // consume
             slice_data_taken = 1'b1;
