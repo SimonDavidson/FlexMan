@@ -24,8 +24,13 @@ module dataline_cache_with_xy #(
 
     /* Control params */
     output wire                         colour_select_o,
+    // Drop the cached line (next read refetches). Asserted on task dispatch,
+    // when the memory contents under a cached address may have changed (e.g.
+    // z_rec rewritten by NP between two SP reads of the same word). Must only
+    // assert while the cache is quiescent (no request / slice in flight).
+    input  wire                         invalidate_i,
     input  wire     [SLICE_SIZE_SZ-1:0] slice_sz_i,
-    input  wire        [`ADDR_SIZE-1:0] base_addr_i, 
+    input  wire        [`ADDR_SIZE-1:0] base_addr_i,
 
     /* System side - in */
     input wire      [IDX_ADDR_BITS-1:0] sys_addr_i,
@@ -139,7 +144,8 @@ assign mem_data_next_cycle = mem_req_o & ~mem_wait_i;
 // and the memory is responding with data on the clock edge:
 // TODO add back pressure from later stages:
 // 
-assign cache_valid_nxt = (mem_new_data_valid_r) ? 1'b1 :
+assign cache_valid_nxt = (invalidate_i) ? 1'b0 :   // task dispatch: line is stale
+	                 (mem_new_data_valid_r) ? 1'b1 :
 	                 (cache_valid_r & (~slice_data_taken_i | ~word_last_slice)) ? 1'b1 :
 			 (slice_data_taken_i & ~sys_req_i) ? 1'b0 :
 			 cache_valid_r;
@@ -212,7 +218,12 @@ slice_and_align #(
 assign mem_addr_o           = shifted_index + base_addr_i;
 
 assign slice_data_valid_o   = sys_req_i & (cache_hit | mem_new_data_valid_r);
-assign slice_data_idx_o     = slice_idx;
+// slice_data_idx_o is the WHOLE index of the returned element (the consumer
+// needs the input-neuron number to address the weight row). slice_idx (the
+// within-word part) is used only internally by slice_and_align. (Was = slice_idx,
+// which truncated to within-word bits → weight_row_base aliased per dataword.)
+// This is the shared cache for annAcc/snnAcc/ipSnnAcc in the closed-loop build.
+assign slice_data_idx_o     = sys_addr_i;
 assign slice_data_index_x_o = sys_index_x_i;
 assign slice_data_index_y_o = sys_index_y_i;
 assign slice_data_last_o    = sys_last_i;

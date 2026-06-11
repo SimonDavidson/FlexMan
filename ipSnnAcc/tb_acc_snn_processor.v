@@ -5,7 +5,7 @@
 `include "../shared/constants.v"
 
 // ====================================================================
-//  tb_acc_snn_processor  — automatic-check version
+//  tb_acc_snn_processor  (ipSnnAcc) — automatic-check version
 //
 //  Configuration
 //  -------------
@@ -13,7 +13,9 @@
 //  Input layer    : 2 neurons (in_x_len=2, in_y_len=1)
 //  Output layer   : 2 neurons (out_x_len=2, out_y_len=1, last_neuron_idx=1)
 //  Weights        : 8-bit value=10; weight_sram filled with 0x0A0A_0A0A
-//  Activations    : all spiking; act_sram filled with 0xFFFF_FFFF
+//  Activations    : 8-bit value=1, 4 per word; act_sram filled with
+//                   0x0101_0101 (ipSnn MACs act x weight, so act=1
+//                   reproduces the snnAcc accumulation values)
 //  syn_curr_sz    : 5 (32-bit elements — one word per neuron)
 //  bias_curr_sz   : 3 (8-bit, matches BIAS_CURR_SLICE_BITS=8; also controls threshold cache)
 //  pot_sz         : 5 (32-bit elements)
@@ -21,7 +23,7 @@
 //  decay_mult     : 0x8000_0000 (0.5 in Q0.32)
 //
 //  Expected spike_processing output (per output neuron):
-//    2 spiking inputs × weight 10 = syn_curr_sram[20/21] = 32'd20
+//    2 active inputs × (act 1 × weight 10) = syn_curr_sram[20/21] = 32'd20
 //
 //  Test 1 — no spike (threshold=50 > accumulated syn_curr=20)
 //    new_pot = 0 + 20 + 0 = 20 < 50  → no spike
@@ -43,7 +45,7 @@
 //
 //  Test 4 — pre-zeroed syn_curr buffer (clear_syn_curr HW removed; the buffer
 //           is zeroed in the TB, exactly as a FILL(value=0) task does in the
-//           full system before a fresh-accumulation snnAcc task)
+//           full system before a fresh-accumulation task)
 //    SP accumulates 20 into the zeroed buffer, decayed=10; thresh=50, no spike.
 //    spike_sram[60]       = 0x00000000
 //    syn_curr_sram[20/21] = 32'd10   (20 × 0.5)
@@ -54,6 +56,13 @@
 //    spike_sram[60]       = 0x00000000
 //    syn_curr_sram[20/21] = 32'd10
 //    pot_sram[50/51]      = 32'd10   (without clear_pot would be 22)
+//
+//  Test 6 — non-uniform column-major weights, no spike
+//
+//  Test 7 — LAST input is a non-spike (weight-pass hang regression,
+//    2026-06-10): the gated act stream never shows act_data_last_i to
+//    the weight generator, so the dump of the last non-spike must
+//    terminate the pass (act_last_dumped_i) or the pipeline hangs.
 // ====================================================================
 
 // CONFIG PARAMS START  (compile-time RTL parameters — keep identical to DUT)
@@ -345,7 +354,7 @@ module tb_acc_snn_processor;
     // SRAM initialisation  (#1 ensures this runs after model resets)
     //
     // Memory layout (all bases fit in 8-bit addr, no truncation issues):
-    //   act_base    =  0   act_sram[0]     = 0xFFFF_FFFF (all spiking)
+    //   act_base    =  0   act_sram[0]     = 0x0101_0101 (8-bit acts = 1)
     //   weight_base = 10   weight_sram[*]  = 0x0A0A_0A0A (8-bit weight=10)
     //   syn_curr    = 20   zero initially; SP accumulates here
     //   bias_base   = 30   all zero
@@ -471,23 +480,31 @@ module tb_acc_snn_processor;
         repeat (2) @(posedge clk);
 
         // ============================================================
-        // Write configuration registers
+        // Write configuration registers (packed per-task layout,
+        // regmap.PACKED_*: word i at offset i*4)
         // ============================================================
-        // spike_processing
-        cfg_write(32'hFFFF_0000, 32'd0);    // act_base_addr      = 0
-        cfg_write(32'hFFFF_0004, 32'd10);   // weight_base_addr   = 10
-        cfg_write(32'hFFFF_0008, 32'd20);   // syn_curr_base_addr = 20
-        cfg_write(32'hFFFF_000C, 32'd3);    // weight_sz          = 3 (8-bit)
-        cfg_write(32'hFFFF_0014, 32'd1);    // total_timesteps    = 1
-        cfg_write(32'hFFFF_0040, 32'd0);    // bin_point_syn_curr = 0
-        cfg_write(32'hFFFF_0044, 32'd2);    // in_x_len           = 2
-        cfg_write(32'hFFFF_0048, 32'd1);    // in_y_len           = 1
-        cfg_write(32'hFFFF_004C, 32'd2);    // out_x_len          = 2
-        cfg_write(32'hFFFF_0050, 32'd1);    // out_y_len          = 1
-        cfg_write(32'hFFFF_0054, 32'd4);    // weights_per_word   = 4
-        cfg_write(32'hFFFF_0058, 32'd1);    // rows_per_neuron    = 1
+        // W0..W8: base addresses + decay multipliers
+        cfg_write(32'hFFFF_0000, 32'd0);            // act_base_addr      = 0
+        cfg_write(32'hFFFF_0004, 32'd10);           // weight_base_addr   = 10
+        cfg_write(32'hFFFF_0008, 32'd20);           // syn_curr_base_addr = 20
+        cfg_write(32'hFFFF_000C, 32'd30);           // bias_base          = 30
+        cfg_write(32'hFFFF_0010, 32'd40);           // thresh_base        = 40
+        cfg_write(32'hFFFF_0014, 32'd50);           // pot_base           = 50
+        cfg_write(32'hFFFF_0018, 32'd60);           // spike_base         = 60
+        cfg_write(32'hFFFF_001C, 32'h8000_0000);    // syn_curr_decay     = 0.5 (Q0.32)
+        cfg_write(32'hFFFF_0020, 32'h8000_0000);    // pot_decay          = 0.5 (Q0.32)
+        // S0..S3: two 16-bit size lanes each
+        cfg_write(32'hFFFF_0024, 32'h0001_0002);    // S0 in_y=1  | in_x=2
+        cfg_write(32'hFFFF_0028, 32'h0001_0002);    // S1 out_y=1 | out_x=2
+        cfg_write(32'hFFFF_002C, 32'h0001_0001);    // S2 last_neuron_idx=1 | rows_per_neuron=1
+        cfg_write(32'hFFFF_0030, 32'h0000_0001);    // S3 total_timesteps=1
+        // M0: weight_sz=3(8b) syn_curr_sz=5(32b) bias_curr_sz=3(8b, also
+        //     thresh cache) pot_sz=5(32b) weight_mode=0(full)
+        cfg_write(32'hFFFF_0034, 32'h0000_5353);
+        // M1: skip=0 np_mode=0 weights_per_word=4 bin_point_syn_curr=0
+        cfg_write(32'hFFFF_0038, 32'h0000_0100);
+        // boot-only conv/sparse params (out-of-window offsets unchanged)
         cfg_write(32'hFFFF_005C, 32'd5);    // weight_idx_sz      = 5
-        cfg_write(32'hFFFF_0070, 32'd0);    // weight_mode        = 0 (full)
         cfg_write(32'hFFFF_0074, 32'd1);    // x_kernel_len       = 1
         cfg_write(32'hFFFF_0078, 32'd1);    // y_kernel_len       = 1
         cfg_write(32'hFFFF_007C, 32'd1);    // x_kernel_step      = 1
@@ -495,20 +512,7 @@ module tb_acc_snn_processor;
         cfg_write(32'hFFFF_0084, 32'd0);    // x_kernel_offset    = 0
         cfg_write(32'hFFFF_0088, 32'd0);    // y_kernel_offset    = 0
 
-        // neuron_processing
-        cfg_write(32'hFFFF_0020, 32'd1);            // last_neuron_idx   = 1  (2 neurons)
-        cfg_write(32'hFFFF_0028, 32'd30);           // bias_base         = 30
-        cfg_write(32'hFFFF_002C, 32'd40);           // thresh_base       = 40
-        cfg_write(32'hFFFF_0030, 32'd50);           // pot_base          = 50
-        cfg_write(32'hFFFF_0064, 32'd60);           // spike_base        = 60
-        cfg_write(32'hFFFF_0034, 32'd5);            // syn_curr_sz       = 5 (32-bit)
-        cfg_write(32'hFFFF_0038, 32'd3);            // bias_curr_sz      = 3 (8-bit, matches BIAS_CURR_SLICE_BITS=8; also controls thresh cache)
-        cfg_write(32'hFFFF_003C, 32'd5);            // pot_sz            = 5 (32-bit)
-        cfg_write(32'hFFFF_0068, 32'h8000_0000);    // syn_curr_decay    = 0.5 (Q0.32)
-        cfg_write(32'hFFFF_006C, 32'h8000_0000);    // pot_decay         = 0.5 (Q0.32)
-        cfg_write(32'hFFFF_0098, 32'd0);            // np_mode           = 0 (all modes off)
-
-        $display("=== tb_acc_snn_processor ===");
+        $display("=== tb_acc_snn_processor (ipSnnAcc) ===");
 
         // ============================================================
         // Test 1: no spike  (threshold=50 > new_pot=20)
@@ -555,7 +559,7 @@ module tb_acc_snn_processor;
         // Point thresh_base at a fresh SRAM region (44) to force a cache miss
         // and guarantee a real memory fetch with the new threshold value.
         u_thresh_mem.mem[44] = 32'h0000_0505;   // thresh=0x05=5 for both neurons
-        cfg_write(32'hFFFF_002C, 32'd44);        // thresh_base = 44
+        cfg_write(32'hFFFF_0010, 32'd44);        // thresh_base = 44
 
         @(negedge clk); start_new_block_i = 1'b1;
         @(negedge clk); start_new_block_i = 1'b0;
@@ -581,7 +585,8 @@ module tb_acc_snn_processor;
             u_pot_mem.mem[i_init]      = 32'd0;
             u_spike_mem.mem[i_init]    = 32'd0;
         end
-        cfg_write(32'hFFFF_0098, 32'd1);    // np_mode = 1 (sub_on_fire)
+        // M1: np_mode=1 (sub_on_fire) in bits [5:2]; weights_per_word=4
+        cfg_write(32'hFFFF_0038, 32'h0000_0104);
 
         @(negedge clk); start_new_block_i = 1'b1;
         @(negedge clk); start_new_block_i = 1'b0;
@@ -598,7 +603,7 @@ module tb_acc_snn_processor;
         // ============================================================
         // Test 4: pre-zeroed syn_curr buffer (clear_syn_curr HW removed)
         // The buffer is zeroed here in the TB — exactly what a FILL(value=0)
-        // task does in the full system before a snnAcc task that needs a fresh
+        // task does in the full system before a task that needs a fresh
         // accumulation. SP then accumulates 20, decayed=10.
         // thresh=50 (base=40): no spike.
         // ============================================================
@@ -610,8 +615,8 @@ module tb_acc_snn_processor;
             u_pot_mem.mem[i_init]      = 32'd0;
             u_spike_mem.mem[i_init]    = 32'd0;
         end
-        cfg_write(32'hFFFF_002C, 32'd40);   // thresh_base = 40 (thresh=50, no spike)
-        cfg_write(32'hFFFF_0098, 32'd0);    // np_mode = 0 (clear sub_on_fire left from T3)
+        cfg_write(32'hFFFF_0010, 32'd40);           // thresh_base = 40 (thresh=50, no spike)
+        cfg_write(32'hFFFF_0038, 32'h0000_0100);    // M1: np_mode = 0 (clear sub_on_fire from T3)
 
         @(negedge clk); start_new_block_i = 1'b1;
         @(negedge clk); start_new_block_i = 1'b0;
@@ -639,7 +644,7 @@ module tb_acc_snn_processor;
         end
         u_pot_mem.mem[50] = 32'd25;
         u_pot_mem.mem[51] = 32'd25;
-        cfg_write(32'hFFFF_0098, 32'd4);    // np_mode = 4 (clear_pot)
+        cfg_write(32'hFFFF_0038, 32'h0000_0110);    // M1: np_mode = 4 (clear_pot)
 
         @(negedge clk); start_new_block_i = 1'b1;
         @(negedge clk); start_new_block_i = 1'b0;
@@ -660,10 +665,11 @@ module tb_acc_snn_processor;
         //   out_elem_count_r bug; this one fails without the fix.
         //   W[0][0]=W[0][1]=+10, W[1][0]=W[1][1]=+5 → syn_curr[20]=20,
         //   syn_curr[21]=10 after SP; decayed by 0.5 → 10, 5.
+        //   Threshold high (=50) → no spike → pot decayed = 10, 5.
         // Expected after full pipeline:
         //   spike_sram[60]      = 0x00000000  (thresh=50 > new_pot=20)
-        //   syn_curr_sram[20]   = 32'd10   (= 0.5 * 20)
-        //   syn_curr_sram[21]   = 32'd5    (= 0.5 * 10)
+        //   syn_curr_sram[20]   = 32'd10
+        //   syn_curr_sram[21]   = 32'd5
         //   pot_sram[50]        = 32'd10
         //   pot_sram[51]        = 32'd5
         // ============================================================
@@ -675,6 +681,9 @@ module tb_acc_snn_processor;
             u_spike_mem.mem[i_init]    = 32'd0;
         end
 
+        // Reset np_mode (T5 left it at 4 = clear_pot)
+        cfg_write(32'hFFFF_0038, 32'h0000_0100);
+
         // Column-major weights at a NEW base (12) to force a weight-cache miss
         //   weight_sram[12] = column 0 = {W[0][0]=10, W[1][0]=5, slice2=0, slice3=0}
         //   weight_sram[13] = column 1 = {W[0][1]=10, W[1][1]=5, slice2=0, slice3=0}
@@ -682,12 +691,9 @@ module tb_acc_snn_processor;
         u_weight_mem.mem[13] = 32'h0000_050A;
         cfg_write(32'hFFFF_0004, 32'd12);        // weight_base_addr = 12
 
-        // Reset np_mode (T5 left it at 4 = clear_pot)
-        cfg_write(32'hFFFF_0098, 32'd0);
-
         // High threshold at a fresh address (52) → no spike → thresh-cache miss
         u_thresh_mem.mem[52] = 32'h0000_3232;    // thresh=50 for both neurons
-        cfg_write(32'hFFFF_002C, 32'd52);        // thresh_base = 52
+        cfg_write(32'hFFFF_0010, 32'd52);        // thresh_base = 52
 
         @(negedge clk); start_new_block_i = 1'b1;
         @(negedge clk); start_new_block_i = 1'b0;
@@ -699,6 +705,42 @@ module tb_acc_snn_processor;
             check_eq(u_syn_curr_mem.mem[21], 32'd5,         "T6 syn_curr_sram[21]");
             check_eq(u_pot_mem.mem[50],      32'd10,        "T6 pot_sram[50]");
             check_eq(u_pot_mem.mem[51],      32'd5,         "T6 pot_sram[51]");
+        end
+
+        // ============================================================
+        // Test 7: LAST input is a NON-spike — regression for the
+        //   weight-pass termination hang (2026-06-10). Non-spikes are
+        //   gated out of the weight generator's act stream, so before
+        //   the act_last_dumped_i fix it never saw act_data_last_i on
+        //   a valid token and the pipeline hung here.
+        //   Weights stay at base 12 (T6 layout): col 0 = {10, 5}.
+        //   Only input 0 contributes: syn_curr = [10, 5]; decayed by
+        //   0.5 → syn/pot = [5, 2] (Q0.32 truncates 2.5 → 2).
+        //   Threshold 50 (still at base 52 from T6) → no spike.
+        // ============================================================
+        $display("Test 7: last input non-spiking (weight-pass hang regression)");
+
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
+        end
+
+        // Acts at a NEW base (2) to force an act-cache miss. 8-bit acts:
+        //   byte 0 = input 0 act=1 (spikes), byte 1 = input 1 (the LAST) = 0.
+        u_act_mem.mem[2] = 32'h0000_0001;
+        cfg_write(32'hFFFF_0000, 32'd2);         // act_base_addr = 2
+
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
+
+        wait_pipeline(timed_out);
+        if (!timed_out) begin
+            check_eq(u_spike_mem.mem[60],    32'h0000_0000, "T7 spike_sram[60]");
+            check_eq(u_syn_curr_mem.mem[20], 32'd5,         "T7 syn_curr_sram[20]");
+            check_eq(u_syn_curr_mem.mem[21], 32'd2,         "T7 syn_curr_sram[21]");
+            check_eq(u_pot_mem.mem[50],      32'd5,         "T7 pot_sram[50]");
+            check_eq(u_pot_mem.mem[51],      32'd2,         "T7 pot_sram[51]");
         end
 
         $display("=== tb_acc_snn_processor: %0d failure(s) ===", errors);

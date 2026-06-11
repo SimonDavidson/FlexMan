@@ -7,6 +7,7 @@ module syn_curr_update
                            parameter X_OUTPUT_SZ        = 8,
                            parameter Y_OUTPUT_SZ        = 8,
                            parameter IN_DATA_BITS       = 32,
+                           parameter ACT_VAL_BITS       = 8, // activation operand width into the MAC
                            parameter WEIGHT_IDX_SZ      = 5, // 2^5 =  32-bit
 			   parameter WEIGHT_SLICE_SZ    = 5,
                            parameter WEIGHT_DATA_IDX_SZ = 5, // 2^5 =  32-bit
@@ -47,14 +48,19 @@ module syn_curr_update
     input  wire          [`WTD_BITS-1:0] syn_curr_mem_data_i,
     output wire          [`WTD_BITS-1:0] syn_curr_mem_data_o,
 
-    // 8-bit input activation (unsigned; from feature-detector layer)
-    input  wire                   [7:0] act_value_i
+    // Input activation operand (unsigned; from feature-detector layer).
+    // Width ACT_VAL_BITS (default 8) — distinct from `ACT_BITS (32-bit mem word).
+    input  wire        [ACT_VAL_BITS-1:0] act_value_i
 );
 
 localparam WEIGHT_BITS     = 2**WEIGHT_SLICE_SZ;
 
 reg               [WEIGHT_IDX_SZ-1:0]    weight_index_r;
 wire              [WEIGHT_IDX_SZ-1:0]    weight_index;
+// MAC operands registered at capture (mirrors annAcc/syn_curr_update.v) so the
+// multiply starts from registers, not combinationally from the weight BRAM.
+reg                  [WEIGHT_BITS-1:0]   weight_value_r;
+reg                  [ACT_VAL_BITS-1:0]  act_value_r;
 reg                                      req_pending_r;
 reg                     [`ADDR_SIZE-1:0] syn_curr_addr_r;
 wire                  [IN_DATA_BITS-1:0] aligned_weight_value;
@@ -67,13 +73,19 @@ if (reset)
 else 
     syn_curr_update_running_r <= syn_curr_update_running_nxt;
 
-assign syn_curr_update_running_nxt = (running_i &
-	                             ~syn_curr_update_running_r) ? 1'b1 :
-	                             ((weight_index_valid_i &
-				       weight_index_last_i  &
-				       weight_index_taken_o) |
-				      finished_pass_weight_i)    ? 1'b0 :
-	                              syn_curr_update_running_r;
+// Stop conditions take PRIORITY over the restart term: a finished_pass_weight_i
+// pulse can arrive while running_r is low (the weight pass was terminated by a
+// gated-out last activation — act_last_dumped_i — one cycle after this block
+// stopped on the previous input's last weight index). With the restart term
+// first, that pulse was swallowed, this block restarted, and no stop condition
+// ever fired again (snn0 e2e hang, 2026-06-10).
+assign syn_curr_update_running_nxt = (((weight_index_valid_i &
+				        weight_index_last_i  &
+				        weight_index_taken_o) |
+				       finished_pass_weight_i)    ? 1'b0 :
+	                             (running_i &
+	                              ~syn_curr_update_running_r) ? 1'b1 :
+	                              syn_curr_update_running_r);
                   
 assign syn_curr_update_running_o = syn_curr_update_running_r;
 
@@ -104,6 +116,8 @@ begin
       weight_index_r  <=  'hDEAD;
       syn_curr_addr_r <=  'hABABAB;
       syn_curr_flat_index_r <= 'h0;
+      weight_value_r  <= 'b0;
+      act_value_r     <= 'b0;
       req_pending_r   <= 1'b0;
    end
    else if (weight_index_valid_i & weight_value_valid_i & ~req_pending_r & ~syn_curr_mem_wait_i)
@@ -112,6 +126,8 @@ begin
 	   req_pending_r   <= 1'b1;
            syn_curr_addr_r <= weight_index_i;
            syn_curr_flat_index_r <= syn_curr_flat_index;
+           weight_value_r  <= weight_value_i;
+           act_value_r     <= act_value_i;
    end
    else if (req_pending_r & ~syn_curr_mem_wait_i)
 	   req_pending_r  <= 1'b0;
@@ -135,16 +151,18 @@ assign syn_curr_mem_rd_o = (syn_curr_mem_wr_o)    ? 1'b0 :
 // Update syn_curr value using given weight
 //
 
-assign aligned_weight_value = {{(IN_DATA_BITS-WEIGHT_BITS){weight_value_i[WEIGHT_BITS-1]}}, weight_value_i[WEIGHT_BITS-1:0]};
+assign aligned_weight_value = {{(IN_DATA_BITS-WEIGHT_BITS){weight_value_r[WEIGHT_BITS-1]}}, weight_value_r[WEIGHT_BITS-1:0]};
 
 // syn_curr always accumulates from memory.  To start a buffer from zero, issue
 // a FILL(value=0) task on the syn_curr buffer before use (the old in-accelerator
 // clear_syn_curr first-write tracking has been removed to save fabric area).
 wire [`WTD_BITS-1:0] base_syn_curr = syn_curr_mem_data_i;
 
-// MAC: accumulate act_value (unsigned 8-bit) * weight (signed) into syn_curr
-wire signed [IN_DATA_BITS+8:0] mac_product;
-assign mac_product = $signed(aligned_weight_value) * $signed({1'b0, act_value_i});
+// MAC: accumulate act_value (unsigned) * weight (signed) into syn_curr.
+// Operands are registered (weight_value_r/act_value_r) so this multiply+add no
+// longer chains combinationally from the weight BRAM read — closes 200 MHz.
+wire signed [IN_DATA_BITS+ACT_VAL_BITS:0] mac_product;
+assign mac_product = $signed(aligned_weight_value) * $signed({1'b0, act_value_r});
 assign syn_curr_mem_data_o = base_syn_curr + mac_product[IN_DATA_BITS-1:0];
 
 //////////////////////////////////////////////////////////////////////////////

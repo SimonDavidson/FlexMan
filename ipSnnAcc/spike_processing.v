@@ -134,6 +134,7 @@ wire     [Y_INPUT_SZ-1:0] act_index_y;
 wire                      act_data_valid;
 wire                      act_data_gated_valid;
 wire                      act_ignore_non_spike;
+wire                      act_last_dumped;
 wire       [ACT_BITS-1:0] act_data_out;
 wire     [X_INPUT_SZ-1:0] act_data_idx_x;
 wire     [Y_INPUT_SZ-1:0] act_data_idx_y;
@@ -296,6 +297,7 @@ dataline_cache_with_xy #(
     .reset(reset),
 
     .colour_select_o(),
+    .invalidate_i(start_new_block_i), // task dispatch — cache quiescent
     .slice_sz_i(3'b011),
     .base_addr_i(act_base_addr_i),
 
@@ -328,9 +330,19 @@ assign act_data_gated_valid = act_data_valid & (act_data_out != {ACT_BITS{1'b0}}
 // Dump valid activations that are zero (non-spike) without passing on:
 assign act_ignore_non_spike = act_data_valid & (act_data_out == {ACT_BITS{1'b0}});
 
-// Get next activation if we've processed the connections from an input spike:
-assign act_data_taken = finished_one_pass_weight_gen; // | 
-                           //(act_data_valid & ~act_data_out[ACT_BITS-1]);
+// The weight generator only sees the gated (non-zero) activations, so its pass
+// termination (finished_for_this_ip_neuron & act_data_last_i) never fires when
+// the LAST activation is zero — the dump must terminate the pass instead, or
+// the weight generator waits forever (snn0 e2e hang, 2026-06-10).
+assign act_last_dumped = act_ignore_non_spike & act_data_last;
+
+// Get next activation either when we've processed the connections from an input
+// spike (finished_one_pass) OR when it's a valid non-spike to be skipped
+// (act_ignore_non_spike). The non-spike term was previously commented out; it is
+// required so a valid non-spike releases the act cache and advances. Before the
+// weight_value_valid act-gate it was masked by the (buggy) consume firing
+// finished_one_pass for non-spikes.
+assign act_data_taken = finished_one_pass_weight_gen | act_ignore_non_spike;
 
 //assign act_index_taken = ~act_index_wait;
 // Move onto next actovation either when the current spike has been processed
@@ -396,6 +408,7 @@ weight_generator #(
     .act_data_idx_i(act_data_idx),
     .act_data_i(act_data_out),
     .act_data_last_i(act_data_last),
+    .act_last_dumped_i(act_last_dumped),     // Last act was a gated-out zero
     .weight_mem_rd_o(weight_mem_rd_o),
     .weight_mem_wait_i(weight_mem_wait_i),
     .weight_mem_addr_o(weight_mem_addr_o),
@@ -540,6 +553,7 @@ syn_curr_update # (
    .X_OUTPUT_SZ(X_OUTPUT_SZ),
    .Y_OUTPUT_SZ(Y_OUTPUT_SZ),
    .IN_DATA_BITS(IN_DATA_BITS),
+   .ACT_VAL_BITS(2**ACT_SLICE_SZ),    // activation operand width (= act_data_out)
    .WEIGHT_IDX_SZ(WEIGHT_IDX_SZ),
    .WEIGHT_SLICE_SZ(WEIGHT_SLICE_SZ),
    .WEIGHT_DATA_IDX_SZ(WEIGHT_DATA_IDX_SZ),
