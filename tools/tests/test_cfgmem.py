@@ -1,50 +1,91 @@
 # SPDX-License-Identifier: MIT
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-08
-# Unit tests for flexman_backend.cfgmem (no torch, no pytest required).
+# Last modified: 2026-06-10
+# Unit tests for flexman_backend.cfgmem packed per-task layout (no torch/pytest).
 from flexman_backend import cfgmem
 
 
-def test_snn_layout_positions():
-    cfg = {
-        "sp_act_base_addr": 0x2A0, "sp_weight_base_addr": 0x111,
-        "syn_curr_base_addr": 0x2E3, "sp_weight_sz": 3,
-        "sp_total_timesteps": 1, "np_syn_curr_decay_mult": 0xD2E7CC00,
-        "np_pot_decay_mult": 0x70ACB100, "np_last_neuron_idx": 0x1F,
-        "np_bias_curr_base_addr": 5, "np_thresh_base_addr": 6, "np_pot_base_addr": 7,
-        "np_syn_curr_sz": 5, "np_bias_curr_sz": 5, "np_pot_sz": 5,
-        "np_mode": 0, "sp_skip_neuron": 1,
-        "bin_point_syn_curr": 0xDEAD,   # out-of-window — must be ignored
-    }
-    w = cfgmem.pack_cfg_words(cfg, "snn")
+def test_packed_length():
+    from flexman_backend import regmap
+    assert regmap.PACKED_WORDS_PER_CONFIG == 15        # meaningful packed words
+    assert cfgmem.WORDS_PER_CONFIG == 16               # cfg_mem stride (power of 2)
+    w = cfgmem.pack_cfg_words({}, "snn")
     assert len(w) == 16
-    assert w[0] == 0x2A0 and w[1] == 0x111 and w[2] == 0x2E3 and w[3] == 3
-    assert w[4] == 1                          # (np_mode<<1)|skip = 0|1
-    assert w[5] == 1
-    assert w[6] == 0xD2E7CC00 and w[7] == 0x70ACB100   # decays aliased into window
-    assert w[8] == 0x1F and w[9] == 0          # word9 unused
-    assert w[15] == 5
-    assert 0xDEAD not in w                      # bin_point (out-of-window) absent
+    assert w[15] == 0                                  # word 15 is spare
 
 
-def test_snn_packed_control_word():
-    assert cfgmem.pack_cfg_words({"np_mode": 0, "sp_skip_neuron": 1}, "snn")[4] == 1
-    assert cfgmem.pack_cfg_words({"np_mode": 2, "sp_skip_neuron": 0}, "snn")[4] == 4
-    assert cfgmem.pack_cfg_words({"np_mode": 0b101, "sp_skip_neuron": 1}, "snn")[4] == 0b1011
+def test_address_words():
+    cfg = dict(sp_act_base_addr=0x2A0, sp_weight_base_addr=0x111,
+               syn_curr_base_addr=0x2E3, np_bias_curr_base_addr=4,
+               np_thresh_base_addr=5, np_pot_base_addr=6, np_spike_base_addr=7,
+               np_syn_curr_decay_mult=0xD2E7CC00, np_pot_decay_mult=0x70ACB100)
+    w = cfgmem.pack_cfg_words(cfg, "snn")
+    assert w[0:9] == [0x2A0, 0x111, 0x2E3, 4, 5, 6, 7, 0xD2E7CC00, 0x70ACB100]
 
 
-def test_ann_layout_skip_only_word6_unused():
-    w = cfgmem.pack_cfg_words({"sp_skip_neuron": 1, "np_mode": 3, "np_pot_decay_mult": 0xABCD}, "ann")
-    assert w[4] == 1            # ann word4 = skip only (np_mode NOT packed)
-    assert w[6] == 0            # ann word6 unused
-    assert w[7] == 0xABCD       # pot decay still aliased into word7
+def test_size_lanes():
+    cfg = dict(sp_in_x_len=512, sp_in_y_len=1, sp_out_x_len=128, sp_out_y_len=2,
+               sp_rows_per_neuron=32, np_last_neuron_idx=127, sp_total_timesteps=8)
+    w = cfgmem.pack_cfg_words(cfg, "snn")
+    assert w[9]  == (512 | (1 << 16))     # S0: in_x | in_y
+    assert w[10] == (128 | (2 << 16))     # S1: out_x | out_y
+    assert w[11] == (32  | (127 << 16))   # S2: rows_per_neuron | last_neuron_idx
+    assert w[12] == 8                     # S3: total_timesteps (high lane spare = 0)
+
+
+def test_size_16bit_headroom():
+    # future-proof: each size lane holds up to 65535
+    w = cfgmem.pack_cfg_words(dict(sp_in_x_len=0xFFFF, sp_in_y_len=0xABCD), "snn")
+    assert w[9] == (0xFFFF | (0xABCD << 16))
+
+
+def test_mode_word_m0():
+    cfg = dict(sp_weight_sz=3, np_syn_curr_sz=5, np_bias_curr_sz=5, np_pot_sz=5,
+               sp_act_sz=3, np_thresh_op=2, sp_weight_mode=1)
+    m0 = cfgmem.pack_cfg_words(cfg, "ann")[13]
+    assert (m0 >> 0)  & 0xF == 3    # weight_sz
+    assert (m0 >> 4)  & 0xF == 5    # syn_curr_sz
+    assert (m0 >> 8)  & 0xF == 5    # bias_sz
+    assert (m0 >> 12) & 0xF == 5    # pot_sz
+    assert (m0 >> 16) & 0xF == 3    # act_sz
+    assert (m0 >> 20) & 0xF == 2    # thresh_op (4-bit headroom)
+    assert (m0 >> 24) & 0xF == 1    # weight_mode (4-bit headroom)
+
+
+def test_mode_word_m1():
+    cfg = dict(sp_skip_neuron=1, np_mode=0b101, sp_weights_per_word=4,
+               bin_point_syn_curr=16, np_out_bin_point=4)
+    m1 = cfgmem.pack_cfg_words(cfg, "snn")[14]
+    assert (m1 >> 0)  & 0x3  == 1
+    assert (m1 >> 2)  & 0xF  == 0b101
+    assert (m1 >> 6)  & 0xF  == 4
+    assert (m1 >> 10) & 0x3F == 16
+    assert (m1 >> 16) & 0x3F == 4
+
+
+def test_field_overflow_masked():
+    # an over-wide value is truncated to its slot, not bleeding into neighbours
+    m0 = cfgmem.pack_cfg_words(dict(sp_weight_sz=0xFF, np_syn_curr_sz=1), "snn")[13]
+    assert (m0 >> 0) & 0xF == 0xF
+    assert (m0 >> 4) & 0xF == 1
+
+
+def test_out_of_layout_ignored():
+    w = cfgmem.pack_cfg_words(dict(sp_x_kernel_len=0xDEAD), "snn")  # conv boot reg
+    assert 0xDEAD not in w
+
+
+def test_unknown_acc_type():
+    try:
+        cfgmem.pack_cfg_words({}, "bogus")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
 
 
 def test_axi_write_addresses():
-    words = list(range(16))
-    writes = cfgmem.cfgmem_axi_writes(2, words)          # cfg_id 2
-    assert writes[0] == (0xA0000000 | ((2 * 16 + 0) << 2), 0)    # 0xA0000080
-    assert writes[0][0] == 0xA0000080
-    assert writes[15][0] == (0xA0000000 | ((2 * 16 + 15) << 2))  # 0xA00000BC
-    assert writes[15][0] == 0xA00000BC
+    writes = cfgmem.cfgmem_axi_writes(2, list(range(16)))         # cfg_id 2, WPC=16
+    assert len(writes) == 16
+    assert writes[0][0]  == (0xA0000000 | ((2 * 16 + 0)  << 2))
+    assert writes[15][0] == (0xA0000000 | ((2 * 16 + 15) << 2))

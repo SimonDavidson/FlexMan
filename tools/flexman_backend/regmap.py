@@ -5,7 +5,7 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-08
+# Last modified: 2026-06-10
 #
 # Pure-Python (no torch). These maps mirror the per-accelerator AXI config-reg
 # decoders in the RTL and the scheduler's fixed control/memory address decode.
@@ -13,9 +13,10 @@
 # by tools/tests/test_regmap_vs_rtl.py.
 #
 # Sources:
-#   SNN_REG_OFFSETS / ANN_REG_OFFSETS : snnAcc/CLAUDE.md, acc_snn_processor.v
-#   HU_REG_OFFSETS                    : Hadamard/hu_config_regs.v
-#   scheduler control/mem addrs       : scheduler/ISA_REFERENCE.md
+#   PACKED_* / BOOT_REG_OFFSETS : snnAcc / annAcc acc_snn_processor.v,
+#                                 siren_detector/acc_ipsnn_processor.v
+#   HU_REG_OFFSETS              : Hadamard/hu_config_regs.v
+#   scheduler control/mem addrs : scheduler/ISA_REFERENCE.md
 #
 # NOTE: per-accelerator config BASE addresses (which instance sits at which AXI
 # base) are TOP-MODULE / deployment specific, so they live in each front-end's
@@ -24,55 +25,74 @@
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
-# Per-accelerator config-register offsets (low byte of the AXI address)
-# Common shape across snnAcc and ipSnnAcc:
+# PACKED per-task config layout (single source of truth, mirrors the RTL decode).
+#
+# The config_manager streams PACKED_WORDS_PER_CONFIG words to a task on dispatch;
+# word i lands at accelerator AXI offset i*4. The full per-task config is packed
+# into 15 words so a multi-layer accelerator (e.g. snnAcc running recurrent
+# pass1/pass2/readout) gets its own in_x/out_x/rows_per_neuron/modes per task.
+#
+# Convention: SIZE fields use 16-bit lanes (two per word -> up to 65536); MODE /
+# slice-size fields are bit-packed with 1-2 spare bits each for future modes.
+# A field absent from a given accelerator's cfg dict simply packs as 0.
+#
+#   words 0..8  : full-32-bit addresses + decay multipliers (one per word)
+#   words 9..12 : S0..S3  -> two 16-bit size lanes  (low=[15:0], high=[31:16])
+#   words 13,14 : M0,M1   -> packed mode/slice-size fields (field, lsb, width)
 # ---------------------------------------------------------------------------
-SNN_REG_OFFSETS = {
-    "sp_act_base_addr":        0x00,
-    "sp_weight_base_addr":     0x04,
-    "syn_curr_base_addr":      0x08,    # shared sp + np
-    "sp_weight_sz":            0x0C,
-    "sp_total_timesteps":      0x14,
-    "np_last_neuron_idx":      0x20,
-    "np_bias_curr_base_addr":  0x28,
-    "np_thresh_base_addr":     0x2C,
-    "np_pot_base_addr":        0x30,
-    "np_syn_curr_sz":          0x34,
-    "np_bias_curr_sz":         0x38,
-    "np_pot_sz":               0x3C,
-    "bin_point_syn_curr":      0x40,
-    "sp_in_x_len":             0x44,
-    "sp_in_y_len":             0x48,
-    "sp_out_x_len":            0x4C,
-    "sp_out_y_len":            0x50,
-    "sp_weights_per_word":     0x54,
-    "sp_rows_per_neuron":      0x58,
-    "sp_weight_idx_sz":        0x5C,
-    "np_spike_base_addr":      0x64,
-    "np_syn_curr_decay_mult":  0x68,
-    "np_pot_decay_mult":       0x6C,
-    "sp_weight_mode":          0x70,    # 00=full, 01=sparse, 10=conv
-    "sp_x_kernel_len":         0x74,
-    "sp_y_kernel_len":         0x78,
-    "sp_x_kernel_step":        0x7C,
-    "sp_y_kernel_step":        0x80,
-    "sp_x_kernel_offset":      0x84,
-    "sp_y_kernel_offset":      0x88,
-    "sp_index_sz":             0x8C,
-    "sp_tuple_sz":             0x90,
-    "sp_sparse_count":         0x94,
-    "np_mode":                 0x98,    # [0]=sub_on_fire [1]=clear_syn [2]=clear_pot
-    "sp_skip_neuron":          0x9C,
-}
+PACKED_ADDR_WORDS = [          # offsets 0x00..0x20
+    "sp_act_base_addr",        # 0x00
+    "sp_weight_base_addr",     # 0x04
+    "syn_curr_base_addr",      # 0x08
+    "np_bias_curr_base_addr",  # 0x0C
+    "np_thresh_base_addr",     # 0x10  (= lut base on annAcc)
+    "np_pot_base_addr",        # 0x14
+    "np_spike_base_addr",      # 0x18
+    "np_syn_curr_decay_mult",  # 0x1C  (0 on annAcc)
+    "np_pot_decay_mult",       # 0x20
+]
+PACKED_SIZE_WORDS = [          # offsets 0x24..0x30 ; (low_field, high_field)
+    ("sp_in_x_len",        "sp_in_y_len"),         # S0 0x24
+    ("sp_out_x_len",       "sp_out_y_len"),        # S1 0x28
+    ("sp_rows_per_neuron", "np_last_neuron_idx"),  # S2 0x2C
+    ("sp_total_timesteps", None),                  # S3 0x30 (high lane spare)
+]
+PACKED_MODE_WORDS = [          # offsets 0x34..0x38 ; (field, lsb, width)
+    [   # M0 0x34
+        ("sp_weight_sz",    0, 4),
+        ("np_syn_curr_sz",  4, 4),
+        ("np_bias_curr_sz", 8, 4),
+        ("np_pot_sz",      12, 4),
+        ("sp_act_sz",      16, 4),
+        ("np_thresh_op",   20, 4),
+        ("sp_weight_mode", 24, 4),
+    ],
+    [   # M1 0x38
+        ("sp_skip_neuron",      0, 2),
+        ("np_mode",             2, 4),
+        ("sp_weights_per_word", 6, 4),
+        ("bin_point_syn_curr", 10, 6),
+        ("np_out_bin_point",   16, 6),
+    ],
+]
+PACKED_WORDS_PER_CONFIG = (len(PACKED_ADDR_WORDS)
+                           + len(PACKED_SIZE_WORDS)
+                           + len(PACKED_MODE_WORDS))   # = 15
 
-# annAcc differs at 0x98 (sp_act_sz instead of np_mode) and adds 0xA0, 0xA4;
-# it has no np_mode and no syn-curr decay.
-ANN_REG_OFFSETS = dict(SNN_REG_OFFSETS)
-ANN_REG_OFFSETS["sp_act_sz"]        = 0x98   # overrides np_mode (annAcc-specific)
-ANN_REG_OFFSETS["np_thresh_op"]     = 0xA0   # 00=RELU 01=LUT 10=ABS
-ANN_REG_OFFSETS["np_out_bin_point"] = 0xA4   # output requant; shift = bin_point_syn_curr - this
-del ANN_REG_OFFSETS["np_mode"]
-del ANN_REG_OFFSETS["np_syn_curr_decay_mult"]
+# Boot-only (out-of-packed-window) registers, set once via direct AXI for the
+# rare conv/sparse layers. Not per-task; the dense siren app never writes these.
+BOOT_REG_OFFSETS = {
+    "sp_weight_idx_sz":   0x5C,
+    "sp_x_kernel_len":    0x74,
+    "sp_y_kernel_len":    0x78,
+    "sp_x_kernel_step":   0x7C,
+    "sp_y_kernel_step":   0x80,
+    "sp_x_kernel_offset": 0x84,
+    "sp_y_kernel_offset": 0x88,
+    "sp_index_sz":        0x8C,
+    "sp_tuple_sz":        0x90,
+    "sp_sparse_count":    0x94,
+}
 
 # Hadamard config-register offsets (Hadamard/hu_config_regs.v reg_sel = addr[7:0]).
 # Computes R = Z*(A-B) + B + mode*R_prev over a stream of `stream_len` elements.
@@ -92,6 +112,13 @@ HU_REG_OFFSETS = {
     "src_r_elem_sz":    0x11,
     "src_r_bin_point":  0x12,
 }
+
+# ---------------------------------------------------------------------------
+# np_thresh_op encodings (annAcc activation function select)
+# ---------------------------------------------------------------------------
+THRESH_OP_RELU = 0b00
+THRESH_OP_LUT  = 0b01
+THRESH_OP_ABS  = 0b10
 
 # ---------------------------------------------------------------------------
 # Slice-size encoding (slice_sz / elem_sz fields), per dataline_cache_with_xy
