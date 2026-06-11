@@ -5,7 +5,7 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-10
+# Last modified: 2026-06-11
 #
 # Pure-Python (no torch). These maps mirror the per-accelerator AXI config-reg
 # decoders in the RTL and the scheduler's fixed control/memory address decode.
@@ -13,8 +13,9 @@
 # by tools/tests/test_regmap_vs_rtl.py.
 #
 # Sources:
-#   PACKED_* / BOOT_REG_OFFSETS : snnAcc / annAcc acc_snn_processor.v,
+#   PACKED_* / BOOT_REG_OFFSETS : snnAcc / annAcc / ipSnnAcc acc_snn_processor.v,
 #                                 siren_detector/acc_ipsnn_processor.v
+#   PACKED_FMI_*                : fmiSnnAcc/acc_fmiSnn_processor.v
 #   HU_REG_OFFSETS              : Hadamard/hu_config_regs.v
 #   scheduler control/mem addrs : scheduler/ISA_REFERENCE.md
 #
@@ -79,6 +80,54 @@ PACKED_WORDS_PER_CONFIG = (len(PACKED_ADDR_WORDS)
                            + len(PACKED_SIZE_WORDS)
                            + len(PACKED_MODE_WORDS))   # = 15
 
+# ---------------------------------------------------------------------------
+# PACKED per-task config layout for fmiSnnAcc (mirrors fmiSnnAcc/acc_fmiSnn_processor.v).
+#
+# fmiSnnAcc replaces the scalar decay multipliers and bias_curr memory with six
+# per-neuron adaptive-LIF memories, so its packed layout differs from the snn/ann
+# one: 12 full-width base addresses, 3 size words, 1 mode word = 16 words, exactly
+# the cfg_mem stride (no spare word). fmi is 1-D (Y hardwired to 1): no y lengths.
+#
+#   words 0..11  : offsets 0x00..0x2C, full-32-bit base addresses (one per word)
+#   words 12..14 : S0..S2 -> two 16-bit size lanes (low=[15:0], high=[31:16])
+#   word  15     : M0     -> packed mode/slice-size fields (field, lsb, width)
+# ---------------------------------------------------------------------------
+PACKED_FMI_ADDR_WORDS = [      # offsets 0x00..0x2C
+    "sp_act_base_addr",        # 0x00
+    "sp_weight_base_addr",     # 0x04
+    "syn_curr_base_addr",      # 0x08
+    "np_thresh_base_addr",     # 0x0C
+    "np_pot_base_addr",        # 0x10
+    "np_spike_base_addr",      # 0x14
+    "np_dcy_syn_base_addr",    # 0x18  per-neuron syn-current decay memory
+    "np_dcy_mem_base_addr",    # 0x1C  per-neuron membrane decay memory
+    "np_ada_base_addr",        # 0x20  adaptive-threshold state memory
+    "np_b_eff_base_addr",      # 0x24  effective-threshold memory
+    "np_dcy_ada_base_addr",    # 0x28  adaptation decay memory
+    "np_scl_ada_base_addr",    # 0x2C  adaptation scale memory
+]
+PACKED_FMI_SIZE_WORDS = [      # offsets 0x30..0x38 ; (low_field, high_field)
+    ("sp_in_x_len",        "sp_out_x_len"),        # S0 0x30
+    ("sp_rows_per_neuron", "np_last_neuron_idx"),  # S1 0x34
+    ("sp_total_timesteps", None),                  # S2 0x38 (high lane spare)
+]
+PACKED_FMI_MODE_WORDS = [      # offset 0x3C ; (field, lsb, width)
+    [   # M0 0x3C
+        ("sp_skip_neuron",      0, 2),
+        ("np_mode",             2, 4),
+        ("sp_weights_per_word", 6, 4),
+        ("bin_point_syn_curr", 10, 6),
+        ("sp_weight_sz",       16, 4),
+        ("np_syn_curr_sz",     20, 4),
+        ("np_pot_sz",          24, 4),
+        ("sp_weight_mode",     28, 2),
+        ("np_has_ada",         30, 1),
+    ],
+]
+PACKED_FMI_WORDS_PER_CONFIG = (len(PACKED_FMI_ADDR_WORDS)
+                               + len(PACKED_FMI_SIZE_WORDS)
+                               + len(PACKED_FMI_MODE_WORDS))   # = 16
+
 # Boot-only (out-of-packed-window) registers, set once via direct AXI for the
 # rare conv/sparse layers. Not per-task; the dense siren app never writes these.
 BOOT_REG_OFFSETS = {
@@ -89,6 +138,18 @@ BOOT_REG_OFFSETS = {
     "sp_y_kernel_step":   0x80,
     "sp_x_kernel_offset": 0x84,
     "sp_y_kernel_offset": 0x88,
+    "sp_index_sz":        0x8C,
+    "sp_tuple_sz":        0x90,
+    "sp_sparse_count":    0x94,
+}
+
+# fmiSnnAcc boot-only registers: same offsets as BOOT_REG_OFFSETS minus the
+# y-kernel params (fmi is 1-D).
+BOOT_REG_OFFSETS_FMI = {
+    "sp_weight_idx_sz":   0x5C,
+    "sp_x_kernel_len":    0x74,
+    "sp_x_kernel_step":   0x7C,
+    "sp_x_kernel_offset": 0x84,
     "sp_index_sz":        0x8C,
     "sp_tuple_sz":        0x90,
     "sp_sparse_count":    0x94,

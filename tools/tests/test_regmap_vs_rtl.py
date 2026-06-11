@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-10
+# Last modified: 2026-06-11
 #
 # ANTI-DRIFT CHECK — the reason the back-end lives in the FlexMan repo.
 # Parses the packed per-task config decoders (case (sys_addr_i[7:0]) ...)
@@ -27,8 +27,12 @@ SKIP_FIELDS = {
 CASES = [
     ("snn",   "snnAcc/acc_snn_processor.v"),
     ("ipsnn", "siren_detector/acc_ipsnn_processor.v"),
+    ("ipsnn", "ipSnnAcc/acc_snn_processor.v"),
     ("ann",   "annAcc/acc_snn_processor.v"),
 ]
+
+# fmiSnnAcc has its own 16-word packed layout (regmap.PACKED_FMI_*).
+FMI_RTL = "fmiSnnAcc/acc_fmiSnn_processor.v"
 
 _RE_CASE   = re.compile(r"8'h([0-9A-Fa-f]{1,2})\s*:")
 _RE_ASSIGN = re.compile(r"([A-Za-z_]\w*?)_r\s*<=\s*sys_data_i\s*\[([^\]]+)\]")
@@ -136,6 +140,63 @@ def test_no_stale_offsets_in_rtl():
             f"{sorted(hex(o) for o in stray)}")
 
 
+def _expected_fields_fmi():
+    """Return {offset: {field_name: lsb}} built from regmap.PACKED_FMI_*."""
+    exp: dict[int, dict[str, int]] = {}
+    for i, name in enumerate(regmap.PACKED_FMI_ADDR_WORDS):
+        exp[i * 4] = {name: 0}
+    s_base = len(regmap.PACKED_FMI_ADDR_WORDS)
+    for i, (low, high) in enumerate(regmap.PACKED_FMI_SIZE_WORDS):
+        fields = {low: 0}
+        if high:
+            fields[high] = 16
+        exp[(s_base + i) * 4] = fields
+    m_base = s_base + len(regmap.PACKED_FMI_SIZE_WORDS)
+    for i, packing in enumerate(regmap.PACKED_FMI_MODE_WORDS):
+        exp[(m_base + i) * 4] = {name: lsb for name, lsb, _w in packing}
+    return exp
+
+
+def test_fmi_packed_layout_matches_rtl_decode():
+    decode = _rtl_decode(FMI_RTL)
+    assert len(decode) > 8, f"parsed too few decode lines from {FMI_RTL}"
+    problems = []
+    for off, fields in _expected_fields_fmi().items():
+        for name, lsb in fields.items():
+            got = decode.get(off, {})
+            if name not in got:
+                problems.append(f"{name} not decoded at 0x{off:02X}")
+            elif got[name] != lsb:
+                problems.append(
+                    f"{name}@0x{off:02X}: lsb {got[name]} != regmap {lsb}")
+    assert not problems, f"{FMI_RTL}: packed-layout drift: {problems}"
+
+
+def test_fmi_boot_regs_match_rtl_decode():
+    decode = _rtl_decode(FMI_RTL)
+    missing = [(name, hex(off))
+               for name, off in regmap.BOOT_REG_OFFSETS_FMI.items()
+               if name not in decode.get(off, {})]
+    assert not missing, f"{FMI_RTL}: boot regs not decoded: {missing}"
+
+
+def test_fmi_no_stale_offsets_in_rtl():
+    # fmi fills the whole 16-word window (0x00..0x3C); anything else must be a
+    # known fmi boot reg.
+    decode = _rtl_decode(FMI_RTL)
+    expected_window = set(_expected_fields_fmi())
+    got_window = {off for off in decode if off < 0x40}
+    assert got_window == expected_window, (
+        f"{FMI_RTL}: in-window decode mismatch: "
+        f"unexpected={sorted(hex(o) for o in got_window - expected_window)} "
+        f"missing={sorted(hex(o) for o in expected_window - got_window)}")
+    stray = ({off for off in decode if off >= 0x40}
+             - set(regmap.BOOT_REG_OFFSETS_FMI.values()))
+    assert not stray, (
+        f"{FMI_RTL}: non-boot out-of-window offsets decoded: "
+        f"{sorted(hex(o) for o in stray)}")
+
+
 def test_hadamard_offsets_decoded_by_rtl():
     # HU keeps its scattered per-register decode (hu_config_regs.v).
     pairs = set()
@@ -164,3 +225,11 @@ def test_known_anchor_offsets():
     assert m1["np_out_bin_point"] == (16, 6)
     assert regmap.BOOT_REG_OFFSETS["sp_weight_idx_sz"] == 0x5C
     assert regmap.HU_REG_OFFSETS["src_z_base_addr"] == 0x0C
+    # fmi anchors
+    assert regmap.PACKED_FMI_WORDS_PER_CONFIG == 16
+    assert regmap.PACKED_FMI_ADDR_WORDS[6] == "np_dcy_syn_base_addr"   # 0x18
+    assert regmap.PACKED_FMI_ADDR_WORDS[11] == "np_scl_ada_base_addr"  # 0x2C
+    assert regmap.PACKED_FMI_SIZE_WORDS[0] == ("sp_in_x_len", "sp_out_x_len")
+    fmi_m0 = {name: (lsb, w) for name, lsb, w in regmap.PACKED_FMI_MODE_WORDS[0]}
+    assert fmi_m0["np_has_ada"] == (30, 1)
+    assert regmap.BOOT_REG_OFFSETS_FMI["sp_weight_idx_sz"] == 0x5C

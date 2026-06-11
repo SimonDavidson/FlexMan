@@ -6,18 +6,19 @@
 // Top-level wrapper — same two-stage pipeline as the original (spike_processing
 // followed by neuron_processing) with the following changes:
 //
-//   Removed config registers:
-//     0x68  np_syn_curr_decay_mult_r  (replaced by per-neuron dcy_syn_mem)
-//     0x6C  np_pot_decay_mult_r       (replaced by per-neuron dcy_mem_mem)
+//   Removed config registers (vs the snn variant):
+//     np_syn_curr_decay_mult_r  (replaced by per-neuron dcy_syn_mem)
+//     np_pot_decay_mult_r       (replaced by per-neuron dcy_mem_mem)
 //
-//   New config registers (NP only):
-//     0xA0  np_dcy_syn_base_addr_r    base address of per-neuron syn decay mem
-//     0xA4  np_dcy_mem_base_addr_r    base address of per-neuron mem decay mem
-//     0xA8  np_has_ada_r              [0]=enable adaptive threshold for this layer
-//     0xAC  np_ada_base_addr_r        ada state memory base
-//     0xB0  np_b_eff_base_addr_r      b_eff = scl_mem*adapt_b memory base
-//     0xB4  np_dcy_ada_base_addr_r    ada decay factor memory base
-//     0xB8  np_scl_ada_base_addr_r    ada scale factor (1-dcy_ada) memory base
+//   New config registers (NP only), delivered in the PACKED per-task window
+//   (W6..W11, offsets 0x18-0x2C; has_ada in M0 bit 30 — see the decode below):
+//     np_dcy_syn_base_addr_r    base address of per-neuron syn decay mem
+//     np_dcy_mem_base_addr_r    base address of per-neuron mem decay mem
+//     np_has_ada_r              enable adaptive threshold for this layer
+//     np_ada_base_addr_r        ada state memory base
+//     np_b_eff_base_addr_r      b_eff = scl_mem*adapt_b memory base
+//     np_dcy_ada_base_addr_r    ada decay factor memory base
+//     np_scl_ada_base_addr_r    ada scale factor (1-dcy_ada) memory base
 //
 //   New memory ports exposed for the six new per-neuron memories.
 //   The bias_curr memory is removed (FMI model has no per-neuron membrane bias).
@@ -235,51 +236,29 @@ module acc_fmiSnn_processor # (
     // =========================================================================
     // AXI config register decode
     //
-    // spike_processing registers  (unchanged from original):
-    //   0x00  sp_act_base_addr_r
-    //   0x04  sp_weight_base_addr_r
-    //   0x08  syn_curr_base_addr_r (shared)
-    //   0x0C  sp_weight_sz_r
-    //   0x14  sp_total_timesteps_r
-    //   0x44  sp_in_x_len_r
-    //   0x4C  sp_out_x_len_r
-    //   0x54  sp_weights_per_word_r
-    //   0x58  sp_rows_per_neuron_r
-    //   0x5C  sp_weight_idx_sz_r
-    //   0x70  sp_weight_mode_r
-    //   0x74  sp_x_kernel_len_r
-    //   0x7C  sp_x_kernel_step_r
-    //   0x84  sp_x_kernel_offset_r
-    //   (0x48/0x50/0x78/0x80/0x88 removed — Y hardwired to 1)
-    //   0x8C  sp_index_sz_r
-    //   0x90  sp_tuple_sz_r
-    //   0x94  sp_sparse_count_r
+    // PACKED per-task config layout (cfg_mem word i -> offset i*4; 16 words,
+    // the full config_manager stride — no spare word). Mirrored by the tools
+    // regmap.PACKED_FMI_* tables; cross-checked by test_regmap_vs_rtl.py.
     //
-    // neuron_processing registers:
-    //   0x20  np_last_neuron_idx_r
-    //   0x2C  np_thresh_base_addr_r
-    //   0x30  np_pot_base_addr_r
-    //   0x34  np_syn_curr_sz_r
-    //   0x3C  np_pot_sz_r
-    //   0x40  bin_point_syn_curr_r
-    //   0x64  np_spike_base_addr_r
-    //   0x98  np_mode_r
-    //   0x9C  sp_skip_neuron_r       [0]    1 = skip neuron_processing after spike_processing
+    //   W0..W11 0x00-0x2C : full-width base addresses, one per word:
+    //                       act, weight, syn_curr (shared), thresh, pot, spike,
+    //                       dcy_syn, dcy_mem, ada, b_eff, dcy_ada, scl_ada
+    //                       (the six adaptive-LIF per-neuron memory bases
+    //                       replace the scalar decay multipliers and the
+    //                       bias_curr memory of the snn variant)
+    //   S0..S2  0x30-0x38 : two 16-bit size lanes each (low [15:0], high [31:16]):
+    //                       S0 in_x/out_x (fmi is 1-D — no y lengths),
+    //                       S1 rows_per_neuron/last_neuron_idx,
+    //                       S2 total_timesteps/spare
+    //   M0      0x3C      : bit-packed mode/slice-size fields:
+    //                       [1:0] skip_neuron, [5:2] np_mode, [9:6] weights_per_word,
+    //                       [15:10] bin_point_syn_curr, [19:16] weight_sz,
+    //                       [23:20] syn_curr_sz, [27:24] pot_sz,
+    //                       [29:28] weight_mode, [30] has_ada
     //
-    //   per-task control word (lives inside the cfg_mem push window):
-    //   0x10  task_ctrl              [0]    sp_skip_neuron
-    //                                [3:1]  np_mode
-    //         Writes here drive the same flops as 0x98/0x9C — last write
-    //         wins. config_manager pushes cfg_mem word 4 here on every
-    //         TASK dispatch, so per-cfg_id rotation works automatically.
-    //
-    //   0xA0  np_dcy_syn_base_addr_r   (new)
-    //   0xA4  np_dcy_mem_base_addr_r   (new)
-    //   0xA8  np_has_ada_r             (new)
-    //   0xAC  np_ada_base_addr_r       (new)
-    //   0xB0  np_b_eff_base_addr_r     (new)
-    //   0xB4  np_dcy_ada_base_addr_r   (new)
-    //   0xB8  np_scl_ada_base_addr_r   (new)
+    // Boot-only conv/sparse registers stay out of the packed window (>=0x5C),
+    // written once via direct AXI: 0x5C weight_idx_sz, 0x74/0x7C/0x84 x-kernel
+    // len/step/offset, 0x8C index_sz, 0x90 tuple_sz, 0x94 sparse_count.
     // =========================================================================
     wire addr_match = (sys_addr_i[31:16] == TGT_CONFIG_BASE_ADDR[31:16]);
     assign sys_ack_o = sys_req_i & addr_match;
@@ -321,43 +300,52 @@ module acc_fmiSnn_processor # (
             np_scl_ada_base_addr_r   <= {MEM_ADDR_BITS{1'b0}};
         end else if (sys_req_i & addr_match) begin
             case (sys_addr_i[7:0])
+                // ---- PACKED per-task config (cfg_mem word i -> offset i*4) ----
+                // Layout mirrored by tools regmap.PACKED_FMI_*: 12 address words,
+                // 3 size words, 1 mode word = the full 16-word cfg_mem stride.
+                // W0..W11: full-width base addresses (one per word)
                 8'h00: sp_act_base_addr_r      <= sys_data_i[MEM_ADDR_BITS-1:0];
                 8'h04: sp_weight_base_addr_r   <= sys_data_i[MEM_ADDR_BITS-1:0];
                 8'h08: syn_curr_base_addr_r    <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'h0C: sp_weight_sz_r          <= sys_data_i[SP_WEIGHT_SLICE_SZ-1:0];
-                8'h14: sp_total_timesteps_r    <= sys_data_i[SP_TIMESTEP_SZ-1:0];
-                8'h44: sp_in_x_len_r           <= sys_data_i[SP_X_INPUT_SZ-1:0];
-                8'h4C: sp_out_x_len_r          <= sys_data_i[SP_X_OUTPUT_SZ-1:0];
-                8'h54: sp_weights_per_word_r   <= sys_data_i[SP_ELEMS_PER_ROW-1:0];
-                8'h58: sp_rows_per_neuron_r    <= sys_data_i[SP_ROWS_PER_NEURON-1:0];
+                8'h0C: np_thresh_base_addr_r   <= sys_data_i[MEM_ADDR_BITS-1:0];
+                8'h10: np_pot_base_addr_r      <= sys_data_i[MEM_ADDR_BITS-1:0];
+                8'h14: np_spike_base_addr_r    <= sys_data_i[MEM_ADDR_BITS-1:0];
+                8'h18: np_dcy_syn_base_addr_r  <= sys_data_i[MEM_ADDR_BITS-1:0];
+                8'h1C: np_dcy_mem_base_addr_r  <= sys_data_i[MEM_ADDR_BITS-1:0];
+                8'h20: np_ada_base_addr_r      <= sys_data_i[MEM_ADDR_BITS-1:0];
+                8'h24: np_b_eff_base_addr_r    <= sys_data_i[MEM_ADDR_BITS-1:0];
+                8'h28: np_dcy_ada_base_addr_r  <= sys_data_i[MEM_ADDR_BITS-1:0];
+                8'h2C: np_scl_ada_base_addr_r  <= sys_data_i[MEM_ADDR_BITS-1:0];
+                // S0..S2: two 16-bit size lanes each (low [15:0], high [31:16])
+                8'h30: begin                                       // S0
+                    sp_in_x_len_r  <= sys_data_i[SP_X_INPUT_SZ-1:0];
+                    sp_out_x_len_r <= sys_data_i[16 +: SP_X_OUTPUT_SZ];
+                end
+                8'h34: begin                                       // S1
+                    sp_rows_per_neuron_r <= sys_data_i[SP_ROWS_PER_NEURON-1:0];
+                    np_last_neuron_idx_r <= sys_data_i[16 +: NP_NEURON_IDX_SZ];
+                end
+                8'h38: sp_total_timesteps_r <= sys_data_i[SP_TIMESTEP_SZ-1:0]; // S2
+                // M0: bit-packed mode / slice-size fields
+                8'h3C: begin                                       // M0
+                    sp_skip_neuron_r      <= sys_data_i[0];
+                    np_mode_r             <= sys_data_i[4:2];
+                    sp_weights_per_word_r <= sys_data_i[9:6];
+                    bin_point_syn_curr_r  <= sys_data_i[14:10];
+                    sp_weight_sz_r        <= sys_data_i[19:16];
+                    np_syn_curr_sz_r      <= sys_data_i[23:20];
+                    np_pot_sz_r           <= sys_data_i[27:24];
+                    sp_weight_mode_r      <= sys_data_i[29:28];
+                    np_has_ada_r          <= sys_data_i[30];
+                end
+                // ---- boot-only conv/sparse params (out-of-packed-window, >=0x5C) ----
                 8'h5C: sp_weight_idx_sz_r      <= sys_data_i[SP_WEIGHT_IDX_SZ-1:0];
-                8'h70: sp_weight_mode_r        <= sys_data_i[1:0];
                 8'h74: sp_x_kernel_len_r       <= sys_data_i[SP_X_KERNEL_SZ-1:0];
                 8'h7C: sp_x_kernel_step_r      <= sys_data_i[SP_X_STEP_SZ-1:0];
                 8'h84: sp_x_kernel_offset_r    <= sys_data_i[SP_X_KERNEL_OFF_SZ-1:0];
                 8'h8C: sp_index_sz_r           <= sys_data_i[SP_WEIGHT_SLICE_SZ-1:0];
                 8'h90: sp_tuple_sz_r           <= sys_data_i[SP_WEIGHT_SLICE_SZ-1:0];
                 8'h94: sp_sparse_count_r       <= sys_data_i[`PIN_BITS-1:0];
-                8'h20: np_last_neuron_idx_r    <= sys_data_i[NP_NEURON_IDX_SZ-1:0];
-                8'h2C: np_thresh_base_addr_r   <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'h30: np_pot_base_addr_r      <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'h64: np_spike_base_addr_r    <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'h34: np_syn_curr_sz_r        <= sys_data_i[NP_SYN_CURR_SLICE_SZ-1:0];
-                8'h3C: np_pot_sz_r             <= sys_data_i[NP_POT_SLICE_SZ-1:0];
-                8'h40: bin_point_syn_curr_r    <= sys_data_i[4:0];
-                8'h98: np_mode_r               <= sys_data_i[2:0];
-                8'h9C: sp_skip_neuron_r        <= sys_data_i[0];
-                8'h10: begin
-                    sp_skip_neuron_r           <= sys_data_i[0];
-                    np_mode_r                  <= sys_data_i[3:1];
-                end
-                8'hA0: np_dcy_syn_base_addr_r  <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'hA4: np_dcy_mem_base_addr_r  <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'hA8: np_has_ada_r            <= sys_data_i[0];
-                8'hAC: np_ada_base_addr_r      <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'hB0: np_b_eff_base_addr_r    <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'hB4: np_dcy_ada_base_addr_r  <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'hB8: np_scl_ada_base_addr_r  <= sys_data_i[MEM_ADDR_BITS-1:0];
                 default: ;
             endcase
         end

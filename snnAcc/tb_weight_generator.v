@@ -136,6 +136,7 @@ module tb_weight_generator;
         .act_data_x_i(act_data_x), .act_data_y_i(act_data_y),
         .act_data_idx_i(act_data_idx), .act_data_i(act_data),
         .act_data_last_i(act_data_last),
+        .act_last_dumped_i(1'b0),   // sub-module TB: no gated act stream
         .weight_mem_rd_o(weight_mem_rd), .weight_mem_wait_i(weight_mem_wait),
         .weight_mem_addr_o(weight_mem_addr), .weight_mem_data_i(weight_mem_data),
         .weight_index_valid_o(weight_index_valid),

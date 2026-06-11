@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-10
+# Last modified: 2026-06-11
 # Unit tests for flexman_backend.cfgmem packed per-task layout (no torch/pytest).
 from flexman_backend import cfgmem
 
@@ -74,6 +74,48 @@ def test_field_overflow_masked():
 def test_out_of_layout_ignored():
     w = cfgmem.pack_cfg_words(dict(sp_x_kernel_len=0xDEAD), "snn")  # conv boot reg
     assert 0xDEAD not in w
+
+
+def test_fmi_packed_length():
+    from flexman_backend import regmap
+    assert regmap.PACKED_FMI_WORDS_PER_CONFIG == 16    # fills the whole stride
+    w = cfgmem.pack_cfg_words({}, "fmisnn")
+    assert len(w) == 16
+
+
+def test_fmi_address_words():
+    cfg = dict(sp_act_base_addr=1, sp_weight_base_addr=2, syn_curr_base_addr=3,
+               np_thresh_base_addr=4, np_pot_base_addr=5, np_spike_base_addr=6,
+               np_dcy_syn_base_addr=7, np_dcy_mem_base_addr=8, np_ada_base_addr=9,
+               np_b_eff_base_addr=10, np_dcy_ada_base_addr=11,
+               np_scl_ada_base_addr=12)
+    w = cfgmem.pack_cfg_words(cfg, "fmisnn")
+    assert w[0:12] == list(range(1, 13))
+
+
+def test_fmi_size_lanes():
+    cfg = dict(sp_in_x_len=257, sp_out_x_len=128, sp_rows_per_neuron=32,
+               np_last_neuron_idx=127, sp_total_timesteps=8)
+    w = cfgmem.pack_cfg_words(cfg, "fmisnn")
+    assert w[12] == (257 | (128 << 16))   # S0: in_x | out_x (fmi is 1-D)
+    assert w[13] == (32  | (127 << 16))   # S1: rows_per_neuron | last_neuron_idx
+    assert w[14] == 8                     # S2: total_timesteps (high lane spare)
+
+
+def test_fmi_mode_word():
+    cfg = dict(sp_skip_neuron=1, np_mode=0b101, sp_weights_per_word=4,
+               bin_point_syn_curr=16, sp_weight_sz=3, np_syn_curr_sz=5,
+               np_pot_sz=5, sp_weight_mode=1, np_has_ada=1)
+    m0 = cfgmem.pack_cfg_words(cfg, "fmisnn")[15]
+    assert (m0 >> 0)  & 0x3  == 1        # skip_neuron
+    assert (m0 >> 2)  & 0xF  == 0b101    # np_mode
+    assert (m0 >> 6)  & 0xF  == 4        # weights_per_word
+    assert (m0 >> 10) & 0x3F == 16       # bin_point_syn_curr
+    assert (m0 >> 16) & 0xF  == 3        # weight_sz
+    assert (m0 >> 20) & 0xF  == 5        # syn_curr_sz
+    assert (m0 >> 24) & 0xF  == 5        # pot_sz
+    assert (m0 >> 28) & 0x3  == 1        # weight_mode
+    assert (m0 >> 30) & 0x1  == 1        # has_ada
 
 
 def test_unknown_acc_type():
