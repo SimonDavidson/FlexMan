@@ -178,6 +178,7 @@ syn_curr_cache (
     .clk               (clk),
     .reset             (reset),
     .colour_select_o   (),
+    .invalidate_i(start_new_block_i), // task dispatch — cache quiescent
     .slice_sz_i        (syn_curr_sz_i),
     .base_addr_i       (syn_curr_base_addr_i),
     .sys_addr_i        (syn_curr_index),
@@ -219,6 +220,7 @@ lut_cache (
     .clk               (clk),
     .reset             (reset),
     .colour_select_o   (),
+    .invalidate_i(start_new_block_i), // task dispatch — cache quiescent
     .slice_sz_i        (lut_out_sz_i),
     .base_addr_i       (thresh_base_addr_i),
     .sys_addr_i        (lut_index),

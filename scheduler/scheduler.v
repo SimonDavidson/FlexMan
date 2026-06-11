@@ -132,6 +132,8 @@ wire                            start_new_task;
 reg  [ENTRY_DATA_SZ-1:0]        d;
 wire [ENTRY_DATA_SZ-1:0]        new_entry_data;
 wire [ENTRY_DATA_SZ-1:0]        entry_data_to_be_launched;
+wire [TGT_ACC_SZ-1:0]           to_launch_acc_hw_id;   // declared here for
+                                                       // dispatch_in_flight_r below
 
 wire [COL_BUFF_ID_SZ-1:0]       buff_full;
 wire [COL_BUFF_ID_SZ-1:0]       buff_free;
@@ -149,7 +151,30 @@ wire table_empty;
 // LOOPEND and NXT completion barriers must also wait for in-flight tasks to
 // finish — NXT must not advance the input/output window pointer until the tasks
 // using the current window have completed.
-wire all_tasks_drained = table_empty & ~|acc_busy_i;
+//
+// A freshly dispatched task is INVISIBLE to both terms while the
+// config_manager streams its per-task config (~WORDS_PER_CONFIG cycles): the
+// table entry is deleted at dispatch and the target accelerator only raises
+// busy after the push + start pulse. Bridge that window — track from the
+// dispatch pulse until the dispatched accelerator's busy is observed (covers
+// the one-cycle cm_config_finished -> acc-busy gap too), and also hold while
+// the config_manager itself is busy.
+reg                  dispatch_in_flight_r;
+reg [TGT_ACC_SZ-1:0] dispatch_tgt_r;
+always @ (posedge clk)
+   if (reset) begin
+      dispatch_in_flight_r <= 1'b0;
+      dispatch_tgt_r       <= {TGT_ACC_SZ{1'b0}};
+   end
+   else if (start_new_task) begin
+      dispatch_in_flight_r <= 1'b1;
+      dispatch_tgt_r       <= to_launch_acc_hw_id;
+   end
+   else if (acc_busy_i[dispatch_tgt_r])
+      dispatch_in_flight_r <= 1'b0;
+
+wire all_tasks_drained = table_empty & ~|acc_busy_i
+                       & ~cm_busy_i & ~dispatch_in_flight_r;
 
 reg  prog_running_r;
 wire prog_running_nxt;
@@ -214,7 +239,6 @@ wire                      goto_nxt;
 wire [NUM_SLOTS*BUFF_INDX_SZ-1:0] to_launch_slot_buff;
 wire [NUM_SLOTS*MODE_SZ-1:0]       to_launch_slot_mode;
 wire [NUM_SLOTS*TGT_COUNT_SZ-1:0]  to_launch_slot_ntgt;
-wire [TGT_ACC_SZ-1:0]              to_launch_acc_hw_id;
 wire                               to_launch_colour;
 
 // ------------------------------------------------------------

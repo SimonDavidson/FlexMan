@@ -256,6 +256,7 @@ dataline_cache_with_xy #(
     .reset(reset),
 
     .colour_select_o(),
+    .invalidate_i(start_new_block_i), // task dispatch — cache quiescent
     .slice_sz_i(syn_curr_sz_i),
     .base_addr_i(syn_curr_base_addr_i),
 
@@ -303,6 +304,7 @@ dataline_cache_with_xy #(
     .reset(reset),
 
     .colour_select_o(),
+    .invalidate_i(start_new_block_i), // task dispatch — cache quiescent
     .slice_sz_i(bias_curr_sz_i),
     .base_addr_i(bias_curr_base_addr_i),
 
@@ -343,6 +345,7 @@ dataline_cache_with_xy #(
     .reset(reset),
 
     .colour_select_o(),
+    .invalidate_i(start_new_block_i), // task dispatch — cache quiescent
     .slice_sz_i(bias_curr_sz_i),
     .base_addr_i(thresh_base_addr_i),
 
@@ -390,6 +393,7 @@ dataline_cache_with_xy #(
     .reset(reset),
 
     .colour_select_o(),
+    .invalidate_i(start_new_block_i), // task dispatch — cache quiescent
     .slice_sz_i(pot_sz_i),
     .base_addr_i(pot_base_addr_i),
 

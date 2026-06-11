@@ -71,13 +71,19 @@ if (reset)
 else 
     syn_curr_update_running_r <= syn_curr_update_running_nxt;
 
-assign syn_curr_update_running_nxt = (running_i &
-	                             ~syn_curr_update_running_r) ? 1'b1 :
-	                             ((weight_index_valid_i &
-				       weight_index_last_i  &
-				       weight_index_taken_o) |
-				      finished_pass_weight_i)    ? 1'b0 :
-	                              syn_curr_update_running_r;
+// Stop conditions take PRIORITY over the restart term: a finished_pass_weight_i
+// pulse can arrive while running_r is low (the weight pass was terminated by a
+// gated-out last activation — act_last_dumped_i — one cycle after this block
+// stopped on the previous input's last weight index). With the restart term
+// first, that pulse was swallowed, this block restarted, and no stop condition
+// ever fired again (snn0 e2e hang, 2026-06-10).
+assign syn_curr_update_running_nxt = (((weight_index_valid_i &
+				        weight_index_last_i  &
+				        weight_index_taken_o) |
+				       finished_pass_weight_i)    ? 1'b0 :
+	                             (running_i &
+	                              ~syn_curr_update_running_r) ? 1'b1 :
+	                              syn_curr_update_running_r);
                   
 assign syn_curr_update_running_o = syn_curr_update_running_r;
 

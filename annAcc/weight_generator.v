@@ -65,6 +65,8 @@ module weight_generator
     input wire          [Y_INPUT_SZ-1:0] act_data_y_i,
     input wire         [ACT_DATA_SZ-1:0] act_data_i,
     input wire                           act_data_last_i,
+    input wire                           act_last_dumped_i, // Pulse: LAST act was
+                                                            // a gated-out non-spike
 
     // Addressing for synaptic row memory:
     output wire                          weight_mem_rd_o,
@@ -305,7 +307,13 @@ assign finished_for_this_ip_neuron        = finished_for_this_ip_neuron_full
                                           | finished_for_this_ip_neuron_conv
                                           | finished_for_this_ip_neuron_sparse;
 
-assign finished_weight_pass = finished_for_this_ip_neuron & act_data_last_i;
+// The pass also finishes when the LAST activation was a non-spike: act gating
+// drops it before this module ever sees act_data_last_i on a valid token, so
+// the parent pulses act_last_dumped_i instead. (annAcc passes all multi-bit
+// activations ungated and ties this to 1'b0; the term exists to keep the two
+// weight_generator copies identical.)
+assign finished_weight_pass = (finished_for_this_ip_neuron & act_data_last_i)
+                            | act_last_dumped_i;
 
 always @ (posedge clk)
    if (reset | ~running_i)
@@ -380,7 +388,12 @@ always @ (posedge clk)
 // Suppress weight_value_valid_o externally for OOB conv kernel positions.
 // (The cache won't be requested in OOB cycles; this guards against any
 // residual valid from a held-but-not-yet-taken previous fetch.)
-assign weight_value_valid_o = weight_value_valid_int & ~oob_skip;
+// Also gate on act_data_valid_i: the weight value must not be consumed while
+// the activation operand is invalid. When the activation fetch is stalled by
+// the memory arbiter, the act cache transiently presents stale data
+// (old_word[new_lane]); without this gate the MAC accumulated that stale
+// activation for the first output(s) of an input neuron.
+assign weight_value_valid_o = weight_value_valid_int & ~oob_skip & act_data_valid_i;
 
 ///////////////////////////////////////////////////////////////
 // Fetch weight, either from local cache or from external memory
@@ -400,6 +413,7 @@ dataline_cache_with_xy #(
     .reset(reset),
 
     .colour_select_o(),
+    .invalidate_i(start_new_block_i), // task dispatch — cache quiescent
     .slice_sz_i(cache_slice_sz),
     .base_addr_i(weight_row_base_addr),
 

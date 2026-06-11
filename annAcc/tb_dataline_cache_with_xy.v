@@ -84,6 +84,7 @@ dataline_cache_with_xy #(
 dut (
     .clk(clk),              .reset(reset),
     .colour_select_o(colour_select),
+    .invalidate_i(1'b0),   // sub-module TB: no task boundaries
     .slice_sz_i(slice_sz),
     .base_addr_i(base_addr),
     .sys_addr_i(sys_addr),
