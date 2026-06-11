@@ -234,7 +234,7 @@ module neuron_processing # (
         .OUT_DATA_BITS      (SYN_CURR_SLICE_BITS))
     syn_curr_cache (
         .clk(clk), .reset(reset),
-        .colour_select_o(), .slice_sz_i(syn_curr_sz_i),
+        .colour_select_o(), .invalidate_i(start_new_block_i), .slice_sz_i(syn_curr_sz_i),
         .base_addr_i(syn_curr_base_addr_i),
         .sys_addr_i(neuron_counter_r), .sys_req_i(neuron_update_running_r),
         .sys_index_x_i(1'b0), .sys_index_y_i(1'b0), .sys_colour_i(1'b0),
@@ -265,7 +265,7 @@ module neuron_processing # (
         .OUT_DATA_BITS      (PARAM_SLICE_BITS))
     threshold_cache (
         .clk(clk), .reset(reset),
-        .colour_select_o(), .slice_sz_i(3'b101),          // always 32-bit
+        .colour_select_o(), .invalidate_i(start_new_block_i), .slice_sz_i(3'b101),          // always 32-bit
         .base_addr_i(thresh_base_addr_i),
         .sys_addr_i(neuron_counter_r), .sys_req_i(neuron_update_running_r),
         .sys_index_x_i(1'b0), .sys_index_y_i(1'b0), .sys_colour_i(1'b0),
@@ -302,7 +302,7 @@ module neuron_processing # (
         .OUT_DATA_BITS      (POT_SLICE_BITS))
     pot_cache (
         .clk(clk), .reset(reset),
-        .colour_select_o(), .slice_sz_i(pot_sz_i),
+        .colour_select_o(), .invalidate_i(start_new_block_i), .slice_sz_i(pot_sz_i),
         .base_addr_i(pot_base_addr_i),
         .sys_addr_i(neuron_counter_r), .sys_req_i(neuron_update_running_r),
         .sys_index_x_i(1'b0), .sys_index_y_i(1'b0), .sys_colour_i(1'b0),
@@ -333,7 +333,7 @@ module neuron_processing # (
         .OUT_DATA_BITS      (PARAM_SLICE_BITS))
     dcy_syn_cache (
         .clk(clk), .reset(reset),
-        .colour_select_o(), .slice_sz_i(3'b101),
+        .colour_select_o(), .invalidate_i(start_new_block_i), .slice_sz_i(3'b101),
         .base_addr_i(dcy_syn_base_addr_i),
         .sys_addr_i(neuron_counter_r), .sys_req_i(neuron_update_running_r),
         .sys_index_x_i(1'b0), .sys_index_y_i(1'b0), .sys_colour_i(1'b0),
@@ -364,7 +364,7 @@ module neuron_processing # (
         .OUT_DATA_BITS      (PARAM_SLICE_BITS))
     dcy_mem_cache (
         .clk(clk), .reset(reset),
-        .colour_select_o(), .slice_sz_i(3'b101),
+        .colour_select_o(), .invalidate_i(start_new_block_i), .slice_sz_i(3'b101),
         .base_addr_i(dcy_mem_base_addr_i),
         .sys_addr_i(neuron_counter_r), .sys_req_i(neuron_update_running_r),
         .sys_index_x_i(1'b0), .sys_index_y_i(1'b0), .sys_colour_i(1'b0),
@@ -403,7 +403,7 @@ module neuron_processing # (
         .OUT_DATA_BITS      (PARAM_SLICE_BITS))
     ada_cache (
         .clk(clk), .reset(reset),
-        .colour_select_o(), .slice_sz_i(3'b101),
+        .colour_select_o(), .invalidate_i(start_new_block_i), .slice_sz_i(3'b101),
         .base_addr_i(ada_base_addr_i),
         .sys_addr_i(neuron_counter_r), .sys_req_i(neuron_update_running_r & has_ada_i),
         .sys_index_x_i(1'b0), .sys_index_y_i(1'b0), .sys_colour_i(1'b0),
@@ -432,7 +432,7 @@ module neuron_processing # (
         .OUT_DATA_BITS      (PARAM_SLICE_BITS))
     b_eff_cache (
         .clk(clk), .reset(reset),
-        .colour_select_o(), .slice_sz_i(3'b101),
+        .colour_select_o(), .invalidate_i(start_new_block_i), .slice_sz_i(3'b101),
         .base_addr_i(b_eff_base_addr_i),
         .sys_addr_i(neuron_counter_r), .sys_req_i(neuron_update_running_r & has_ada_i),
         .sys_index_x_i(1'b0), .sys_index_y_i(1'b0), .sys_colour_i(1'b0),
@@ -461,7 +461,7 @@ module neuron_processing # (
         .OUT_DATA_BITS      (PARAM_SLICE_BITS))
     dcy_ada_cache (
         .clk(clk), .reset(reset),
-        .colour_select_o(), .slice_sz_i(3'b101),
+        .colour_select_o(), .invalidate_i(start_new_block_i), .slice_sz_i(3'b101),
         .base_addr_i(dcy_ada_base_addr_i),
         .sys_addr_i(neuron_counter_r), .sys_req_i(neuron_update_running_r & has_ada_i),
         .sys_index_x_i(1'b0), .sys_index_y_i(1'b0), .sys_colour_i(1'b0),
@@ -490,7 +490,7 @@ module neuron_processing # (
         .OUT_DATA_BITS      (PARAM_SLICE_BITS))
     scl_ada_cache (
         .clk(clk), .reset(reset),
-        .colour_select_o(), .slice_sz_i(3'b101),
+        .colour_select_o(), .invalidate_i(start_new_block_i), .slice_sz_i(3'b101),
         .base_addr_i(scl_ada_base_addr_i),
         .sys_addr_i(neuron_counter_r), .sys_req_i(neuron_update_running_r & has_ada_i),
         .sys_index_x_i(1'b0), .sys_index_y_i(1'b0), .sys_colour_i(1'b0),
