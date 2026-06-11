@@ -1,5 +1,13 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
+//
+// Author      : Simon Davidson & Claude
+// Created     : 2026-06-09
+// Last modified: 2026-06-09
+//
+// DIAGNOSTIC (throwaway): asymmetric dense layer in_x=8 -> out=4 to determine which
+// bits of the activation element index drive weight_row_base. Result: the within-word
+// (low) bits, which aliases the weight column every elems-per-dataword inputs.
 `timescale 1ns/1ps
 
 `include "../shared/constants.v"
@@ -81,7 +89,7 @@
 `define POT_SLICE_BITS 32
 // CONFIG PARAMS END
 
-module tb_acc_snn_processor;
+module tb_fe_addr_probe;
 
     localparam CLK_PERIOD = 10;
     localparam MEM_DEPTH  = 256;
@@ -153,7 +161,11 @@ module tb_acc_snn_processor;
     wire  [`WTD_BITS-1:0]   thresh_mem_data_i;
     wire  [`POT_BITS-1:0]   pot_mem_data_i;
 
-    wire weight_mem_wait_i    = 1'b0;
+    // DIAGNOSTIC: inject weight-memory wait states (like the closed-loop pool
+    // arbiter) — grant only 1 in 4 cycles, so each fetch stalls up to 3 cycles.
+    reg [2:0] dbg_wctr = 3'd0;
+    always @(posedge clk) dbg_wctr <= reset ? 3'd0 : dbg_wctr + 3'd1;
+    wire weight_mem_wait_i    = weight_mem_rd_o & (dbg_wctr[1:0] != 2'b00);
     wire act_mem_wait_i       = 1'b0;
     wire syn_curr_mem_wait_i  = 1'b0;
     wire bias_curr_mem_wait_i = 1'b0;
@@ -336,14 +348,35 @@ module tb_acc_snn_processor;
     initial begin
         #1;
         for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
-            u_act_mem.mem[i_init]      = 32'h0101_0101;  // 8-bit acts = 1
-            u_weight_mem.mem[i_init]   = 32'h0A0A_0A0A;
+            u_act_mem.mem[i_init]      = 32'h0101_0101;  // 8-bit acts = 1 (every input spikes)
+            // DIAGNOSTIC: out=8 (2 weight words/input). word0 (even addr)=out0..3=1..4,
+            // word1 (odd addr)=out4..7=5..8. 8 inputs (act=1): expected syn_curr =
+            // [8,16,24,32,40,48,56,64]. Tests the multi-word-per-input prefetch path.
+            u_weight_mem.mem[i_init]   = (i_init % 2) ? 32'h08070605 : 32'h04030201;
             u_syn_curr_mem.mem[i_init] = 32'd0;
             u_bias_curr_mem.mem[i_init]= 32'd0;
             u_thresh_mem.mem[i_init]   = 32'd0;
             u_pot_mem.mem[i_init]      = 32'd0;
             u_spike_mem.mem[i_init]    = 32'd0;
         end
+    end
+
+    // ----------------------------------------------------------------
+    // DIAGNOSTIC PROBES — what index drives weight_row_base?
+    // ----------------------------------------------------------------
+    always @(posedge clk) begin
+        if (act_mem_req_o)
+            $display("[%0t] ACT_RD  mem_addr=%0d  act_index=%0d",
+                     $time, act_mem_addr_o,
+                     u_dut.u_spike_processing.act_index);
+        if (weight_mem_rd_o)
+            $display("[%0t] WGT_RD  mem_addr=%0d wrow_base=%0d | act_index=%0d act_data_idx=%0d in_elem=%0d  wdata_prev=%0d",
+                     $time, weight_mem_addr_o,
+                     u_dut.u_spike_processing.weight_gen0.weight_row_base_addr,
+                     u_dut.u_spike_processing.act_index,
+                     u_dut.u_spike_processing.act_data_idx,
+                     u_dut.u_spike_processing.act_index_gen0.in_elem_count_r,
+                     weight_mem_data_i);
     end
 
     // ----------------------------------------------------------------
@@ -456,15 +489,15 @@ module tb_acc_snn_processor;
         cfg_write(32'hFFFF_0018, 32'd60);           // spike_base         = 60
         cfg_write(32'hFFFF_0020, 32'h8000_0000);    // pot_decay_mult     = 0.5 (Q0.32)
         // S0..S3: two 16-bit size lanes each
-        cfg_write(32'hFFFF_0024, 32'h0001_0002);    // S0 in_y=1  | in_x=2
-        cfg_write(32'hFFFF_0028, 32'h0001_0002);    // S1 out_y=1 | out_x=2
-        cfg_write(32'hFFFF_002C, 32'h0001_0001);    // S2 last_neuron_idx=1 | rows_per_neuron=1
+        cfg_write(32'hFFFF_0024, 32'h0001_0008);    // S0 in_y=1  | in_x=8  (asymmetric diag)
+        cfg_write(32'hFFFF_0028, 32'h0001_0008);    // S1 out_y=1 | out_x=8 (2 weight words/input)
+        cfg_write(32'hFFFF_002C, 32'h0003_0002);    // S2 last_neuron_idx=3 | rows_per_neuron=2
         cfg_write(32'hFFFF_0030, 32'h0000_0001);    // S3 total_timesteps=1
         // M0: weight_sz=3(8b) syn_curr_sz=5(32b) lut_out_sz=3(8b)
         //     act_out_sz=5(32b) sp_act_sz=3(8b) thresh_op=0(RELU) weight_mode=0
         cfg_write(32'hFFFF_0034, 32'h0003_5353);
-        // M1: skip=0 weights_per_word=4 bin_point_syn_curr=0 np_out_bin_point=0
-        cfg_write(32'hFFFF_0038, 32'h0000_0100);
+        // M1: skip=1 (SP only, skip NP) weights_per_word=4 bin_point_syn_curr=0
+        cfg_write(32'hFFFF_0038, 32'h0000_0101);
         // boot-only conv/sparse params (out-of-window offsets unchanged)
         cfg_write(32'hFFFF_005C, 32'd5);    // weight_idx_sz      = 5
         cfg_write(32'hFFFF_0074, 32'd1);    // x_kernel_len       = 1
@@ -474,27 +507,26 @@ module tb_acc_snn_processor;
         cfg_write(32'hFFFF_0084, 32'd0);    // x_kernel_offset    = 0
         cfg_write(32'hFFFF_0088, 32'd0);    // y_kernel_offset    = 0
 
-        $display("=== tb_acc_snn_processor (annAcc) ===");
-
-        // ============================================================
-        // Test 1: RELU mode
-        // SP: syn_curr = 2 × (1 × 10) = 20 per output neuron
-        // NP: RELU(20) = 20, decayed = floor(20 × 0.5) = 10
-        //   spike_sram[60/61] = 32'd20
-        //   pot_sram[50/51]   = 32'd10
-        // ============================================================
-        $display("Test 1: RELU mode, syn_curr=20 -> act_out=20, decayed=10");
+        $display("=== tb_fe_addr_probe: asymmetric dense in_x=8 -> out=4 ===");
+        $display("    weight value == word address; rows_per_neuron=4; weight_base=10");
+        $display("    EXPECT weight_row_base per input k=0..7:");
+        $display("      word-index model (k>>2): 10,10,10,10,14,14,14,14");
+        $display("      full-index model (k):    10,14,18,22,26,30,34,38");
 
         @(negedge clk); start_new_block_i = 1'b1;
         @(negedge clk); start_new_block_i = 1'b0;
 
         wait_pipeline(timed_out);
-        if (!timed_out) begin
-            check_eq(u_spike_mem.mem[60], 32'd20, "T1 act_out[0] RELU(20)=20");
-            check_eq(u_spike_mem.mem[61], 32'd20, "T1 act_out[1] RELU(20)=20");
-            check_eq(u_pot_mem.mem[50],   32'd10, "T1 pot[0] decayed=10");
-            check_eq(u_pot_mem.mem[51],   32'd10, "T1 pot[1] decayed=10");
-        end
+
+        $display("--- syn_curr results (base=20, 8 output neurons, 32-bit) ---");
+        $display("  syn_curr[0..7] = %0d %0d %0d %0d %0d %0d %0d %0d",
+                 u_syn_curr_mem.mem[20], u_syn_curr_mem.mem[21],
+                 u_syn_curr_mem.mem[22], u_syn_curr_mem.mem[23],
+                 u_syn_curr_mem.mem[24], u_syn_curr_mem.mem[25],
+                 u_syn_curr_mem.mem[26], u_syn_curr_mem.mem[27]);
+        $display("  expected       = 8 16 24 32 40 48 56 64");
+        $display("=== tb_fe_addr_probe done ===");
+        $finish;
 
         // ============================================================
         // Test 2: LUT mode
