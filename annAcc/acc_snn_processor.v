@@ -30,7 +30,10 @@ module ann_processor # (
     parameter SP_IN_DATA_BITS         = 32,
     parameter SP_ELEM_SZ              = 8,
     parameter SP_ACT_SLICE_SZ         = 5,   // max 32-bit acts in annAcc
-    parameter SP_ACT_DATA_IDX_SZ      = 5,
+    // Width of the activation element index that selects the weight row.
+    // Must be >= COL_BITS (the act_index width) so the WHOLE index survives to
+    // weight_row_base; at 5 it truncated to the within-word bits (alias bug).
+    parameter SP_ACT_DATA_IDX_SZ      = `COL_BITS,
     parameter SP_WEIGHT_ENTRY_BITS    = 8,
     parameter SP_WEIGHT_IDX_SZ        = 5,
     parameter SP_WEIGHT_SLICE_SZ      = 5,
@@ -305,19 +308,50 @@ module ann_processor # (
             np_pot_decay_mult_r     <= 32'b0;
         end else if (sys_req_i & addr_match) begin
             case (sys_addr_i[7:0])
-                8'h00: sp_act_base_addr_r      <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'h04: sp_weight_base_addr_r   <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'h08: syn_curr_base_addr_r    <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'h0C: sp_weight_sz_r          <= sys_data_i[SP_WEIGHT_SLICE_SZ-1:0];
-                8'h14: sp_total_timesteps_r    <= sys_data_i[SP_TIMESTEP_SZ-1:0];
-                8'h44: sp_in_x_len_r           <= sys_data_i[SP_X_INPUT_SZ-1:0];
-                8'h48: sp_in_y_len_r           <= sys_data_i[SP_Y_INPUT_SZ-1:0];
-                8'h4C: sp_out_x_len_r          <= sys_data_i[SP_X_OUTPUT_SZ-1:0];
-                8'h50: sp_out_y_len_r          <= sys_data_i[SP_Y_OUTPUT_SZ-1:0];
-                8'h54: sp_weights_per_word_r   <= sys_data_i[SP_ELEMS_PER_ROW-1:0];
-                8'h58: sp_rows_per_neuron_r    <= sys_data_i[SP_ROWS_PER_NEURON-1:0];
+                // ---- packed per-task config (cfg_mem word i -> offset i*4) ----
+                // W0..W8: full-width base addresses + decay multipliers
+                // (annAcc has no syn-curr decay, so W7/0x1C is unused.)
+                8'h00: sp_act_base_addr_r       <= sys_data_i[MEM_ADDR_BITS-1:0];
+                8'h04: sp_weight_base_addr_r    <= sys_data_i[MEM_ADDR_BITS-1:0];
+                8'h08: syn_curr_base_addr_r     <= sys_data_i[MEM_ADDR_BITS-1:0];
+                8'h0C: np_bias_curr_base_addr_r <= sys_data_i[MEM_ADDR_BITS-1:0];
+                8'h10: np_thresh_base_addr_r    <= sys_data_i[MEM_ADDR_BITS-1:0]; // lut base
+                8'h14: np_pot_base_addr_r       <= sys_data_i[MEM_ADDR_BITS-1:0];
+                8'h18: np_spike_base_addr_r     <= sys_data_i[MEM_ADDR_BITS-1:0];
+                8'h20: np_pot_decay_mult_r      <= sys_data_i[31:0];
+                // S0..S3: two 16-bit size lanes each (low [15:0], high [31:16])
+                8'h24: begin                                       // S0
+                    sp_in_x_len_r  <= sys_data_i[SP_X_INPUT_SZ-1:0];
+                    sp_in_y_len_r  <= sys_data_i[16 +: SP_Y_INPUT_SZ];
+                end
+                8'h28: begin                                       // S1
+                    sp_out_x_len_r <= sys_data_i[SP_X_OUTPUT_SZ-1:0];
+                    sp_out_y_len_r <= sys_data_i[16 +: SP_Y_OUTPUT_SZ];
+                end
+                8'h2C: begin                                       // S2
+                    sp_rows_per_neuron_r <= sys_data_i[SP_ROWS_PER_NEURON-1:0];
+                    np_last_neuron_idx_r <= sys_data_i[16 +: NP_NEURON_IDX_SZ];
+                end
+                8'h30: sp_total_timesteps_r <= sys_data_i[SP_TIMESTEP_SZ-1:0]; // S3
+                // M0,M1: bit-packed mode / slice-size fields (4-bit lanes + headroom)
+                8'h34: begin                                       // M0
+                    sp_weight_sz_r    <= sys_data_i[ 3:0];
+                    np_syn_curr_sz_r  <= sys_data_i[ 7:4];
+                    np_bias_curr_sz_r <= sys_data_i[11:8];   // = lut_out_sz on annAcc
+                    np_pot_sz_r       <= sys_data_i[15:12];  // = act_out_sz on annAcc
+                    sp_act_sz_r       <= sys_data_i[19:16];
+                    np_thresh_op_r    <= sys_data_i[23:20];
+                    sp_weight_mode_r  <= sys_data_i[27:24];
+                end
+                8'h38: begin                                       // M1
+                    sp_skip_neuron_r      <= sys_data_i[0];
+                    // [5:2] np_mode -> not present on annAcc
+                    sp_weights_per_word_r <= sys_data_i[ 9:6];
+                    bin_point_syn_curr_r  <= sys_data_i[15:10];
+                    np_out_bin_point_r    <= sys_data_i[21:16];
+                end
+                // ---- boot-only conv/sparse params (out-of-packed-window, >=0x5C) ----
                 8'h5C: sp_weight_idx_sz_r      <= sys_data_i[SP_WEIGHT_IDX_SZ-1:0];
-                8'h70: sp_weight_mode_r        <= sys_data_i[1:0];
                 8'h74: sp_x_kernel_len_r       <= sys_data_i[SP_X_KERNEL_SZ-1:0];
                 8'h78: sp_y_kernel_len_r       <= sys_data_i[SP_Y_KERNEL_SZ-1:0];
                 8'h7C: sp_x_kernel_step_r      <= sys_data_i[SP_X_STEP_SZ-1:0];
@@ -327,22 +361,6 @@ module ann_processor # (
                 8'h8C: sp_index_sz_r           <= sys_data_i[SP_WEIGHT_SLICE_SZ-1:0];
                 8'h90: sp_tuple_sz_r           <= sys_data_i[SP_WEIGHT_SLICE_SZ-1:0];
                 8'h94: sp_sparse_count_r       <= sys_data_i[`PIN_BITS-1:0];
-                8'h98: sp_act_sz_r             <= sys_data_i[2:0];
-                8'h20: np_last_neuron_idx_r    <= sys_data_i[NP_NEURON_IDX_SZ-1:0];
-                8'h28: np_bias_curr_base_addr_r<= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'h2C: np_thresh_base_addr_r   <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'h30: np_pot_base_addr_r      <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'h64: np_spike_base_addr_r    <= sys_data_i[MEM_ADDR_BITS-1:0];
-                8'h34: np_syn_curr_sz_r        <= sys_data_i[NP_SYN_CURR_SLICE_SZ-1:0];
-                8'h38: np_bias_curr_sz_r       <= sys_data_i[2:0];
-                8'h3C: np_pot_sz_r             <= sys_data_i[NP_POT_SLICE_SZ-1:0];
-                8'h40: bin_point_syn_curr_r    <= sys_data_i[4:0];
-                8'h6C: np_pot_decay_mult_r     <= sys_data_i[31:0];
-                8'hA0: np_thresh_op_r          <= sys_data_i[1:0];
-                8'hA4: np_out_bin_point_r      <= sys_data_i[4:0];
-                8'h9C: sp_skip_neuron_r        <= sys_data_i[0];
-                8'h10: sp_skip_neuron_r        <= sys_data_i[0];
-                8'h1C: np_pot_decay_mult_r     <= sys_data_i[31:0];
                 default: ;
             endcase
         end
