@@ -55,6 +55,7 @@ module ann_spike_processing # (parameter NUM_TIMESTEPS      = 32,
     input wire                 [4:0] bin_point_syn_curr_i,
     input wire                 [1:0] weight_mode_i,
     input wire                 [2:0] act_slice_sz_i,   // runtime activation element width
+    input wire                       act_signed_i,     // 1 = sign-extend activation (signed MAC, §5.4)
     input wire    [X_INPUT_SZ-1:0] in_x_len_i,
     input wire    [Y_INPUT_SZ-1:0] in_y_len_i,
     input wire   [X_OUTPUT_SZ-1:0] out_x_len_i,
@@ -544,14 +545,19 @@ wire [WEIGHT_BITS-1:0] weight_value_to_update = is_sparse ? actual_weight
 
 // Right-justify act_data_out (left-justified by slice_and_align) for MAC.
 // act_slice_sz_i selects element width; top bits of act_data_out hold the value.
+// act_fill is the extension bit: 0 (zero-extend) by default; the slice MSB
+// (act_data_out[ACT_BITS-1]) when act_signed_i=1, so a signed activation is
+// sign-extended. Mirrors the weight_rj_nonsparse sign-extend above. §5.4.
+// act_signed_i=0 -> act_fill=0 -> bit-identical to the legacy zero-extension.
+wire act_fill = act_signed_i & act_data_out[ACT_BITS-1];
 reg [ACT_BITS-1:0] act_value_rj;
 always @* begin
     case (act_slice_sz_i)
-        3'b000: act_value_rj = {{(ACT_BITS-1){1'b0}},  act_data_out[ACT_BITS-1]};
-        3'b001: act_value_rj = {{(ACT_BITS-2){1'b0}},  act_data_out[ACT_BITS-1:ACT_BITS-2]};
-        3'b010: act_value_rj = {{(ACT_BITS-4){1'b0}},  act_data_out[ACT_BITS-1:ACT_BITS-4]};
-        3'b011: act_value_rj = {{(ACT_BITS-8){1'b0}},  act_data_out[ACT_BITS-1:ACT_BITS-8]};
-        3'b100: act_value_rj = {{(ACT_BITS-16){1'b0}}, act_data_out[ACT_BITS-1:ACT_BITS-16]};
+        3'b000: act_value_rj = {{(ACT_BITS-1){act_fill}},  act_data_out[ACT_BITS-1]};
+        3'b001: act_value_rj = {{(ACT_BITS-2){act_fill}},  act_data_out[ACT_BITS-1:ACT_BITS-2]};
+        3'b010: act_value_rj = {{(ACT_BITS-4){act_fill}},  act_data_out[ACT_BITS-1:ACT_BITS-4]};
+        3'b011: act_value_rj = {{(ACT_BITS-8){act_fill}},  act_data_out[ACT_BITS-1:ACT_BITS-8]};
+        3'b100: act_value_rj = {{(ACT_BITS-16){act_fill}}, act_data_out[ACT_BITS-1:ACT_BITS-16]};
         3'b101: act_value_rj = act_data_out;
         default: act_value_rj = {ACT_BITS{1'b0}};
     endcase
@@ -602,7 +608,8 @@ ann_syn_curr_update # (
    .syn_curr_mem_addr_o(syn_curr_mem_addr_o),
    .syn_curr_mem_data_i(syn_curr_mem_data_rd_i),
    .syn_curr_mem_data_o(syn_curr_mem_data_wr_o),
-   .act_value_i(act_value_rj)
+   .act_value_i(act_value_rj),
+   .act_signed_i(act_signed_i)
 );
 
 endmodule

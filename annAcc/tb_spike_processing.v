@@ -63,6 +63,7 @@ localparam SPARSE_IDX_SZ      = 16;
 
 reg  clk, reset;
 reg [2:0]                   act_slice_sz;
+reg                         act_signed;
 
 // Config registers
 reg [`ADDR_SIZE-1:0]        act_base_addr;
@@ -198,6 +199,7 @@ dut (
     .act_mem_addr_o         (act_mem_addr),
     .act_mem_data_i         (act_mem_data),
     .act_slice_sz_i         (act_slice_sz),
+    .act_signed_i           (act_signed),
     .syn_curr_mem_wr_o      (syn_curr_mem_wr),
     .syn_curr_mem_rd_o      (syn_curr_mem_rd),
     .syn_curr_mem_wait_i    (syn_curr_mem_wait),
@@ -231,6 +233,25 @@ always  #5 clk = ~clk;
 
 integer errors, timeout;
 
+// Pulse start_new_block and wait for the stage to finish (shares errors/timeout).
+task run_pass;
+    begin
+        start_new_block = 1;
+        @(posedge clk); #1;
+        start_new_block = 0;
+        timeout = 500;
+        while (!spike_proc_finished && timeout > 0) begin
+            @(posedge clk); #1;
+            timeout = timeout - 1;
+        end
+        if (timeout == 0) begin
+            $display("FAIL: spike_proc_finished never asserted (timeout)");
+            errors = errors + 1;
+        end else
+            $display("  spike_proc_finished after %0d cycles", 500 - timeout);
+    end
+endtask
+
 initial begin
     errors = 0;
 
@@ -245,6 +266,7 @@ initial begin
 
     reset            = 1;
     act_slice_sz     = 3'b011;   // 8-bit elements at runtime
+    act_signed       = 1'b0;     // default: legacy unsigned MAC (§5.4 off)
     start_new_block  = 0;
     act_mem_wait     = 0;
     weight_mem_wait  = 0;
@@ -287,43 +309,44 @@ initial begin
     @(posedge clk); #1;
 
     $display("=== tb_spike_processing ===");
-    $display("Test 1: full-mode, 2×2 in/out, all spikes");
-
-    // Pulse start
-    start_new_block = 1;
+    $display("Test 1: full-mode 2x2, all acts=+1 (unsigned), expect syn_curr[128]=4");
+    act_signed = 1'b0;
+    run_pass;
+    // acc_busy_o = running_r, cleared by the NBA at the posedge where
+    // spike_proc_finished fires; check one cycle later.
     @(posedge clk); #1;
-    start_new_block = 0;
-
-    // Wait for completion with timeout
-    timeout = 500;
-    while (!spike_proc_finished && timeout > 0) begin
-        @(posedge clk); #1;
-        timeout = timeout - 1;
-    end
-
-    if (timeout == 0) begin
-        $display("FAIL: spike_proc_finished never asserted (timeout)");
+    if (acc_busy) begin
+        $display("FAIL T1: acc_busy_o still high after finished");
         errors = errors + 1;
-    end else begin
-        $display("  spike_proc_finished after %0d cycles", 500 - timeout);
-        // spike_proc_finished_o is combinational (running_r & ~submodules).
-        // acc_busy_o = running_r, which is cleared by the NBA at the posedge
-        // where spike_proc_finished fires.  Check acc_busy one cycle later,
-        // after running_r has been clocked to 0.
-        @(posedge clk); #1;
-        if (acc_busy) begin
-            $display("FAIL: acc_busy_o still high after finished");
-            errors = errors + 1;
-        end
-        // Check that at least one syn_curr write happened
-        // (syn_curr_sram entries beyond base should have changed)
-        if (syn_curr_sram[128] === 32'h0) begin
-            $display("FAIL: syn_curr_sram[128] still 0 (no write-back detected)");
-            errors = errors + 1;
-        end else begin
-            $display("  syn_curr_sram[128] = 0x%08h (non-zero as expected)", syn_curr_sram[128]);
-        end
     end
+    if (syn_curr_sram[128] !== 32'd4) begin
+        $display("FAIL T1: syn_curr_sram[128]=0x%08h exp 0x00000004", syn_curr_sram[128]);
+        errors = errors + 1;
+    end else
+        $display("  T1 OK: syn_curr_sram[128]=0x%08h", syn_curr_sram[128]);
+
+    // ----------------------------------------------------------
+    // Test 2: SIGNED-activation path (§5.4) through the whole stage.
+    // All int8 activations = 0xFE (-2), weights = +1, act_signed=1.
+    // Each output neuron accumulates 4 * (-2 * 1) = -8:
+    //   signed   -> syn_curr[128] = 0xFFFF_FFF8 (-8)
+    //   unsigned -> would be 4*254 = 0x3F8 (so -8 proves the signed
+    //               slice sign-extension + signed MAC route end-to-end).
+    // ----------------------------------------------------------
+    $display("Test 2: signed int8 acts=-2 (0xFE), expect syn_curr[128]=-8");
+    for (mi = 0; mi < 256; mi = mi + 1) begin
+        act_sram[mi]      = 32'hFEFE_FEFE;   // four int8 -2 per word
+        syn_curr_sram[mi] = 32'h0;           // clear accumulator
+    end
+    act_signed = 1'b1;
+    run_pass;
+    @(posedge clk); #1;
+    if (syn_curr_sram[128] !== 32'hFFFF_FFF8) begin
+        $display("FAIL T2: syn_curr_sram[128]=0x%08h exp 0xFFFFFFF8", syn_curr_sram[128]);
+        errors = errors + 1;
+    end else
+        $display("  T2 OK: syn_curr_sram[128]=0x%08h (-8, signed path verified)", syn_curr_sram[128]);
+    act_signed = 1'b0;
 
     $display("=== tb_spike_processing: %0d failure(s) ===", errors);
     if (errors == 0) $display("PASS"); else $display("FAIL");

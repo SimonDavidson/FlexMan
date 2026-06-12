@@ -49,8 +49,11 @@ module ann_syn_curr_update
     input  wire          [`WTD_BITS-1:0] syn_curr_mem_data_i,
     output wire          [`WTD_BITS-1:0] syn_curr_mem_data_o,
 
-    // Right-justified input activation (unsigned; from feature layer)
-    input  wire          [IN_DATA_BITS-1:0] act_value_i
+    // Right-justified input activation. Default: unsigned (zero-extended) feature
+    // activation. When act_signed_i=1 it is a sign-extended signed value, so the
+    // signed GRU state h / candidate n (tanh in [-1,1]) can feed the MAC (§5.4).
+    input  wire          [IN_DATA_BITS-1:0] act_value_i,
+    input  wire                             act_signed_i
 );
 
 localparam WEIGHT_BITS = 2**WEIGHT_SLICE_SZ;
@@ -151,9 +154,17 @@ assign syn_curr_mem_rd_o = (syn_curr_mem_wr_o)    ? 1'b0 :
 
 assign aligned_weight_value = {{(IN_DATA_BITS-WEIGHT_BITS){weight_value_r[WEIGHT_BITS-1]}}, weight_value_r[WEIGHT_BITS-1:0]};
 
-// MAC: accumulate act_value (unsigned) * weight (signed) into syn_curr
+// MAC: accumulate (signed weight) * activation into syn_curr.
+//   act_signed_i=0 : activation is unsigned magnitude (zero-extended) — legacy,
+//                    bit-identical to the original $signed({1'b0, act_value_r}) form.
+//   act_signed_i=1 : activation is signed (sign-extended from its slice MSB in
+//                    spike_processing), so the signed GRU state can feed the
+//                    W_i.h / W_h.h MACs. Symmetric with the signed-weight path. §5.4
 wire signed [IN_DATA_BITS+ACT_VAL_BITS:0] mac_product;
-assign mac_product = $signed(aligned_weight_value) * $signed({1'b0, act_value_r});
+wire signed [ACT_VAL_BITS:0]              act_operand =
+        act_signed_i ? {act_value_r[ACT_VAL_BITS-1], act_value_r}   // sign-extend
+                     : {1'b0,                         act_value_r}; // zero-extend
+assign mac_product = $signed(aligned_weight_value) * act_operand;
 assign syn_curr_mem_data_o = syn_curr_mem_data_i + mac_product[IN_DATA_BITS-1:0];
 
 //////////////////////////////////////////////////////////////////////////////

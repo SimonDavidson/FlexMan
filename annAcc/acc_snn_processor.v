@@ -193,6 +193,7 @@ module ann_processor # (
     reg  [SP_WEIGHT_SLICE_SZ-1:0] sp_tuple_sz_r;
     reg          [`PIN_BITS-1:0]  sp_sparse_count_r;
     reg                    [2:0]  sp_act_sz_r;        // runtime activation element width
+    reg                           act_signed_r;       // 1 = signed-activation MAC (§5.4); default 0
 
     //----------------------------------------------------------------
     // neuron_processing config registers
@@ -293,6 +294,7 @@ module ann_processor # (
             sp_tuple_sz_r           <= {SP_WEIGHT_SLICE_SZ{1'b0}};
             sp_sparse_count_r       <= {`PIN_BITS{1'b0}};
             sp_act_sz_r             <= 3'b0;
+            act_signed_r            <= 1'b0;
             np_last_neuron_idx_r    <= {NP_NEURON_IDX_SZ{1'b0}};
             np_bias_curr_base_addr_r<= {MEM_ADDR_BITS{1'b0}};
             np_thresh_base_addr_r   <= {MEM_ADDR_BITS{1'b0}};
@@ -342,6 +344,7 @@ module ann_processor # (
                     sp_act_sz_r       <= sys_data_i[19:16];
                     np_thresh_op_r    <= sys_data_i[23:20];
                     sp_weight_mode_r  <= sys_data_i[27:24];
+                    act_signed_r      <= sys_data_i[28];   // §5.4 signed-activation MAC (default 0)
                 end
                 8'h38: begin                                       // M1
                     sp_skip_neuron_r      <= sys_data_i[0];
@@ -496,6 +499,7 @@ module ann_processor # (
         .tuple_sz_i             (sp_tuple_sz_r),
         .sparse_count_i         (sp_sparse_count_r),
         .act_slice_sz_i         (sp_act_sz_r),
+        .act_signed_i           (act_signed_r),
 
         // Scheduler — gated dispatch
         .start_new_block_i      (my_dispatch),

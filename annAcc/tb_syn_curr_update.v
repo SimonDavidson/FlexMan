@@ -66,6 +66,7 @@ reg  [`WTD_BITS-1:0]         syn_curr_mem_data_i;
 wire                         weight_index_taken;
 wire                         weight_value_taken;
 reg  [IN_DATA_BITS-1:0]      act_value;
+reg                          act_signed;
 
 ann_syn_curr_update #(
     .X_OUTPUT_SZ       (X_OUTPUT_SZ),
@@ -102,7 +103,8 @@ dut (
     .syn_curr_mem_addr_o     (syn_curr_mem_addr),
     .syn_curr_mem_data_i     (syn_curr_mem_data_i),
     .syn_curr_mem_data_o     (syn_curr_mem_data_o),
-    .act_value_i             (act_value)
+    .act_value_i             (act_value),
+    .act_signed_i            (act_signed)
 );
 
 // ----------------------------------------------------------------
@@ -173,6 +175,7 @@ initial begin
     weight_value_valid  = 0;
     weight_value        = 0;
     act_value           = 32'd1;   // act=1 preserves T1–T4 expectations
+    act_signed          = 1'b0;     // default: legacy unsigned MAC (§5.4 off)
     syn_curr_mem_wait   = 0;
     syn_curr_mem_data_i = 0;
 
@@ -510,6 +513,67 @@ initial begin
 
     // Restore act_value for any future tests
     act_value = 32'd1;
+
+    // ----------------------------------------------------------
+    // Test 10: SIGNED-activation MAC (§5.4). act_signed=1 makes the
+    // activation a signed operand, so a negative state can feed the
+    // MAC.  neuron (x=2,y=6) → addr = 6*4+2 = 26, sram[26]=104.
+    //   act = -2 (0xFFFF_FFFE signed), weight = +5
+    //   signed:   104 + (-2)*5 = 94
+    // (with act_signed=0 the same bits are a huge unsigned magnitude,
+    //  so 94 only arises if the signed path actually routes.)
+    // ----------------------------------------------------------
+    $display("Test 10: signed-activation MAC, act=-2 weight=+5");
+    running = 0;
+    @(posedge clk); #1;
+    running    = 1;
+    act_signed = 1'b1;
+    act_value  = 32'hFFFF_FFFE;   // -2 signed
+    @(posedge clk); #1;
+
+    weight_mode        = 2'b00;
+    weight_index_valid = 1;
+    weight_value_valid = 1;
+    weight_index_x     = 4'd2;
+    weight_index_y     = 4'd6;
+    weight_index       = 5'd26;
+    weight_index_last  = 1;
+    weight_value       = 32'd5;
+
+    wait_wr_done;
+    weight_index_valid = 0;
+    weight_value_valid = 0;
+    @(posedge clk); #1;
+    check_eq(sram[26], 32'd94, "T10 sram[26] signed act=-2 w=+5");
+
+    // ----------------------------------------------------------
+    // Test 11: signed mode, positive activation still correct.
+    //   neuron (x=3,y=6) → addr = 27, sram[27]=108
+    //   act = +3, weight = -4  →  108 + 3*(-4) = 96
+    // ----------------------------------------------------------
+    $display("Test 11: signed-activation MAC, act=+3 weight=-4");
+    running = 0;
+    @(posedge clk); #1;
+    running    = 1;
+    act_signed = 1'b1;
+    act_value  = 32'd3;
+    @(posedge clk); #1;
+
+    weight_mode        = 2'b00;
+    weight_index_valid = 1;
+    weight_value_valid = 1;
+    weight_index_x     = 4'd3;
+    weight_index_y     = 4'd6;
+    weight_index       = 5'd27;
+    weight_index_last  = 1;
+    weight_value       = 32'hFFFF_FFFC;   // -4 signed
+
+    wait_wr_done;
+    weight_index_valid = 0;
+    weight_value_valid = 0;
+    @(posedge clk); #1;
+    check_eq(sram[27], 32'd96, "T11 sram[27] signed act=+3 w=-4");
+    act_signed = 1'b0;   // restore default
 
     $display("=== tb_syn_curr_update: %0d failure(s) ===", errors);
     if (errors == 0) $display("PASS"); else $display("FAIL");

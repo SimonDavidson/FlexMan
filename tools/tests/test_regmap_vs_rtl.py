@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-11
+# Last modified: 2026-06-12
 #
 # ANTI-DRIFT CHECK — the reason the back-end lives in the FlexMan repo.
 # Parses the packed per-task config decoders (case (sys_addr_i[7:0]) ...)
@@ -19,8 +19,8 @@ REPO = Path(__file__).resolve().parents[2]   # .../FlexMan
 
 # Fields each accelerator variant does NOT decode (packs as 0 / ignored).
 SKIP_FIELDS = {
-    "snn":   {"sp_act_sz", "np_thresh_op", "np_out_bin_point"},
-    "ipsnn": {"sp_act_sz", "np_thresh_op", "np_out_bin_point"},
+    "snn":   {"sp_act_sz", "np_thresh_op", "np_out_bin_point", "act_signed"},
+    "ipsnn": {"sp_act_sz", "np_thresh_op", "np_out_bin_point", "act_signed"},
     "ann":   {"np_syn_curr_decay_mult", "np_mode"},
 }
 

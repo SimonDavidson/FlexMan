@@ -5,7 +5,7 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-11
+# Last modified: 2026-06-12
 #
 # Pure-Python (no torch). These maps mirror the per-accelerator AXI config-reg
 # decoders in the RTL and the scheduler's fixed control/memory address decode.
@@ -67,6 +67,7 @@ PACKED_MODE_WORDS = [          # offsets 0x34..0x38 ; (field, lsb, width)
         ("sp_act_sz",      16, 4),
         ("np_thresh_op",   20, 4),
         ("sp_weight_mode", 24, 4),
+        ("act_signed",     28, 1),   # §5.4 signed-activation MAC (annAcc only; default 0)
     ],
     [   # M1 0x38
         ("sp_skip_neuron",      0, 2),
