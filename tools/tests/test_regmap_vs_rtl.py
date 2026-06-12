@@ -26,7 +26,6 @@ SKIP_FIELDS = {
 
 CASES = [
     ("snn",   "snnAcc/acc_snn_processor.v"),
-    ("ipsnn", "siren_detector/acc_ipsnn_processor.v"),
     ("ipsnn", "ipSnnAcc/acc_snn_processor.v"),
     ("ann",   "annAcc/acc_snn_processor.v"),
 ]
