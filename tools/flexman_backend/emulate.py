@@ -64,15 +64,16 @@ def decay(value: int, mult: int, bits: int = DECAY_BITS) -> int:
 # ---------------------------------------------------------------------------
 # MAC (spike_processing / syn_curr_update): i_t = stored + sum(w * a)
 # ---------------------------------------------------------------------------
-def mac_accumulate(stored_syn: int, weights_row, acts) -> int:
-    """i_t = stored_syn + Σ (signed weight * unsigned activation), 32-bit wrap.
+def mac_accumulate(stored_syn: int, weights_row, acts, bits: int = 32) -> int:
+    """i_t = stored_syn + Σ (signed weight * unsigned activation), `bits`-wide wrap.
 
     `weights_row` and `acts` are equal-length sequences of ints (weights signed,
-    activations unsigned — spikes are 0/1). The accumulation wraps at 32 bits.
+    activations unsigned — spikes are 0/1). The accumulation wraps at `bits` (32 =
+    the syn_curr width as built; widened only by precision studies).
     """
     acc = stored_syn
     for w, a in zip(weights_row, acts):
-        acc = wrap_signed(acc + w * a)
+        acc = wrap_signed(acc + w * a, bits)
     return acc
 
 
@@ -131,3 +132,95 @@ def fe_neuron(acc: int, bin_point_syn_curr: int, np_out_bin_point: int,
     rounded = a + (1 << (shift - 1)) if shift > 0 else a   # round-half-up
     shifted = rounded >> shift if shift > 0 else rounded << (-shift)
     return sat_unsigned(shifted, out_bits)
+
+
+# =============================================================================
+# Gated-nonlinearity + element-wise gated-update primitives.
+#
+# Model the annAcc LUT activation path and the Hadamard datapath. ADDITIVE and
+# unused by the existing spiking-network path — nothing above changes, so the
+# bit-validated snnAcc unit-TB goldens are untouched. They model the annAcc RTL
+# with three default-off datapath options enabled:
+#   (1) LUT input:  scaled + centred + saturated index (not raw low bits)
+#   (2) LUT output: signed path for tanh (sigmoid stays unsigned)
+#   (3) signed-activation MAC mode: activation treated as signed (sign-extended),
+#       so a signed activation can feed the MAC. mac_accumulate() already does a
+#       signed multiply, so it models this mode directly (see mac_signed()).
+# =============================================================================
+import math
+
+
+def _q_round(value: float, frac: int) -> int:
+    """Quantise a real value to `frac` fractional bits, round-half-up."""
+    return int(math.floor(value * (1 << frac) + 0.5))
+
+
+def make_lut(func, in_frac: int, out_frac: int, idx_bits: int, signed: bool):
+    """Build a 2**idx_bits-entry activation table for `func` (e.g. math.tanh).
+
+    Entry k corresponds to input value (k - MID)/2**in_frac, MID = 2**(idx_bits-1),
+    so index MID is input 0 and the covered domain is [-MID, MID)/2**in_frac
+    (e.g. idx_bits=8, in_frac=4 -> domain +/-8 over 256 entries). Outputs are
+    fixed-point at `out_frac` fractional bits; sigmoid is unsigned [0,1], tanh is
+    signed [-1,1] (the signed-output path).
+    """
+    n = 1 << idx_bits
+    mid = n >> 1
+    # Range of the quantised output: tanh in [-1,1] -> +/-2**out_frac needs a
+    # signed (out_frac+2)-bit clamp; sigmoid in [0,1] -> [0,2**out_frac] needs an
+    # unsigned (out_frac+1)-bit clamp. The clamp only guards the table extremes.
+    out_bits = (out_frac + 2) if signed else (out_frac + 1)
+    tbl = []
+    for k in range(n):
+        x = (k - mid) / (1 << in_frac)
+        q = _q_round(func(x), out_frac)
+        tbl.append(sat_signed(q, out_bits) if signed else sat_unsigned(q, out_bits))
+    return tbl
+
+
+@dataclass
+class Lut:
+    """A loaded annAcc activation table + its fixed-point metadata."""
+    table: list
+    in_frac: int        # table input fractional bits (domain scaling)
+    out_frac: int       # table output fractional bits (== activation bin point)
+    idx_bits: int
+    signed: bool        # True for tanh (signed out), False for sigmoid
+
+    @classmethod
+    def build(cls, func, in_frac, out_frac, idx_bits, signed):
+        return cls(make_lut(func, in_frac, out_frac, idx_bits, signed),
+                   in_frac, out_frac, idx_bits, signed)
+
+    def lookup(self, acc: int, bin_point_syn_curr: int) -> int:
+        """Indexed lookup: scale the signed accumulator to the table's input
+        fractional bits, centre on MID, saturate to the table range, return the
+        fixed-point activation (Q`out_frac`; signed for tanh)."""
+        n = 1 << self.idx_bits
+        mid = n >> 1
+        shift = bin_point_syn_curr - self.in_frac
+        scaled = (acc >> shift) if shift >= 0 else (acc << (-shift))
+        idx = scaled + mid
+        idx = 0 if idx < 0 else (n - 1) if idx > n - 1 else idx   # saturate index
+        return self.table[idx]
+
+
+def mac_signed(stored_syn: int, weights_row, acts, bits: int = 32) -> int:
+    """Signed-activation MAC: identical to mac_accumulate (the Python multiply is
+    already signed), named to make the signed-activation annAcc mode explicit at
+    the call site — `acts` may be negative (a signed activation)."""
+    return mac_accumulate(stored_syn, weights_row, acts, bits)
+
+
+def hadamard(a: int, b: int, z: int, z_frac: int, mode: int = 0, r_prev: int = 0) -> int:
+    """One Hadamard element: R = ((Z*(A-B)) >> z_frac) + B + mode*R_prev.
+
+    Z is an unsigned gate in Q`z_frac` (representing [0,1]); A, B share one
+    fractional scale and the result is at that same scale. The shift is arithmetic
+    (Python >> floors == arithmetic shift for the signed product). Covers both
+    gated-update forms: a plain product Z*A [B=0] and a convex combination
+    Z*(A-B)+B.
+    """
+    prod = z * (a - b)
+    shifted = prod >> z_frac          # arithmetic, back to A/B scale
+    return shifted + b + (r_prev if mode else 0)
