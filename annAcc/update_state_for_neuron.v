@@ -24,7 +24,10 @@
 //
 // Threshold modes (thresh_op_i):
 //   2'b00 = RELU — negative pre-activations clamped to 0
-//   2'b01 = LUT  — lut_result_i zero-extended to POT_SLICE_BITS
+//   2'b01 = LUT  — lut_result_i extended to POT_SLICE_BITS:
+//                  out_signed_i=0 -> zero-extend (sigmoid/legacy, default);
+//                  out_signed_i=1 -> sign-extend from the slice MSB
+//                  (THRESH_SLICE_BITS-1) for signed tables (tanh, §5.2).
 //   2'b10 = ABS  — |potential_i|; saturates to 0x7FFFFFFF at min-negative
 // =============================================================================
 
@@ -39,6 +42,7 @@ module ann_update_state_for_neuron # (
     input  wire                                reset,
 
     input  wire                    [1:0]       thresh_op_i,
+    input  wire                                out_signed_i,    // §5.2: 1 = sign-extend signed LUT (tanh) output (default 0)
 
     // Input handshake
     input  wire                                neuron_valid_i,
@@ -79,8 +83,18 @@ module ann_update_state_for_neuron # (
         abs_overflow ? {1'b0, {(POT_SLICE_BITS-1){1'b1}}}
                      : (potential_i[POT_SLICE_BITS-1] ? -potential_i : potential_i);
 
+    // §5.2: LUT result extended to the full potential width. Default zero-extend
+    // (sigmoid/legacy, bit-identical); when out_signed_i, sign-extend from the
+    // slice MSB so signed tanh tables read back negative. (Faithful when the
+    // table element width == THRESH_SLICE_BITS, i.e. lut_out_sz matches the
+    // loaded table — the 16-bit deploy config.)
+    wire [POT_SLICE_BITS-1:0] lut_ext =
+        out_signed_i
+            ? {{(POT_SLICE_BITS-THRESH_SLICE_BITS){lut_result_i[THRESH_SLICE_BITS-1]}}, lut_result_i}
+            : {{(POT_SLICE_BITS-THRESH_SLICE_BITS){1'b0}},                              lut_result_i};
+
     wire [POT_SLICE_BITS-1:0] act_out_comb =
-        (thresh_op_i == 2'b01) ? {{(POT_SLICE_BITS-THRESH_SLICE_BITS){1'b0}}, lut_result_i}
+        (thresh_op_i == 2'b01) ? lut_ext
       : (thresh_op_i == 2'b10) ? abs_value
       :                          (potential_i[POT_SLICE_BITS-1]
                                   ? {POT_SLICE_BITS{1'b0}}

@@ -207,6 +207,8 @@ module ann_processor # (
     reg                    [2:0]  np_bias_curr_sz_r;         // reused as lut_out_sz
     reg    [NP_POT_SLICE_SZ-1:0]  np_pot_sz_r;              // reused as act_out_sz
     reg                     [1:0] np_thresh_op_r;            // 00=RELU 01=LUT 10=ABS
+    reg                           np_lut_window_r;           // §5.1: 1 = windowed/saturated LUT index; default 0
+    reg                           np_out_signed_r;           // §5.2: 1 = sign-extend signed LUT (tanh) output; default 0
 
     //----------------------------------------------------------------
     // Shared config registers
@@ -304,6 +306,8 @@ module ann_processor # (
             np_bias_curr_sz_r       <= 3'b0;
             np_pot_sz_r             <= {NP_POT_SLICE_SZ{1'b0}};
             np_thresh_op_r          <= 2'b0;
+            np_lut_window_r         <= 1'b0;
+            np_out_signed_r         <= 1'b0;
             sp_skip_neuron_r        <= 1'b0;
             bin_point_syn_curr_r    <= 5'b0;
             np_out_bin_point_r      <= 5'b0;
@@ -345,6 +349,8 @@ module ann_processor # (
                     np_thresh_op_r    <= sys_data_i[23:20];
                     sp_weight_mode_r  <= sys_data_i[27:24];
                     act_signed_r      <= sys_data_i[28];   // §5.4 signed-activation MAC (default 0)
+                    np_lut_window_r   <= sys_data_i[29];   // §5.1 windowed/saturated LUT index (default 0)
+                    np_out_signed_r   <= sys_data_i[30];   // §5.2 signed LUT (tanh) output (default 0)
                 end
                 8'h38: begin                                       // M1
                     sp_skip_neuron_r      <= sys_data_i[0];
@@ -575,6 +581,8 @@ module ann_processor # (
         .thresh_op_i            (np_thresh_op_r),
         .bin_point_syn_curr_i   (bin_point_syn_curr_r),  // requant: input bin point
         .np_out_bin_point_i     (np_out_bin_point_r),    // requant: output bin point (0=off)
+        .lut_window_i           (np_lut_window_r),       // §5.1 windowed/saturated LUT index
+        .out_signed_i           (np_out_signed_r),       // §5.2 signed LUT (tanh) output
         .pot_decay_mult_i       (np_pot_decay_mult_r[NP_POT_DECAY_BITS-1:0]),
 
         // Scheduler – triggered by spike_processing completion

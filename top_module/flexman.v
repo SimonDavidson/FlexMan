@@ -987,7 +987,12 @@ ann_processor #(
     // annAcc already defaults NP_SYN_CURR/NP_POT slices to 32; spike_processing's
     // syn_curr slice still defaults to 10 — bump it so a real task on annAcc reads
     // full-precision 32-bit syn_curr (matches siren's u_ann).
-    .SP_SYN_CURR_SLICE_BITS (32)
+    .SP_SYN_CURR_SLICE_BITS (32),
+    // §5.2: widen LUT entries from int8 to int16 so the NsNet2 gate tables fit
+    // (sigmoid Q15, tanh Q14 both need 16 bits). Only the LUT path is affected;
+    // no current net uses LUT mode (Bosch uses ABS), so this is bit-identical
+    // for every existing task.
+    .NP_LUT_SLICE_BITS      (16)
 ) u_ann (
     .clk                   (clk),
     .reset                 (reset),

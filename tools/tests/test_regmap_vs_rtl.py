@@ -19,8 +19,10 @@ REPO = Path(__file__).resolve().parents[2]   # .../FlexMan
 
 # Fields each accelerator variant does NOT decode (packs as 0 / ignored).
 SKIP_FIELDS = {
-    "snn":   {"sp_act_sz", "np_thresh_op", "np_out_bin_point", "act_signed"},
-    "ipsnn": {"sp_act_sz", "np_thresh_op", "np_out_bin_point", "act_signed"},
+    "snn":   {"sp_act_sz", "np_thresh_op", "np_out_bin_point", "act_signed",
+              "np_lut_window", "np_out_signed"},
+    "ipsnn": {"sp_act_sz", "np_thresh_op", "np_out_bin_point", "act_signed",
+              "np_lut_window", "np_out_signed"},
     "ann":   {"np_syn_curr_decay_mult", "np_mode"},
 }
 

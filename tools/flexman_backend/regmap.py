@@ -68,6 +68,8 @@ PACKED_MODE_WORDS = [          # offsets 0x34..0x38 ; (field, lsb, width)
         ("np_thresh_op",   20, 4),
         ("sp_weight_mode", 24, 4),
         ("act_signed",     28, 1),   # §5.4 signed-activation MAC (annAcc only; default 0)
+        ("np_lut_window",  29, 1),   # §5.1 windowed/saturated LUT index (annAcc only; default 0)
+        ("np_out_signed",  30, 1),   # §5.2 signed LUT (tanh) output (annAcc only; default 0)
     ],
     [   # M1 0x38
         ("sp_skip_neuron",      0, 2),

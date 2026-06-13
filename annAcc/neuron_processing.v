@@ -43,6 +43,8 @@ module ann_neuron_processing # (
     input wire                    [1:0] thresh_op_i,           // 00=RELU 01=LUT 10=ABS
     input wire                    [4:0] bin_point_syn_curr_i,  // requant: input (accumulator) bin point
     input wire                    [4:0] np_out_bin_point_i,    // requant: output activation bin point (0=disabled)
+    input wire                          lut_window_i,          // §5.1: 1 = scaled+saturated LUT index (default 0 = raw low bits)
+    input wire                          out_signed_i,          // §5.2: 1 = sign-extend signed LUT (tanh) output (default 0)
     input wire    [POT_DECAY_BITS-1:0] pot_decay_mult_i,
 
     // Scheduler interface
@@ -203,10 +205,36 @@ syn_curr_cache (
 
 ///////////////////////////////////////////////////////////////////////
 // 2) LUT cache — triggered once potential is available (LUT mode only)
-//    Uses thresh_mem_* ports; indexed by lower LUT_IDX_SZ bits of potential
+//    Uses thresh_mem_* ports; indexed by the pre-activation.
+//      lut_window_i=0 : legacy raw low LUT_IDX_SZ bits (wraps; default)
+//      lut_window_i=1 : §5.1 scaled + sign-centred + saturated index —
+//        idx = clamp( ($signed(pot) >>> (bin_point_syn_curr - F)) + MID, 0, N-1 )
+//        reusing bin_point_syn_curr_i (no new register); F = the loaded table's
+//        input fractional bits (compile-time localparam, must equal the table
+//        generator's in_frac); MID = N/2, N = 2^LUT_IDX_SZ. Saturation is
+//        detected on the FULL-WIDTH value before truncation, so a large |pot|
+//        pins to the endpoint entries (which carry the sigmoid/tanh asymptotes)
+//        instead of aliasing. Assumes bin_point_syn_curr >= F (acc_frac >= F),
+//        true for every NsNet2 LUT layer; the left-shift branch is for
+//        completeness only.
 ///////////////////////////////////////////////////////////////////////
+localparam integer               F       = LUT_IDX_SZ - 3;      // = emulator lut_in_frac
+localparam signed [LUT_IDX_SZ:0] MID     = (1 <<< (LUT_IDX_SZ-1));   // N/2
+localparam signed [LUT_IDX_SZ:0] IDX_MAX = (1 <<< LUT_IDX_SZ) - 1;   // N-1
 
-assign lut_index = syn_curr_data_out[LUT_IDX_SZ-1:0];
+wire signed [SYN_CURR_SLICE_BITS-1:0] pot_signed = syn_curr_data_out;
+wire signed [6:0] win_shift = $signed({2'b00, bin_point_syn_curr_i}) - F;   // bin_point - F
+wire signed [SYN_CURR_SLICE_BITS-1:0] pot_scaled =
+        (win_shift >= 0) ? (pot_signed >>> win_shift)
+                         : (pot_signed <<< (-win_shift));
+wire signed [SYN_CURR_SLICE_BITS:0] idx_centred = pot_scaled + MID;          // +1 bit headroom
+wire [LUT_IDX_SZ-1:0] lut_index_win =
+        (idx_centred < 0)       ? {LUT_IDX_SZ{1'b0}} :
+        (idx_centred > IDX_MAX) ? {LUT_IDX_SZ{1'b1}} :
+                                  idx_centred[LUT_IDX_SZ-1:0];
+
+assign lut_index = lut_window_i ? lut_index_win
+                                : syn_curr_data_out[LUT_IDX_SZ-1:0];
 
 dataline_cache_with_xy #(
     .IN_DATA_BITS      (IN_DATA_BITS),
@@ -261,6 +289,7 @@ neuron_update0 (
     .clk                    (clk),
     .reset                  (reset),
     .thresh_op_i            (thresh_op_i),
+    .out_signed_i           (out_signed_i),
     .neuron_valid_i         (neuron_valid),
     .potential_i            (syn_curr_data_out),
     .lut_result_i           (lut_data_out),

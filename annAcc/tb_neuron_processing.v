@@ -5,7 +5,7 @@
 //
 // Authors      : Simon Davidson & Claude
 // Created      : 2026-05-08
-// Last modified: 2026-06-08
+// Last modified: 2026-06-13
 //
 // Aggressive golden-checked rewrite. Drives WHOLE LAYERS of neurons through
 // ann_neuron_processing and checks every memory write-back against a per-neuron
@@ -76,6 +76,7 @@ module tb_neuron_processing;
     reg [2:0]                    lut_out_sz, act_out_sz;
     reg [4:0]                    bin_point_syn_curr, np_out_bin_point;
     reg [1:0]                    thresh_op;
+    reg                          lut_window, out_signed;   // §5.1/§5.2 mode bits (default 0)
     reg [31:0]                   pot_decay_mult;
 
     // Scheduler iface
@@ -142,6 +143,8 @@ module tb_neuron_processing;
         .thresh_op_i            (thresh_op),
         .bin_point_syn_curr_i   (bin_point_syn_curr),
         .np_out_bin_point_i     (np_out_bin_point),
+        .lut_window_i           (lut_window),
+        .out_signed_i           (out_signed),
         .pot_decay_mult_i       (pot_decay_mult),
         .start_new_block_i      (start_new_block),
         .target_acc_i           (target_acc),
@@ -338,6 +341,7 @@ module tb_neuron_processing;
         act_out_sz    = SZ32;   pot_sz      = SZ32;
         bin_point_syn_curr = 5'd0; np_out_bin_point = 5'd0;
         thresh_op     = ROP_RELU;
+        lut_window    = 1'b0;   out_signed = 1'b0;     // §5.1/§5.2 default off
         pot_decay_mult = 32'h8000_0000;       // 0.5
         syn_curr_mem_wait = 0; thresh_mem_wait = 0;
         pot_mem_wait = 0; spike_mem_wait = 0;
@@ -392,6 +396,70 @@ module tb_neuron_processing;
         check_eq_u(spk_sram[(192 + 0) & 8'hFF], 32'hFFFF_FFFF, "B12 sat word0 0xFFFFFFFF");
         check_eq_u(spk_sram[(192 + 3) & 8'hFF], 32'hFFFF_FFFF, "B12 sat word3 0xFFFFFFFF");
         check_eq_u(g_spkval[0], 32'h0000_00FF, "B12 golden saturates to 255");
+
+        // ---- §5.1 windowed/saturated LUT index (lut_window=1) --------------
+        // Identity table (value==index) so the packed spike output equals the
+        // SELECTED index. F = LUT_IDX_SZ-3 = 5, MID = 128. With
+        // bin_point_syn_curr = F+S the index is clamp((pot>>>S)+128, 0, 255).
+        // (All 12 blocks above ran lut_window=0, proving the raw-index path
+        // stays bit-identical; this block proves the windowed/saturated path.)
+        begin : sec_lut_window
+            integer m;
+            `SRAM_CLEAR(syn_sram) `SRAM_CLEAR(lut_sram)
+            `SRAM_CLEAR(pot_sram) `SRAM_CLEAR(spk_sram)
+            for (m = 0; m < 256; m = m + 1) lut_sram[m] = m;   // identity table
+
+            thresh_base = 30'd0;                 // index maps directly to sram[idx]
+            thresh_op   = ROP_LUT;  lut_out_sz = SZ32;
+            act_out_sz  = SZ32;     pot_sz     = SZ32;
+            np_out_bin_point = 5'd0;             // requant disabled (table at target scale)
+            pot_decay_mult   = 32'h0;            // pot path unused here
+            lut_window  = 1'b1;  out_signed = 1'b0;  bp_en = 0;
+
+            // S=0 : idx = pot + 128, clamped to [0,255]
+            bin_point_syn_curr = 5'd5;           // = F  -> shift 0
+            in_pot[0]=0;     in_pot[1]=50;   in_pot[2]=200;  in_pot[3]=-50;
+            in_pot[4]=-200;  in_pot[5]=-128; in_pot[6]=127;
+            for (m=0;m<7;m=m+1) syn_sram[m] = in_pot[m];
+            last_neuron_idx = 7-1;
+            `VT_PULSE(start_new_block)
+            `VT_WAIT_FINISH(neuron_proc_finished, 6000)
+            repeat (40) @(posedge clk); #1;
+            check_eq_u(spk_sram[(192+0)&8'hFF], 32'd128, "W1 pot0   -> idx128");
+            check_eq_u(spk_sram[(192+1)&8'hFF], 32'd178, "W1 pot50  -> idx178");
+            check_eq_u(spk_sram[(192+2)&8'hFF], 32'd255, "W1 pot200 -> sat255");
+            check_eq_u(spk_sram[(192+3)&8'hFF], 32'd78,  "W1 pot-50 -> idx78");
+            check_eq_u(spk_sram[(192+4)&8'hFF], 32'd0,   "W1 pot-200-> sat0");
+            check_eq_u(spk_sram[(192+5)&8'hFF], 32'd0,   "W1 pot-128-> idx0 edge");
+            check_eq_u(spk_sram[(192+6)&8'hFF], 32'd255, "W1 pot127 -> idx255 edge");
+
+            // S=2 : idx = (pot>>>2) + 128, clamped (arithmetic shift incl. neg)
+            `SRAM_CLEAR(spk_sram)
+            bin_point_syn_curr = 5'd7;           // = F+2 -> shift 2
+            in_pot[0]=512;  in_pot[1]=4;  in_pot[2]=-8;  in_pot[3]=0;
+            for (m=0;m<4;m=m+1) syn_sram[m] = in_pot[m];
+            last_neuron_idx = 4-1;
+            `VT_PULSE(start_new_block)
+            `VT_WAIT_FINISH(neuron_proc_finished, 6000)
+            repeat (40) @(posedge clk); #1;
+            check_eq_u(spk_sram[(192+0)&8'hFF], 32'd255, "W2 pot512>>2 -> sat255");
+            check_eq_u(spk_sram[(192+1)&8'hFF], 32'd129, "W2 pot4>>2   -> idx129");
+            check_eq_u(spk_sram[(192+2)&8'hFF], 32'd126, "W2 pot-8>>2  -> idx126");
+            check_eq_u(spk_sram[(192+3)&8'hFF], 32'd128, "W2 pot0      -> idx128");
+
+            // default-off contrast: lut_window=0 -> raw low 8 bits (no centring)
+            `SRAM_CLEAR(spk_sram)
+            lut_window = 1'b0;  bin_point_syn_curr = 5'd5;
+            in_pot[0]=5;  in_pot[1]=200;
+            for (m=0;m<2;m=m+1) syn_sram[m] = in_pot[m];
+            last_neuron_idx = 2-1;
+            `VT_PULSE(start_new_block)
+            `VT_WAIT_FINISH(neuron_proc_finished, 6000)
+            repeat (40) @(posedge clk); #1;
+            check_eq_u(spk_sram[(192+0)&8'hFF], 32'd5,   "W3 off pot5   -> raw idx5");
+            check_eq_u(spk_sram[(192+1)&8'hFF], 32'd200, "W3 off pot200 -> raw idx200");
+            lut_window = 1'b0;  out_signed = 1'b0;
+        end
 
         `VERIF_EPILOGUE("tb_neuron_processing")
     end
