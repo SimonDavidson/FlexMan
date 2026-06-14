@@ -841,6 +841,123 @@ module tb_acc_fmiSnn_processor;
             check_eq(u_thresh_mem.mem[1], 32'h0000_4000, "T6 thresh[1] = 1.0 at K=14");
         end
 
+        // ============================================================
+        // Test 7: $readmemh of group3 adaptive-LIF hex files.
+        //
+        //   Counterpart to T6 but for the adaptive datapath. Loads all
+        //   six per-neuron memories for group3 (dcy_syn, dcy_mem, thresh,
+        //   b_eff, dcy_ada, scl_ada) from convert_model.py output, and
+        //   pre-loads ada to a known non-zero value so the b_eff*ada
+        //   multiplier produces an observable ada_corr.
+        //
+        //   T1 inputs: 2 spikes * weight 10 = 20 at K_mem=14, bp=0.
+        //   With ada_init = 0x4000_0000 (= 0.25 in Q0.32):
+        //     ada_corr[i] = (b_eff[i] * 0x4000_0000) >> 32   (signed * unsigned)
+        //                 = b_eff[i] / 4 (arithmetic, signed)
+        //     eff_syn[i]  = 20 - ada_corr[i]
+        //     diff[i]     = 0 - eff_syn[i]
+        //     decayed_diff[i] = (diff[i] * dcy_mem[i]) >> 32
+        //     new_mem[i]  = decayed_diff[i] + eff_syn[i]
+        //     spike[i]    = new_mem[i] >= 0x4000          -> 0 (small new_mem)
+        //     syn_wb[i]   = (20 * dcy_syn[i]) >> 32
+        //     ada_wb[i]   = ((0x4000_0000 * dcy_ada[i]) >> 32) + spike[i]*scl_ada[i]
+        //
+        //   Same first-run mode: $display loaded hex + outputs to compute
+        //   expected values, then convert to check_eq.
+        // ============================================================
+        $display("Test 7: $readmemh of group3 hex into adaptive-LIF memories");
+
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
+            u_ada_mem.mem[i_init]      = 32'd0;
+        end
+
+        $readmemh("../../fmi/mem_files/recurrent/group3_dcy_syn.hex",
+                  u_dcy_syn_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group3_dcy_mem.hex",
+                  u_dcy_mem_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group3_thresh.hex",
+                  u_thresh_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group3_b_eff.hex",
+                  u_b_eff_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group3_dcy_ada.hex",
+                  u_dcy_ada_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group3_scl_ada.hex",
+                  u_scl_ada_mem.mem);
+
+        // Pre-load ada to 0.25 in Q0.32 to make ada_corr observable.
+        u_ada_mem.mem[0] = 32'h4000_0000;
+        u_ada_mem.mem[1] = 32'h4000_0000;
+
+        // Same T1 act/weight setup.
+        u_act_mem.mem[0]    = 32'hFFFF_FFFF;
+        u_weight_mem.mem[0] = 32'h0A0A_0A0A;
+
+        // Repoint the ada-related base addresses to 0 (still pointing at T1
+        // defaults 90/100/110/120 otherwise). Must come BEFORE the trigger.
+        cfg_write(32'hFFFF_0020, 32'd0);    // ada_base_addr     = 0
+        cfg_write(32'hFFFF_0024, 32'd0);    // b_eff_base_addr   = 0
+        cfg_write(32'hFFFF_0028, 32'd0);    // dcy_ada_base_addr = 0
+        cfg_write(32'hFFFF_002C, 32'd0);    // scl_ada_base_addr = 0
+
+        // M0 with has_ada=1 (bit 30 set), other fields same as T1.
+        cfg_write(32'hFFFF_003C, 32'h4553_0100);
+
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
+
+        wait_pipeline(timed_out);
+        if (!timed_out) begin
+            $display("  T7 loaded dcy_syn[0]=0x%08h  dcy_mem[0]=0x%08h",
+                     u_dcy_syn_mem.mem[0], u_dcy_mem_mem.mem[0]);
+            $display("  T7 loaded thresh[0]=0x%08h   b_eff[0]=0x%08h",
+                     u_thresh_mem.mem[0],  u_b_eff_mem.mem[0]);
+            $display("  T7 loaded dcy_ada[0]=0x%08h  scl_ada[0]=0x%08h",
+                     u_dcy_ada_mem.mem[0], u_scl_ada_mem.mem[0]);
+            $display("  T7 loaded dcy_syn[1]=0x%08h  dcy_mem[1]=0x%08h",
+                     u_dcy_syn_mem.mem[1], u_dcy_mem_mem.mem[1]);
+            $display("  T7 loaded thresh[1]=0x%08h   b_eff[1]=0x%08h",
+                     u_thresh_mem.mem[1],  u_b_eff_mem.mem[1]);
+            $display("  T7 loaded dcy_ada[1]=0x%08h  scl_ada[1]=0x%08h",
+                     u_dcy_ada_mem.mem[1], u_scl_ada_mem.mem[1]);
+            $display("  T7 neuron 0:  syn=0x%08h  pot=0x%08h  ada=0x%08h",
+                     u_syn_curr_mem.mem[0], u_pot_mem.mem[0], u_ada_mem.mem[0]);
+            $display("  T7 neuron 1:  syn=0x%08h  pot=0x%08h  ada=0x%08h",
+                     u_syn_curr_mem.mem[1], u_pot_mem.mem[1], u_ada_mem.mem[1]);
+            $display("  T7 spike_word=0x%08h", u_spike_mem.mem[0]);
+
+            // Expected outputs (verified against simulate_int_recurrent.py
+            // primitives, all multiplications use the upper 32 bits of
+            // signed * unsigned products):
+            //   Neuron 0 -- b_eff=0xae(=+174), dcy_mem=0xfb3f6100, dcy_ada=0xfdf6ef00
+            //     ada_corr      = (174 * 0x40000000) >> 32 = 43
+            //     eff_syn       = 20 - 43 = -23
+            //     diff          = 0 - (-23) = 23
+            //     decayed_diff  = (23 * 0xfb3f6100) >> 32 = 22
+            //     new_mem       = 22 + (-23) = -1 = 0xFFFFFFFF
+            //     spike         = -1 >= 0x4000 -> 0
+            //     syn_writeback = (20 * 0xfc2afd00) >> 32 = 19 = 0x13
+            //     ada_writeback = (0x40000000 * 0xfdf6ef00) >> 32 = 0x3F7DBBC0
+            //   Neuron 1 -- b_eff=0x03(=+3), dcy_mem=0xfd327700, dcy_ada=0xf8470a00
+            //     ada_corr      = (3 * 0x40000000) >> 32 = 0
+            //     eff_syn       = 20
+            //     decayed_diff  = (-20 * 0xfd327700) >> 32 = -20
+            //     new_mem       = -20 + 20 = 0
+            //     syn_writeback = 0x13 (same dcy_syn rounding)
+            //     ada_writeback = (0x40000000 * 0xf8470a00) >> 32 = 0x3E11C280
+            check_eq(u_syn_curr_mem.mem[0], 32'h0000_0013, "T7 syn_curr[0]");
+            check_eq(u_syn_curr_mem.mem[1], 32'h0000_0013, "T7 syn_curr[1]");
+            check_eq(u_pot_mem.mem[0],      32'hFFFF_FFFF, "T7 pot[0] (-1, no spike)");
+            check_eq(u_pot_mem.mem[1],      32'h0000_0000, "T7 pot[1] (0)");
+            check_eq(u_ada_mem.mem[0],      32'h3F7D_BBC0, "T7 ada[0] (decayed 0.25)");
+            check_eq(u_ada_mem.mem[1],      32'h3E11_C280, "T7 ada[1] (decayed 0.25)");
+            check_eq(u_spike_mem.mem[0],    32'h0000_0000, "T7 spike_sram[0] (no spike)");
+            check_eq(u_thresh_mem.mem[0],   32'h0000_4000, "T7 thresh[0] = 1.0 at K=14");
+            check_eq(u_thresh_mem.mem[1],   32'h0000_4000, "T7 thresh[1] = 1.0 at K=14");
+        end
+
         $display("=== tb_acc_fmiSnn_processor: %0d failure(s) ===", errors);
         if (errors == 0) $display("PASS"); else $display("FAIL");
         $finish;
