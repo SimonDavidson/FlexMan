@@ -88,7 +88,7 @@
 module tb_acc_fmiSnn_processor;
 
     localparam CLK_PERIOD = 10;
-    localparam MEM_DEPTH  = 256;
+    localparam MEM_DEPTH  = 4096;   // bumped 256 -> 4096 for T6_LAYER (group4 full layer)
 
     reg clk;
     reg reset;
@@ -321,65 +321,65 @@ module tb_acc_fmiSnn_processor;
     // ----------------------------------------------------------------
     sram_model #(.DATA_W(`WTD_BITS), .DEPTH(MEM_DEPTH)) u_weight_mem (
         .clk(clk), .we(1'b0), .re(weight_mem_rd_o),
-        .addr(weight_mem_addr_o[7:0]), .wdata({`WTD_BITS{1'b0}}),
+        .addr(weight_mem_addr_o[15:0]), .wdata({`WTD_BITS{1'b0}}),
         .rdata(weight_mem_data_i));
 
     sram_model #(.DATA_W(`ACT_BITS), .DEPTH(MEM_DEPTH)) u_act_mem (
         .clk(clk), .we(1'b0), .re(act_mem_req_o),
-        .addr(act_mem_addr_o[7:0]), .wdata({`ACT_BITS{1'b0}}),
+        .addr(act_mem_addr_o[15:0]), .wdata({`ACT_BITS{1'b0}}),
         .rdata(act_mem_data_i));
 
     sram_model #(.DATA_W(`POT_BITS), .DEPTH(MEM_DEPTH)) u_syn_curr_mem (
         .clk(clk), .we(syn_curr_mem_wr_o), .re(syn_curr_mem_rd_o),
-        .addr(syn_curr_mem_addr_o[7:0]), .wdata(syn_curr_mem_data_o),
+        .addr(syn_curr_mem_addr_o[15:0]), .wdata(syn_curr_mem_data_o),
         .rdata(syn_curr_mem_data_i));
 
     sram_model #(.DATA_W(`WTD_BITS), .DEPTH(MEM_DEPTH)) u_thresh_mem (
         .clk(clk), .we(1'b0), .re(thresh_mem_rd_o),
-        .addr(thresh_mem_addr_o[7:0]), .wdata({`WTD_BITS{1'b0}}),
+        .addr(thresh_mem_addr_o[15:0]), .wdata({`WTD_BITS{1'b0}}),
         .rdata(thresh_mem_data_i));
 
     sram_model #(.DATA_W(`POT_BITS), .DEPTH(MEM_DEPTH)) u_pot_mem (
         .clk(clk), .we(pot_mem_wr_o), .re(pot_mem_rd_o),
-        .addr(pot_mem_addr_o[7:0]), .wdata(pot_mem_data_o),
+        .addr(pot_mem_addr_o[15:0]), .wdata(pot_mem_data_o),
         .rdata(pot_mem_data_i));
 
     wire [`ACT_BITS-1:0] spike_rdata_nc;
     sram_model #(.DATA_W(`ACT_BITS), .DEPTH(MEM_DEPTH)) u_spike_mem (
         .clk(clk), .we(spike_mem_wr_o), .re(1'b0),
-        .addr(spike_mem_addr_o[7:0]), .wdata(spike_mem_data_o),
+        .addr(spike_mem_addr_o[15:0]), .wdata(spike_mem_data_o),
         .rdata(spike_rdata_nc));
 
     // Per-neuron decay memories (read-only from DUT perspective)
     sram_model #(.DATA_W(32), .DEPTH(MEM_DEPTH)) u_dcy_syn_mem (
         .clk(clk), .we(1'b0), .re(dcy_syn_mem_rd_o),
-        .addr(dcy_syn_mem_addr_o[7:0]), .wdata(32'b0),
+        .addr(dcy_syn_mem_addr_o[15:0]), .wdata(32'b0),
         .rdata(dcy_syn_mem_data_i));
 
     sram_model #(.DATA_W(32), .DEPTH(MEM_DEPTH)) u_dcy_mem_mem (
         .clk(clk), .we(1'b0), .re(dcy_mem_mem_rd_o),
-        .addr(dcy_mem_mem_addr_o[7:0]), .wdata(32'b0),
+        .addr(dcy_mem_mem_addr_o[15:0]), .wdata(32'b0),
         .rdata(dcy_mem_mem_data_i));
 
     // Ada state memory (read/write)
     sram_model #(.DATA_W(32), .DEPTH(MEM_DEPTH)) u_ada_mem (
         .clk(clk), .we(ada_mem_wr_o), .re(ada_mem_rd_o),
-        .addr(ada_mem_addr_o[7:0]), .wdata(ada_mem_data_o),
+        .addr(ada_mem_addr_o[15:0]), .wdata(ada_mem_data_o),
         .rdata(ada_mem_data_i));
 
     sram_model #(.DATA_W(32), .DEPTH(MEM_DEPTH)) u_b_eff_mem (
         .clk(clk), .we(1'b0), .re(b_eff_mem_rd_o),
-        .addr(b_eff_mem_addr_o[7:0]), .wdata(32'b0),
+        .addr(b_eff_mem_addr_o[15:0]), .wdata(32'b0),
         .rdata(b_eff_mem_data_i));
 
     sram_model #(.DATA_W(32), .DEPTH(MEM_DEPTH)) u_dcy_ada_mem (
         .clk(clk), .we(1'b0), .re(dcy_ada_mem_rd_o),
-        .addr(dcy_ada_mem_addr_o[7:0]), .wdata(32'b0),
+        .addr(dcy_ada_mem_addr_o[15:0]), .wdata(32'b0),
         .rdata(dcy_ada_mem_data_i));
 
     sram_model #(.DATA_W(32), .DEPTH(MEM_DEPTH)) u_scl_ada_mem (
         .clk(clk), .we(1'b0), .re(scl_ada_mem_rd_o),
-        .addr(scl_ada_mem_addr_o[7:0]), .wdata(32'b0),
+        .addr(scl_ada_mem_addr_o[15:0]), .wdata(32'b0),
         .rdata(scl_ada_mem_data_i));
 
     // ----------------------------------------------------------------
@@ -738,6 +738,109 @@ module tb_acc_fmiSnn_processor;
             check_eq(u_pot_mem.mem[51],      32'd2,         "T5 pot_sram[51]");
         end
 
+        // ============================================================
+        // Test 6: $readmemh of FMI hex files into per-neuron memories.
+        //
+        //   Validates the loading path (convert_model.py output -> RTL via
+        //   $readmemh) and the per-neuron decay path with REAL group4
+        //   parameters from the recurrent_snn model.
+        //
+        //   Reuses T1's tiny full-connectivity setup (2 in, 2 out, all
+        //   spiking, weight=10) so the inputs to the LIF are deterministic.
+        //   What differs: dcy_syn, dcy_mem and thresh come from
+        //   ../../fmi/mem_files/recurrent/group4_*.hex (neurons 0 and 1).
+        //
+        //   Pre-computed expected values from simulate_int_recurrent.py-
+        //   equivalent integer math (recompute on the Python side and
+        //   paste here if model files change):
+        //     group4_dcy_syn[0..1] from hex:  filled by readmemh
+        //     group4_dcy_mem[0..1] from hex:  filled by readmemh
+        //     group4_thresh[0..1] = 0x4000 (1.0 at K_neuron=14)
+        //
+        //   With 2 spikes * weight 10 = 20 at K_mem=14 (bin_point=0,
+        //   so neuron-scale syn = 20 too):
+        //     diff = 0 - 20 = -20
+        //     decayed_diff = (-20 * dcy_mem) >> 32  (signed)
+        //     new_mem = decayed_diff + 20
+        //     spike  = new_mem >= 16384 (=1.0 at K=14)   — won't fire for
+        //              small new_mem; will be verified after first run.
+        //
+        //   First-run mode: $display the actual outputs so we can compute
+        //   the goldens by hand from the loaded hex values, then convert
+        //   to check_eq in a follow-up commit.
+        // ============================================================
+        $display("Test 6: $readmemh of group4 hex into dcy/thresh memories");
+
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
+        end
+
+        // Load group4 per-neuron decay and threshold hex.
+        // Paths are relative to wherever the simulator is invoked; this
+        // testbench is normally launched from fmiSnnAcc/ via tbAccFmiSNN.bsh.
+        $readmemh("../../fmi/mem_files/recurrent/group4_dcy_syn.hex",
+                  u_dcy_syn_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group4_dcy_mem.hex",
+                  u_dcy_mem_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group4_thresh.hex",
+                  u_thresh_mem.mem);
+
+        // Restore the simple T1 act/weight: 2 inputs all spiking, weight=10.
+        u_act_mem.mem[0]    = 32'hFFFF_FFFF;
+        u_weight_mem.mem[0] = 32'h0A0A_0A0A;
+
+        // Repoint all the base addresses to 0 (the hex files load starting at
+        // index 0 in each SRAM).
+        cfg_write(32'hFFFF_0000, 32'd0);    // act_base_addr      = 0
+        cfg_write(32'hFFFF_0004, 32'd0);    // weight_base_addr   = 0
+        cfg_write(32'hFFFF_0008, 32'd0);    // syn_curr_base_addr = 0
+        cfg_write(32'hFFFF_000C, 32'd0);    // thresh_base        = 0
+        cfg_write(32'hFFFF_0010, 32'd0);    // pot_base           = 0
+        cfg_write(32'hFFFF_0014, 32'd0);    // spike_base         = 0
+        cfg_write(32'hFFFF_0018, 32'd0);    // dcy_syn_base       = 0
+        cfg_write(32'hFFFF_001C, 32'd0);    // dcy_mem_base       = 0
+
+        // S1 still has last_neuron_idx=1 (2 neurons); has_ada still 0.
+        // M0 = 0x0553_0100 unchanged from T1 (no ada, full conn, 8-bit weights).
+        cfg_write(32'hFFFF_003C, 32'h0553_0100);
+
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
+
+        wait_pipeline(timed_out);
+        if (!timed_out) begin
+            $display("  T6 neuron 0:  syn_curr=0x%08h  pot=0x%08h  spike_word=0x%08h",
+                     u_syn_curr_mem.mem[0], u_pot_mem.mem[0], u_spike_mem.mem[0]);
+            $display("  T6 neuron 1:  syn_curr=0x%08h  pot=0x%08h",
+                     u_syn_curr_mem.mem[1], u_pot_mem.mem[1]);
+            $display("  T6 loaded dcy_syn[0]=0x%08h  dcy_mem[0]=0x%08h  thresh[0]=0x%08h",
+                     u_dcy_syn_mem.mem[0], u_dcy_mem_mem.mem[0], u_thresh_mem.mem[0]);
+            $display("  T6 loaded dcy_syn[1]=0x%08h  dcy_mem[1]=0x%08h  thresh[1]=0x%08h",
+                     u_dcy_syn_mem.mem[1], u_dcy_mem_mem.mem[1], u_thresh_mem.mem[1]);
+            // Threshold from hex is 0x4000 (=1.0 at K=14). With weight=10 (very small
+            // at K=14), new_mem will be far below threshold -> no spike expected.
+            //
+            // Expected outputs (computed by hand, agreeing with simulate_int_recurrent.py):
+            //   MAC: 2 spikes * weight 10 = 20 at K_mem=14 (bin_point=0 -> neuron-scale 20)
+            //   For each neuron i:
+            //     syn_writeback = (20 * dcy_syn[i]) >> 32   (signed * unsigned Q0.32)
+            //     new_mem       = ((-20) * dcy_mem[i]) >> 32 + 20
+            //     spike         = new_mem >= 0x4000  -> 0 (both)
+            //   Neuron 0: dcy_syn=0xfae9da00 -> 20*4209758720>>32 = 19 -> 0x13
+            //             dcy_mem=0xfd07d300 -> -20*4245242624>>32 = -20, new_mem=0
+            //   Neuron 1: dcy_syn=0xfc493400 -> 20*4232029184>>32 = 19 -> 0x13
+            //             dcy_mem=0xfb6b5800 -> -20*4218747392>>32 = -20, new_mem=0
+            check_eq(u_syn_curr_mem.mem[0], 32'h0000_0013, "T6 syn_curr[0] (decay of 20)");
+            check_eq(u_syn_curr_mem.mem[1], 32'h0000_0013, "T6 syn_curr[1] (decay of 20)");
+            check_eq(u_pot_mem.mem[0],      32'd0,         "T6 pot[0] (new_mem=0)");
+            check_eq(u_pot_mem.mem[1],      32'd0,         "T6 pot[1] (new_mem=0)");
+            check_eq(u_spike_mem.mem[0], 32'h0000_0000, "T6 spike_sram[0] (no spike)");
+            check_eq(u_thresh_mem.mem[0], 32'h0000_4000, "T6 thresh[0] = 1.0 at K=14");
+            check_eq(u_thresh_mem.mem[1], 32'h0000_4000, "T6 thresh[1] = 1.0 at K=14");
+        end
+
         $display("=== tb_acc_fmiSnn_processor: %0d failure(s) ===", errors);
         if (errors == 0) $display("PASS"); else $display("FAIL");
         $finish;
@@ -762,7 +865,7 @@ module sram_model #(
     input  wire              clk,
     input  wire              we,
     input  wire              re,
-    input  wire        [7:0] addr,
+    input  wire       [15:0] addr,   // widened 8 -> 16 bits for T6_LAYER (group4 has 1920 entries)
     input  wire [DATA_W-1:0] wdata,
     output reg  [DATA_W-1:0] rdata
 );
