@@ -10,7 +10,18 @@
 // AXI bus sharing:
 //   A single host AXI bus (sys_req_i/sys_addr_i/sys_data_i) is broadcast to
 //   all sub-modules.  Each sub-module self-filters by address.  Acks are OR'd.
-//   Only the scheduler produces read data (sys_data_o).
+//   Read data (sys_data_o) comes from the scheduler (status registers) or,
+//   for the POOL_RD_BASE window, from the shared-pool readback path below.
+//
+// Host pool readback (POOL_RD_BASE window, read-only):
+//   A memory-mapped window lets the host read the shared pool back out (e.g.
+//   output activations after a run).  An access in the window issues ONE pool
+//   read requester at the LOWEST arbiter priority, so it never disturbs compute
+//   (it just waits for a free bank cycle).  Reads are VARIABLE LATENCY: the host
+//   must hold sys_req_i until sys_ack_o.  For prompt, race-free readback the host
+//   should quiesce compute first:
+//     PAUSE (sched ctrl reg 3) -> poll status reg 1 until acc_busy==0
+//       -> read POOL_RD_BASE+(word<<2) ...  -> UNPAUSE (sched ctrl reg 4).
 //
 // Config write adapter (per accelerator):
 //   config_manager outputs cm_config_wr_o[i] + cm_config_data_o with no address.
@@ -39,6 +50,10 @@ module flexman #(
     parameter [31:0] SNN1_CFG_BASE           = 32'h1001_0000,
     parameter [31:0] ANN_CFG_BASE            = 32'h1002_0000,
     parameter [31:0] HAD_CFG_BASE            = 32'h1003_0000,
+    // Host pool-readback window — read-only, memory-mapped view of the shared
+    // pool.  Decoded on sys_addr_i[31:20] == POOL_RD_BASE[31:20] (1 MB / 256K
+    // words).  Clear of the accelerator windows (0x100x) and CM/BBA/FU/SCH.
+    parameter [31:0] POOL_RD_BASE            = 32'h1010_0000,
     // config_manager AXI slave address ranges (must not overlap with above).
     parameter [31:0] CM_CFG_MEM_ADDR         = 32'hA000_0000,
     parameter [31:0] CM_CFG_MEM_MASK         = 32'hFF00_0000,
@@ -425,9 +440,8 @@ wire had_ext_ack  = had_sys_ack  & ~cm_config_wr[3];
 wire [NUM_COMP_ACC-1:0] cm_config_wait    = {NUM_COMP_ACC{1'b0}};
 wire [NUM_COMP_ACC-1:0] cm_buff_base_wait = {NUM_COMP_ACC{1'b0}};
 
-assign sys_ack_o  = sch_ack | cm_ack | fu_ack
-                  | snn0_ext_ack | snn1_ext_ack | ann_ext_ack | had_ext_ack;
-assign sys_data_o = sch_data_o;
+// sys_ack_o / sys_data_o are driven below, after the pool-readback FSM, so the
+// mux can fold in pool_rd_ack / prd_data_r from the POOL_RD_BASE window.
 
 // ─── BBA register banks ───────────────────────────────────────────────────────
 reg [BBA_CNT_SZ-1:0] bba_cnt_0, bba_cnt_1, bba_cnt_2, bba_cnt_3;
@@ -657,10 +671,11 @@ assign a0_pot_mem_data_o = acc_uses_a0_pot ? acc_a0_pot_data : fu_a0_pot_data[`P
 assign fu_a0_pot_wait    = acc_uses_a0_pot | a0_pot_mem_wait_i;
 
 // ─── Shared act/spike/syn_curr + Hadamard pool — shared_pool (4 banks) ───────
-// Requesters, strict priority (index 0 = highest):
+// Requesters, strict priority (index 0 = highest, index SP_NREQ-1 = lowest):
 //   0 FILL  1 s0_syn 2 s0_act 3 s0_spike  4 s1_syn 5 s1_act 6 s1_spike
 //   7 a0_syn 8 a0_act 9 a0_spike  10 hd_a 11 hd_b 12 hd_z 13 hd_r_rd 14 hd_r_wr
-localparam SP_NREQ  = 15;
+//   15 pool_rd  (host AXI readback window — lowest priority, never disturbs compute)
+localparam SP_NREQ  = 16;
 localparam SP_NBANK = 4;
 
 wire [SP_NREQ-1:0]            sp_req_act;
@@ -671,7 +686,52 @@ wire [SP_NREQ*32-1:0]         sp_req_wdata;
 wire [SP_NREQ-1:0]            sp_req_wait;
 wire [SP_NREQ*32-1:0]         sp_req_rdata;
 
-assign sp_req_act = { acc_hd_r_wr, acc_hd_r_rd_req, acc_hd_z_req, acc_hd_b_req,
+// ── Host pool-readback window (requester index SP_NREQ-1, lowest priority) ──
+// Read-only, memory-mapped view of the shared pool on the sys_* (AXI) bus.
+// Variable latency: the host holds sys_req_i until sys_ack_o.  Read FSM:
+//   REQ : drive the pool read until granted (!sp_req_wait[SP_NREQ-1])
+//   CAP : pool read data is valid for this one cycle -> latch it
+//   ACK : assert sys_ack_o + present data until the host drops sys_req_i
+wire pool_rd_sel = sys_req_i & (sys_addr_i[31:20] == POOL_RD_BASE[31:20]);
+
+// window byte-offset >> 2 = pool logical word (bank-interleaved, addr[1:0]=bank)
+wire [`ADDR_SIZE-1:0] pool_rd_addr =
+    {{(`ADDR_SIZE-18){1'b0}}, sys_addr_i[19:2]};
+
+localparam PRD_IDLE = 2'd0, PRD_REQ = 2'd1, PRD_CAP = 2'd2, PRD_ACK = 2'd3;
+reg  [1:0]  prd_state;
+reg  [31:0] prd_data_r;
+
+always @(posedge clk or posedge reset) begin
+    if (reset) begin
+        prd_state  <= PRD_IDLE;
+        prd_data_r <= 32'b0;
+    end else begin
+        case (prd_state)
+            PRD_IDLE: if (pool_rd_sel)                  prd_state <= PRD_REQ;
+            PRD_REQ : if (!pool_rd_sel)                 prd_state <= PRD_IDLE;
+                      else if (!sp_req_wait[SP_NREQ-1]) prd_state <= PRD_CAP;
+            PRD_CAP : begin
+                          prd_data_r <= sp_req_rdata[(SP_NREQ-1)*32 +: 32];
+                          prd_state  <= PRD_ACK;
+                      end
+            PRD_ACK : if (!pool_rd_sel)                 prd_state <= PRD_IDLE;
+            default :                                   prd_state <= PRD_IDLE;
+        endcase
+    end
+end
+
+wire pool_rd_req_active = (prd_state == PRD_REQ) & pool_rd_sel;
+wire pool_rd_ack        = (prd_state == PRD_ACK);
+
+// Host AXI response: fold the pool-readback path into the OR'd ack / data mux.
+assign sys_ack_o  = sch_ack | cm_ack | fu_ack
+                  | snn0_ext_ack | snn1_ext_ack | ann_ext_ack | had_ext_ack
+                  | pool_rd_ack;
+assign sys_data_o = pool_rd_ack ? prd_data_r : sch_data_o;
+
+assign sp_req_act = { pool_rd_req_active,
+                      acc_hd_r_wr, acc_hd_r_rd_req, acc_hd_z_req, acc_hd_b_req,
                       acc_hd_a_req,
                       acc_a0_spike_wr, acc_a0_act_req,
                       (acc_a0_syn_curr_rd | acc_a0_syn_curr_wr),
@@ -680,24 +740,28 @@ assign sp_req_act = { acc_hd_r_wr, acc_hd_r_rd_req, acc_hd_z_req, acc_hd_b_req,
                       acc_s0_spike_wr, acc_s0_act_req,
                       (acc_s0_syn_curr_rd | acc_s0_syn_curr_wr),
                       fu_shared_wr };
-assign sp_req_rd  = { 1'b0, acc_hd_r_rd_req, acc_hd_z_req, acc_hd_b_req,
+assign sp_req_rd  = { pool_rd_req_active,
+                      1'b0, acc_hd_r_rd_req, acc_hd_z_req, acc_hd_b_req,
                       acc_hd_a_req,
                       1'b0, acc_a0_act_req, acc_a0_syn_curr_rd,
                       1'b0, acc_s1_act_req, acc_s1_syn_curr_rd,
                       1'b0, acc_s0_act_req, acc_s0_syn_curr_rd,
                       1'b0 };
-assign sp_req_wr  = { acc_hd_r_wr, 1'b0, 1'b0, 1'b0, 1'b0,
+assign sp_req_wr  = { 1'b0,
+                      acc_hd_r_wr, 1'b0, 1'b0, 1'b0, 1'b0,
                       acc_a0_spike_wr, 1'b0, acc_a0_syn_curr_wr,
                       acc_s1_spike_wr, 1'b0, acc_s1_syn_curr_wr,
                       acc_s0_spike_wr, 1'b0, acc_s0_syn_curr_wr,
                       fu_shared_wr };
-assign sp_req_addr = { acc_hd_r_wr_addr, acc_hd_r_rd_addr, acc_hd_z_addr,
+assign sp_req_addr = { pool_rd_addr,
+                       acc_hd_r_wr_addr, acc_hd_r_rd_addr, acc_hd_z_addr,
                        acc_hd_b_addr, acc_hd_a_addr,
                        acc_a0_spike_addr, acc_a0_act_addr, acc_a0_syn_curr_addr,
                        acc_s1_spike_addr, acc_s1_act_addr, acc_s1_syn_curr_addr,
                        acc_s0_spike_addr, acc_s0_act_addr, acc_s0_syn_curr_addr,
                        fu_shared_addr };
-assign sp_req_wdata = { acc_hd_r_wr_data, 32'b0, 32'b0, 32'b0, 32'b0,
+assign sp_req_wdata = { 32'b0,
+                        acc_hd_r_wr_data, 32'b0, 32'b0, 32'b0, 32'b0,
                         acc_a0_spike_data, 32'b0, acc_a0_syn_curr_data,
                         acc_s1_spike_data, 32'b0, acc_s1_syn_curr_data,
                         acc_s0_spike_data, 32'b0, acc_s0_syn_curr_data,
