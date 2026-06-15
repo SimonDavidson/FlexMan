@@ -160,21 +160,24 @@ BOOT_REG_OFFSETS_FMI = {
 
 # Hadamard config-register offsets (Hadamard/hu_config_regs.v reg_sel = addr[7:0]).
 # Computes R = Z*(A-B) + B + mode*R_prev over a stream of `stream_len` elements.
+# ONE 32-bit register per word (byte offset = word_index*4), so the config_manager
+# per-task stream (word i -> byte i*4) delivers all 14 fields in order — i.e. the
+# packed cfg_mem block is just word[i] = field[i] (see cfgmem.pack_hu_cfg_words).
 HU_REG_OFFSETS = {
-    "mode":             0x00,   # [0]: 1 = update (+R_prev), 0 = init
-    "stream_len":       0x01,   # number of vector elements
-    "src_a_base_addr":  0x04,
-    "src_a_elem_sz":    0x05,
-    "src_a_bin_point":  0x06,
-    "src_b_base_addr":  0x08,
-    "src_b_elem_sz":    0x09,
-    "src_b_bin_point":  0x0A,
-    "src_z_base_addr":  0x0C,
-    "src_z_elem_sz":    0x0D,
-    "src_z_bin_point":  0x0E,
-    "src_r_base_addr":  0x10,
-    "src_r_elem_sz":    0x11,
-    "src_r_bin_point":  0x12,
+    "mode":             0x00,   # w0  [0]: 1 = update (+R_prev), 0 = init
+    "stream_len":       0x04,   # w1  number of vector elements
+    "src_a_base_addr":  0x08,   # w2
+    "src_a_elem_sz":    0x0C,   # w3
+    "src_a_bin_point":  0x10,   # w4
+    "src_b_base_addr":  0x14,   # w5
+    "src_b_elem_sz":    0x18,   # w6
+    "src_b_bin_point":  0x1C,   # w7
+    "src_z_base_addr":  0x20,   # w8
+    "src_z_elem_sz":    0x24,   # w9
+    "src_z_bin_point":  0x28,   # w10
+    "src_r_base_addr":  0x2C,   # w11
+    "src_r_elem_sz":    0x30,   # w12
+    "src_r_bin_point":  0x34,   # w13
 }
 
 # ---------------------------------------------------------------------------

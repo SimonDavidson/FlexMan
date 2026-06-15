@@ -119,40 +119,40 @@ module tb_hu_config_regs;
         cfg_write(8'h00, 32'hFFFF_FFFE, 1'b1);
         check_bit(mode_r, 1'b0, "mode = 0 (bit0 low)");
 
-        // 0x01 stream_len [15:0]
-        cfg_write(8'h01, 32'h1234_ABCD, 1'b1);
+        // 0x04 stream_len [15:0]  (w1)
+        cfg_write(8'h04, 32'h1234_ABCD, 1'b1);
         check_eq_u(stream_len_r, 16'hABCD, "stream_len trunc 16b");
 
-        // src A
-        cfg_write(8'h04, 32'hFFFF_FFFF, 1'b1);
+        // src A  (w2/w3/w4)
+        cfg_write(8'h08, 32'hFFFF_FFFF, 1'b1);
         check_eq_u(a_base, {ADDR_SZ{1'b1}}, "a_base trunc 30b");
-        cfg_write(8'h05, 32'hFFFF_FFFF, 1'b1);
+        cfg_write(8'h0C, 32'hFFFF_FFFF, 1'b1);
         check_eq_u(a_esz, {ACT_SZ{1'b1}}, "a_esz trunc 3b");
-        cfg_write(8'h06, 32'hFFFF_FFFF, 1'b1);
+        cfg_write(8'h10, 32'hFFFF_FFFF, 1'b1);
         check_eq_u(a_bp, 5'h1F, "a_bp trunc 5b");
 
-        // src B
-        cfg_write(8'h08, 32'h2AAA_AAAA, 1'b1);
+        // src B  (w5/w6/w7)
+        cfg_write(8'h14, 32'h2AAA_AAAA, 1'b1);
         check_eq_u(b_base, 30'h2AAA_AAAA & {ADDR_SZ{1'b1}}, "b_base");
-        cfg_write(8'h09, 32'd5, 1'b1);
+        cfg_write(8'h18, 32'd5, 1'b1);
         check_eq_u(b_esz, 3'd5, "b_esz");
-        cfg_write(8'h0A, 32'd17, 1'b1);
+        cfg_write(8'h1C, 32'd17, 1'b1);
         check_eq_u(b_bp, 5'd17, "b_bp");
 
-        // src Z
-        cfg_write(8'h0C, 32'h1555_5555, 1'b1);
+        // src Z  (w8/w9/w10)
+        cfg_write(8'h20, 32'h1555_5555, 1'b1);
         check_eq_u(z_base, 30'h1555_5555, "z_base");
-        cfg_write(8'h0D, 32'd4, 1'b1);
+        cfg_write(8'h24, 32'd4, 1'b1);
         check_eq_u(z_esz, 3'd4, "z_esz");
-        cfg_write(8'h0E, 32'd9, 1'b1);
+        cfg_write(8'h28, 32'd9, 1'b1);
         check_eq_u(z_bp, 5'd9, "z_bp");
 
-        // src R
-        cfg_write(8'h10, 32'h0123_4567, 1'b1);
+        // src R  (w11/w12/w13)
+        cfg_write(8'h2C, 32'h0123_4567, 1'b1);
         check_eq_u(r_base, 30'h0123_4567, "r_base");
-        cfg_write(8'h11, 32'd3, 1'b1);
+        cfg_write(8'h30, 32'd3, 1'b1);
         check_eq_u(r_esz, 3'd3, "r_esz");
-        cfg_write(8'h12, 32'd31, 1'b1);
+        cfg_write(8'h34, 32'd31, 1'b1);
         check_eq_u(r_bp, 5'd31, "r_bp");
 
         // ---- isolation: writing one register must not disturb neighbours ----
@@ -161,7 +161,7 @@ module tb_hu_config_regs;
         check_eq_u(b_esz, 3'd5, "b_esz unchanged");
 
         // ---- address-match gating: wrong upper bits => ignored, no ack ----
-        cfg_write_nomatch(8'h11, 32'd0);            // would zero r_esz if it hit
+        cfg_write_nomatch(8'h30, 32'd0);            // would zero r_esz if it hit
         check_eq_u(r_esz, 3'd3, "r_esz untouched by nomatch write");
 
         // ---- unknown offset within matched window writes nothing (acks though) ----

@@ -503,19 +503,19 @@ task cfg_common;
     input [ACT_SZ-1:0] esz_a, esz_b, esz_z, esz_r;
     input [BINPT_SZ-1:0] bp_a, bp_b, bp_z, bp_r;
     begin
-        cfg_write(32'h1D1D_0001, {16'd0, slen}); // stream_len
-        cfg_write(32'h1D1D_0004, 32'd0);         // A base
-        cfg_write(32'h1D1D_0005, {29'd0, esz_a});
-        cfg_write(32'h1D1D_0006, {27'd0, bp_a});
-        cfg_write(32'h1D1D_0008, 32'd0);         // B base
-        cfg_write(32'h1D1D_0009, {29'd0, esz_b});
-        cfg_write(32'h1D1D_000A, {27'd0, bp_b});
-        cfg_write(32'h1D1D_000C, 32'd0);         // Z base
-        cfg_write(32'h1D1D_000D, {29'd0, esz_z});
-        cfg_write(32'h1D1D_000E, {27'd0, bp_z});
-        cfg_write(32'h1D1D_0010, 32'd0);         // R base
-        cfg_write(32'h1D1D_0011, {29'd0, esz_r});
-        cfg_write(32'h1D1D_0012, {27'd0, bp_r});
+        cfg_write(32'h1D1D_0004, {16'd0, slen});  // stream_len  (w1)
+        cfg_write(32'h1D1D_0008, 32'd0);          // A base      (w2)
+        cfg_write(32'h1D1D_000C, {29'd0, esz_a}); // A elem_sz   (w3)
+        cfg_write(32'h1D1D_0010, {27'd0, bp_a});  // A bin_pt    (w4)
+        cfg_write(32'h1D1D_0014, 32'd0);          // B base      (w5)
+        cfg_write(32'h1D1D_0018, {29'd0, esz_b}); // B elem_sz   (w6)
+        cfg_write(32'h1D1D_001C, {27'd0, bp_b});  // B bin_pt    (w7)
+        cfg_write(32'h1D1D_0020, 32'd0);          // Z base      (w8)
+        cfg_write(32'h1D1D_0024, {29'd0, esz_z}); // Z elem_sz   (w9)
+        cfg_write(32'h1D1D_0028, {27'd0, bp_z});  // Z bin_pt    (w10)
+        cfg_write(32'h1D1D_002C, 32'd0);          // R base      (w11)
+        cfg_write(32'h1D1D_0030, {29'd0, esz_r}); // R elem_sz   (w12)
+        cfg_write(32'h1D1D_0034, {27'd0, bp_r});  // R bin_pt    (w13)
     end
 endtask
 

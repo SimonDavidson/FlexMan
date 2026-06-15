@@ -131,3 +131,23 @@ def test_axi_write_addresses():
     assert len(writes) == 16
     assert writes[0][0]  == (0xA0000000 | ((2 * 16 + 0)  << 2))
     assert writes[15][0] == (0xA0000000 | ((2 * 16 + 15) << 2))
+
+
+def test_hu_cfg_words_flat_layout():
+    # Hadamard: one 32-bit register per word; field lands at word (offset>>2).
+    from flexman_backend import regmap
+    cfg = dict(mode=1, stream_len=400,
+               src_a_base_addr=0x100, src_a_elem_sz=5, src_a_bin_point=15,
+               src_r_base_addr=0x200, src_r_elem_sz=4, src_r_bin_point=15)
+    w = cfgmem.pack_hu_cfg_words(cfg)
+    assert len(w) == 16
+    for name, off in regmap.HU_REG_OFFSETS.items():
+        # config_manager streams word i -> byte i*4, so every HU field MUST be on
+        # the word*4 grid (else it is unreachable per-task) and within the stride.
+        assert off % 4 == 0, f"{name} offset {off:#x} not word-aligned"
+        assert (off >> 2) < cfgmem.WORDS_PER_CONFIG
+        assert w[off >> 2] == cfg.get(name, 0)
+
+
+def test_hu_cfg_words_defaults_zero():
+    assert cfgmem.pack_hu_cfg_words({}) == [0] * 16     # all reset (mode=0, ...)

@@ -5,7 +5,7 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-11
+# Last modified: 2026-06-15
 #
 # Pure-Python (no torch). The config_manager streams WORDS_PER_CONFIG (=15) words
 # from cfg_mem[cfg_id*WPC ..] to a target accelerator on every TASK dispatch. It
@@ -73,6 +73,21 @@ def pack_cfg_words(cfg: dict, acc_type: str = "snn") -> list[int]:
     # pad to the power-of-2 cfg_mem stride (snn/ann/ipsnn: word 15 / offset 0x3C
     # is spare; fmisnn fills all 16 words)
     words += [0] * (WORDS_PER_CONFIG - len(words))
+    return words
+
+
+def pack_hu_cfg_words(cfg: dict) -> list[int]:
+    """Return the packed cfg_mem words for one Hadamard cfg_id.
+
+    The Hadamard register map is ONE 32-bit register per word: each field's byte
+    offset in `regmap.HU_REG_OFFSETS` is `word_index * 4`, matching the
+    config_manager stream (word i -> byte i*4). So the packed block is simply
+    word[offset>>2] = field value; fields absent from `cfg` pack as 0 (the reset
+    value, e.g. mode=0). Used for Hadamard TASKs (R = Z*(A-B)+B+mode*R_prev).
+    """
+    words = [0] * WORDS_PER_CONFIG
+    for name, off in regmap.HU_REG_OFFSETS.items():
+        words[off >> 2] = cfg.get(name, 0) & 0xFFFFFFFF
     return words
 
 

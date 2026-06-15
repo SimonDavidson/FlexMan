@@ -225,7 +225,7 @@ def test_known_anchor_offsets():
     assert m1["bin_point_syn_curr"] == (10, 6)
     assert m1["np_out_bin_point"] == (16, 6)
     assert regmap.BOOT_REG_OFFSETS["sp_weight_idx_sz"] == 0x5C
-    assert regmap.HU_REG_OFFSETS["src_z_base_addr"] == 0x0C
+    assert regmap.HU_REG_OFFSETS["src_z_base_addr"] == 0x20   # w8 (one reg/word)
     # fmi anchors
     assert regmap.PACKED_FMI_WORDS_PER_CONFIG == 16
     assert regmap.PACKED_FMI_ADDR_WORDS[6] == "np_dcy_syn_base_addr"   # 0x18
