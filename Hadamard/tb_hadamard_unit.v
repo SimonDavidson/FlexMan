@@ -5,7 +5,7 @@
 //
 // Authors      : Simon Davidson & Claude
 // Created      : 2026-05 (original 3-case smoke test)
-// Last modified: 2026-06-08
+// Last modified: 2026-06-15
 //
 // Exercises the full datapath end-to-end:
 //   config regs -> stream_generator (x4) -> hu_compute -> packer -> R memory.
@@ -26,26 +26,23 @@
 //                 (R=17, +127 clamp, -128 clamp, mode1 Rprev=22, bp!=0, 16-bit),
 //                 with PER-ELEMENT-DISTINCT A/B/Z across the stream so each is a
 //                 genuine multiply (element k gets A=base+k, etc.), all checked.
-//   * RND       : constrained-random loop: random stream_len/elem_sz/bin_pts/
-//                 mode and per-element A/B/Z/R_prev; every output element word
-//                 checked against the golden.
+//   * DW1..DW3  : MULTI-WORD directed cases (16-bit 3-word, 32-bit 3-word,
+//                 8-bit 2-word) that assert values landing in NON-ZERO output
+//                 words -- the F7 multi-word + 32-bit addressing proof.
+//   * RND       : constrained-random loop: random MULTI-WORD stream_len, random
+//                 elem_sz (incl. 32-bit), bin_pts, mode and per-element
+//                 A/B/Z/R_prev; every output element word checked vs golden.
 //
 // PASS/FAIL via verif/checks.vh epilogue (prints literal "PASS"/"FAIL").
 //
-// Integration findings (pre-existing RTL bugs surfaced while writing this tb;
-// both stem from hadamard_unit feeding the cache's PER-WORD slice index to the
-// packer as the element index):
-//   (1) Multi-word output broken: the packer derives the output WORD address
-//       from its index (offset = index >> index_shift), but the slice index
-//       only counts WITHIN a 32-bit word, so any stream > one output word
-//       writes every word to base addr 0 (only the last word survives).
-//   (2) 32-bit elements broken: dataline_cache_with_xy.slice_idx has no 'b101
-//       case (-> 'hx), so the packer ADDRESS becomes X for 32-bit.
-// Therefore every task here is sized to ONE output word and elem_sz=5 (32-bit)
-// is not scored through the integration (the 32-bit MUL is covered in
-// tb_hu_compute D8). When the index plumbing is fixed (route the global stream
-// index to pak_index_i, as snnAcc/neuron_processing does), lift the per-task
-// single-word cap and re-enable 32-bit here.
+// F7 (FIXED 2026-06-15): hadamard_unit previously fed the packer the cache's
+// PER-WORD slice index instead of the GLOBAL element index, so (1) multi-word
+// streams wrote every output word to base+0 and (2) 32-bit elements emitted an
+// X address (dataline_cache_with_xy.slice_idx had no 'b101 case). Fix: the
+// stream generator exposes its global `index` (data_global_idx_o) and
+// hadamard_unit drives the packer pak_index_i from it; the cache gains the
+// 'b101 slice_idx case. Multi-word + 32-bit are now scored here (DW1-DW3, RND).
+// See verif/FINDINGS.md F7.
 //
 // Note: in update mode the DUT reads R_prev from and writes R back to the SAME
 // R memory, so mem_r is clobbered before scoring -> golden R_prev is taken from
@@ -660,15 +657,13 @@ initial begin
     //  Per-element-distinct operands (element k: A=base+k etc.) so each
     //  element is a genuine multiply; every element checked vs golden.
     //
-    //  NOTE (integration limitation -- see report): hadamard_unit wires the
-    //  packer's pak_index_i to the cache's PER-WORD slice index (a_idx, 0..N-1
-    //  within a 32-bit word) rather than the GLOBAL element index. The packer
-    //  derives the output word address from that index (offset = index >>
-    //  index_shift), so any stream spanning more than ONE output word writes
-    //  every word back to base address 0 (only the last word survives). To
-    //  exercise REAL multiplies end-to-end without tripping that separate RTL
-    //  bug, the directed and random tasks here are sized to fit in a single
-    //  output word: 8-bit -> <=4 elems, 16-bit -> <=2, 32-bit -> 1, 4-bit -> 8.
+    //  NOTE (F7 FIXED 2026-06-15): hadamard_unit now feeds the packer the
+    //  GLOBAL stream-element index (stream_generator.data_global_idx_o) instead
+    //  of the cache PER-WORD slice index, so multi-word output streams address
+    //  ascending output words correctly (and 32-bit no longer emits an X
+    //  address). The single-word D-cases (D4-D11) below are retained unchanged;
+    //  multi-word + 32-bit are exercised end-to-end in DW1-DW3 and the random
+    //  loop. See verif/FINDINGS.md F7.
     // ===================================================================
 
     // D4: Z=2,A=10,B=3,mode0,8-bit,bp0 -> R = 2*(10-3)+3 = 17 per stream.
@@ -777,29 +772,63 @@ initial begin
     check_eq_u(((mem_r[0] >> 24) & 32'h0000_000F) << rsh(3'd2), la(7, 3'd2),
                "D11 TRUE elem6 = 7 (4-bit max)");
 
-    // NOTE: 32-bit (elem_sz=5) output is NOT exercised through the integration:
-    // dataline_cache_with_xy's slice_idx case has no 'b101 entry (defaults to
-    // 'hx), and hadamard_unit feeds that slice_idx to the packer as the element
-    // index -> the packer write ADDRESS becomes X for 32-bit. The 32-bit MUL
-    // itself is verified at the unit level in tb_hu_compute (D8=1993). See the
-    // header notes and the integration report for both RTL findings.
+    // ===================================================================
+    //  MULTI-WORD + 32-bit directed cases (F7 fix proof).  Each spans >1
+    //  output word; run_directed checks EVERY element via check_elem, which
+    //  reads mem_r[k/(32/wR)] -- the correct output word.  These FAIL on the
+    //  old RTL (all words collapse to mem_r[0]; 32-bit address goes X) and pass
+    //  only with the global-index packer addressing.  The explicit asserts hit
+    //  a NON-ZERO output word to make the ascending-address proof loud.
+    // ===================================================================
+
+    // DW1: 16-bit, 6 elems = 3 output words (2 elems/word). Z=3,A=100+10k,B=20
+    //      -> R = 3*((100+10k)-20)+20 = 260 + 30k.
+    run_directed("DW1 16-bit 6elem 3word", 6, 3'd4, 5'd0, 1'b0,
+                 32'sd100, 32'sd10,   // A = 100 + 10k
+                 32'sd20,  32'sd0,    // B = 20
+                 32'sd3,   32'sd0,    // Z = 3
+                 32'sd0,   32'sd0);
+    // element 5 lives in WORD 2 (5/2=2), high half (5%2=1): R = 260+30*5 = 410
+    check_eq_u(((mem_r[2] >> 16) & 32'h0000_FFFF) << rsh(3'd4), la(410, 3'd4),
+               "DW1 TRUE elem5 = 410 (word2 hi)");
+
+    // DW2: 32-bit, 3 elems = 3 output words (1 elem/word). Proves the 'b101
+    //      slice_idx fix end-to-end. Z=2,A=1000+100k,B=50 ->
+    //      R = 2*((1000+100k)-50)+50 = 1950 + 200k.
+    run_directed("DW2 32-bit 3elem 3word", 3, 3'd5, 5'd0, 1'b0,
+                 32'sd1000, 32'sd100, // A = 1000 + 100k
+                 32'sd50,   32'sd0,   // B = 50
+                 32'sd2,    32'sd0,   // Z = 2
+                 32'sd0,    32'sd0);
+    // element 2 is the WHOLE of WORD 2: R = 1950 + 200*2 = 2350 (rsh=0 for 32b)
+    check_eq_u(mem_r[2], la(2350, 3'd5), "DW2 TRUE elem2 = 2350 (32-bit word2)");
+
+    // DW3: 8-bit, 6 elems = 2 output words (4 elems/word). Z=2,A=10+k,B=3+k
+    //      -> R = 2*7 + (3+k) ... = 17 + k.
+    run_directed("DW3 8-bit 6elem 2word", 6, 3'd3, 5'd0, 1'b0,
+                 32'sd10, 32'sd1,    // A = 10 + k
+                 32'sd3,  32'sd1,    // B =  3 + k
+                 32'sd2,  32'sd0,    // Z =  2
+                 32'sd0,  32'sd0);
+    // element 5 lives in WORD 1 (5/4=1), byte 1 (5%4=1): R = 17 + 5 = 22
+    check_eq_u(((mem_r[1] >> 8) & 32'h0000_00FF) << rsh(3'd3), la(22, 3'd3),
+               "DW3 TRUE elem5 = 22 (word1 byte1)");
 
     // ===================================================================
-    //  CONSTRAINED-RANDOM loop. Random elem_sz, random stream_len (1 .. one
-    //  full output word for that size: 8b->4, 16b->2, 4b->8, 2b->16, 1b->32,
-    //  32b->1), random bin points (0..4), random mode, per-element A/B/Z/
-    //  R_prev mostly avoiding clamping but occasionally hitting it. Streams
-    //  are kept to a single output word to avoid the packer multi-word
-    //  addressing bug (see note above). Every element checked vs golden.
+    //  CONSTRAINED-RANDOM loop. Random elem_sz (1/2/4/8/16/32-bit), random
+    //  MULTI-WORD stream_len (1 .. 3 output words for that size), random bin
+    //  points (0..4), random mode, per-element A/B/Z/R_prev mostly avoiding
+    //  clamping but occasionally hitting it. Every element checked vs golden.
+    //  F7 FIXED: multi-word + 32-bit now addressed correctly (global index).
+    //  Stream length is bounded to 3 words so the largest case (1-bit -> 96
+    //  elems) stays well under the 256-word mem_* arrays and the wait_done
+    //  watchdog.
     // ===================================================================
-    // esz 0..4 only (1/2/4/8/16-bit). 32-bit (esz=5) is excluded from the
-    // integration loop because the cache emits an X slice_idx for 32-bit which
-    // hadamard_unit forwards as the packer address (see note after D11).
     void'($urandom(32'hDADA_3717));
     for (ridx = 0; ridx < 60; ridx = ridx + 1) begin
-        r_esz  = $urandom_range(4);                   // 1/2/4/8/16 bit
+        r_esz  = $urandom_range(5);                   // 1/2/4/8/16/32 bit
         epw    = 32 / ewidth(r_esz);                  // elems per 32-bit word
-        r_len  = 1 + $urandom_range(epw - 1);         // 1 .. epw (single word)
+        r_len  = 1 + $urandom_range(3*epw - 1);       // 1 .. 3 output words
         r_bpa  = $urandom_range(4);
         r_bpb  = r_bpa;                                // A and B share esz/bp domain in this DUT path
         r_bpz  = $urandom_range(4);

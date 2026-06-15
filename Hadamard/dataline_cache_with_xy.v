@@ -213,7 +213,9 @@ begin
          slice_idx = {3'b0, sys_addr_i[1:0]};
       'b100:
          slice_idx = {4'b0, sys_addr_i[0]};
-      default: 
+      'b101:                          /* 32-bit: one element per word (F7 fix) */
+         slice_idx = 5'b0;
+      default:
          slice_idx = 'hx;
    endcase
 end

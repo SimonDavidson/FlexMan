@@ -337,7 +337,28 @@ stream_len-1), like snnAcc — not from `a_idx`. Also add the `'b101` case to
 0 failures — but ONLY because every task is sized to one output word and elem_sz=5 is
 excluded from scoring (the test header documents how to lift those caps once F7 is fixed).
 
-**Status:** OPEN — reported, not auto-fixed (RTL change to hadamard_unit + cache).
+**Status:** FIXED 2026-06-15 (branch `hadamard-f7-multiword` off `verif-coverage-uplift`).
+
+**Fix as implemented:** rather than a free-running counter in `hadamard_unit` (a naive
+count-on-`take` desyncs by one — `take` is gated by compute-ready while the stream's `index`
+advances on cache-ready), the fix reuses the stream generator's EXISTING global position:
+- `stream_generator.v`: expose its `index` register as a new output `data_global_idx_o`
+  (combinationally aligned with `data_o`/`data_idx_o`, exactly like the slice index).
+- `hadamard_unit.v`: declare `a_gidx`, connect it to `u_sg_a.data_global_idx_o`, and drive
+  the packer via `assign elem_index = a_gidx` (was `{..,a_idx}`). No new register; the
+  packer (`offset = index >> (5-out_sz)`) is unchanged.
+- `dataline_cache_with_xy.v`: add the `'b101` (32-bit) `slice_idx` case (→ 0).
+All three files are Hadamard-local copies (no cross-accelerator impact). Unconditional fix
+(no config gate): for a single output word the global index equals the old `a_idx`, so all
+prior single-word coverage is bit-identical.
+
+**Verification:** `Hadamard/tb_hadamard_unit.v` caps lifted; added DW1 (16-bit/3-word),
+DW2 (32-bit/3-word), DW3 (8-bit/2-word) directed cases (assert values in NON-ZERO output
+words) and a multi-word + 32-bit random loop. **2164 checks, 0 failures** (was 1511 single-
+word). Negative control: reverting to the old `a_idx` wiring makes DW1/DW2/DW3 and the
+multi-word random elements FAIL (words 1+ read 0; only the last word survives) — confirming
+the cases genuinely exercise multi-word addressing. `tb_hu_compute` 20056/0 and
+`tb_hu_config_regs` unchanged; `run_regression.sh Hadamard` = 3 passed / 0 failed.
 
 ---
 

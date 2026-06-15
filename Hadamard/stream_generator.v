@@ -32,6 +32,7 @@ module stream_generator #(
     output wire                              data_valid_o,
     output wire  [OUT_DATA_BITS-1:0]         data_o,
     output wire  [SLICE_DATA_IDX_SZ-1:0]     data_idx_o,
+    output wire  [$clog2(MAX_STREAM_LEN)-1:0] data_global_idx_o, /* global element pos (F7 fix) */
     output wire                              data_last_o,
     input  wire                              data_taken_i  /* All downstream stall conditions */
 );
@@ -63,6 +64,12 @@ always @(posedge clk)
     end
 
 assign busy_o = active;
+
+/* Global element position (0..stream_len-1), combinationally aligned with
+ * data_o/data_idx_o (all derive from the same `index` register).  Feeds the
+ * output packer so multi-word streams address ascending output words (F7 fix
+ * 2026-06-15).  data_idx_o is only the WITHIN-word slice index. */
+assign data_global_idx_o = index;
 
 dataline_cache_with_xy #(
     .IN_DATA_BITS      (IN_DATA_BITS),

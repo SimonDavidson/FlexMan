@@ -128,6 +128,7 @@ always @(posedge clk)
 wire                 a_valid, a_last, a_busy;
 wire [DATA_BITS-1:0] a_data;
 wire [4:0]           a_idx;
+wire [IDX_BITS-1:0]  a_gidx;   /* A's global element index (F7 fix) */
 wire                 a_taken;
 
 stream_generator #(
@@ -151,6 +152,7 @@ stream_generator #(
     .data_valid_o (a_valid),
     .data_o       (a_data),
     .data_idx_o   (a_idx),
+    .data_global_idx_o (a_gidx),
     .data_last_o  (a_last),
     .data_taken_i (a_taken)
 );
@@ -282,9 +284,13 @@ wire [DATA_BITS-1:0] pak_data;
 wire [PIN_BITS-1:0]  pak_index;
 wire                 pak_last;
 
-/* Element index for packer: use A's index (all streams are synchronised) */
+/* Element index for packer: GLOBAL stream-element index (F7 fix, 2026-06-15).
+ * a_gidx is stream-generator A's `index` register (0..stream_len-1),
+ * combinationally aligned with the data exactly like a_idx.  Was
+ * {{(PIN_BITS-5){1'b0}}, a_idx} -- the cache per-word slice index, which
+ * collapsed all output words to base+0 and went X for 32-bit elements. */
 wire [PIN_BITS-1:0] elem_index;
-assign elem_index = {{(PIN_BITS-5){1'b0}}, a_idx};
+assign elem_index = a_gidx;   /* IDX_BITS <= PIN_BITS: zero-extends */
 
 hu_compute #(
     .DATA_BITS  (DATA_BITS),
