@@ -467,6 +467,36 @@ module tb_acc_fmiSnnMC_processor;
         end
     endtask
 
+    // Sticky-flag latches for the per-cycle pulses on spike_proc_finished_o
+    // and acc_finished_o. The RTL fires them as 1-cycle pulses (this is a
+    // deliberate convention — the scheduler OR-latches them in
+    // sch_buffer_state.v:103-104, so it doesn't need them sustained). The
+    // testbench polling pattern used by wait_pipeline does need them
+    // sustained, so we latch here.
+    //
+    // Cleared on the rising edge of start_new_block_i (i.e. when a new TASK
+    // dispatches), then set by either of the underlying pulses. Becomes
+    // observable to wait_pipeline as the *_latched signals below.
+    //
+    // Without this fix, wait_pipeline hangs whenever spike_proc_finished_o
+    // and acc_finished_o are the SAME wire (sp_skip_neuron=1 in M0): the
+    // first poll catches the pulse, then @(posedge clk) advances past it,
+    // and the second poll never sees it high.
+    reg spike_proc_finished_latched;
+    reg acc_finished_latched;
+    always @(posedge clk) begin
+        if (reset) begin
+            spike_proc_finished_latched <= 1'b0;
+            acc_finished_latched        <= 1'b0;
+        end else if (start_new_block_i) begin
+            spike_proc_finished_latched <= 1'b0;
+            acc_finished_latched        <= 1'b0;
+        end else begin
+            if (spike_proc_finished_o) spike_proc_finished_latched <= 1'b1;
+            if (acc_finished_o)        acc_finished_latched        <= 1'b1;
+        end
+    end
+
     task wait_pipeline;
         output reg timed_out;
         begin
@@ -474,7 +504,7 @@ module tb_acc_fmiSnnMC_processor;
 
             timeout = 500;
             @(posedge clk);
-            while (!spike_proc_finished_o && timeout > 0) begin
+            while (!spike_proc_finished_latched && timeout > 0) begin
                 timeout = timeout - 1;
                 @(posedge clk);
             end
@@ -488,7 +518,7 @@ module tb_acc_fmiSnnMC_processor;
 
             timeout = 500;
             @(posedge clk);
-            while (!acc_finished_o && timeout > 0) begin
+            while (!acc_finished_latched && timeout > 0) begin
                 timeout = timeout - 1;
                 @(posedge clk);
             end
@@ -1003,24 +1033,15 @@ module tb_acc_fmiSnnMC_processor;
         // ============================================================
         $display("Test 8: native multi-channel conv (Cin=2, Cout=2, K=3)");
 
-        // Zero everything, and explicitly drive the per-neuron LIF memories
-        // to deterministic values so we can predict the NP writeback exactly:
-        //   dcy_syn = 0xFFFFFFFF (almost 1.0): syn_wb = (syn*0xFFFFFFFF)>>32
-        //                                          = syn - 1 for positive syn
-        //                                          = 0     for syn == 0
-        //   dcy_mem = 0 (no membrane carry across timesteps; no spike since
-        //              new_mem = 0*(pot-syn)+syn = syn = small)
-        //   thresh = max int32 (so new_mem never reaches threshold; no spike;
-        //                       pot writeback = new_mem ignored by this test)
+        // Zero the bytes we care about. With sp_skip_neuron=1 below, NP is
+        // not dispatched so dcy_syn/dcy_mem/thresh leftovers from T7 are
+        // irrelevant.
         for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
             u_syn_curr_mem.mem[i_init] = 32'd0;
             u_pot_mem.mem[i_init]      = 32'd0;
             u_spike_mem.mem[i_init]    = 32'd0;
             u_weight_mem.mem[i_init]   = 32'd0;
             u_act_mem.mem[i_init]      = 32'd0;
-            u_dcy_syn_mem.mem[i_init]  = 32'hFFFFFFFF;
-            u_dcy_mem_mem.mem[i_init]  = 32'h00000000;
-            u_thresh_mem.mem[i_init]   = 32'h7FFFFFFF;
         end
 
         // 12 32-bit weights in PyTorch row-major (Cout, Cin, Kx) order.
@@ -1065,11 +1086,13 @@ module tb_acc_fmiSnnMC_processor;
         cfg_write(32'hFFFF_0034, 32'h0007_000C);
         // S2: total_timesteps=1
         cfg_write(32'hFFFF_0038, 32'h0000_0001);
-        // M0: skip_neuron=0, np_mode=0, weights_per_word=1, bin_point=0,
+        // M0: skip_neuron=1, np_mode=0, weights_per_word=1, bin_point=0,
         //     weight_sz=5(32b), syn_curr_sz=5, pot_sz=5, weight_mode=10(conv), has_ada=0
-        //     (Debugging: NP runs, but the LIF dynamics simply decay syn_curr
-        //      slightly — we check the EXACT raw syn_curr via $display.)
-        cfg_write(32'hFFFF_003C, 32'h2555_0040);
+        //     Skip-neuron: only spike_processing runs, so syn_curr_mem holds
+        //     the raw MAC output (no LIF decay applied). This relies on the
+        //     sticky-flag latch in wait_pipeline above — without it, the
+        //     same-cycle acc_finished_o pulse would race.
+        cfg_write(32'hFFFF_003C, 32'h2555_0041);
         // Boot regs (conv params):
         cfg_write(32'hFFFF_005C, 32'd4);   // weight_idx_sz = 4 (Cout*Cin*K=12 fits in 4)
         cfg_write(32'hFFFF_0074, 32'd3);   // x_kernel_len = 3
@@ -1086,22 +1109,20 @@ module tb_acc_fmiSnnMC_processor;
                      u_syn_curr_mem.mem[2], u_syn_curr_mem.mem[3],
                      u_syn_curr_mem.mem[4], u_syn_curr_mem.mem[5],
                      u_syn_curr_mem.mem[6], u_syn_curr_mem.mem[7]);
-            // Expected = MAC_raw - 1 for syn_writeback (because dcy_syn = 0xFFFFFFFF
-            // gives (syn * 0xFFFFFFFF) >> 32 = syn - 1 for positive syn). For
-            // zero MAC contributions the writeback is 0 (0 - 1 isn't applied
-            // because 0 * 0xFFFFFFFF = 0).
-            // The shape of the syn_curr image — which cells got contributions
-            // from which weights — is what this test validates. MAC values:
-            //   (0,0)=0  (0,1)=1  (0,2)=2  (0,3)=3
-            //   (1,0)=0  (1,1)=7  (1,2)=8  (1,3)=9
+            // With sp_skip_neuron=1, NP doesn't run, so syn_curr_mem holds the
+            // raw MAC accumulator output. Expected values are exactly the
+            // weights routed via the conv projection:
+            //   (cout=0, x=1..3) = w[0][0][0..2] = 1, 2, 3
+            //   (cout=1, x=1..3) = w[1][0][0..2] = 7, 8, 9
+            // Channel-major flatten: cout=0 in [0..3], cout=1 in [4..7].
             check_eq(u_syn_curr_mem.mem[0], 32'd0, "T8 syn(0,0) (no kernel hit)");
-            check_eq(u_syn_curr_mem.mem[1], 32'd0, "T8 syn(0,1) MAC=1 -> wb=0");
-            check_eq(u_syn_curr_mem.mem[2], 32'd1, "T8 syn(0,2) MAC=2 -> wb=1 (= w[0][0][1]-1)");
-            check_eq(u_syn_curr_mem.mem[3], 32'd2, "T8 syn(0,3) MAC=3 -> wb=2 (= w[0][0][2]-1)");
+            check_eq(u_syn_curr_mem.mem[1], 32'd1, "T8 syn(0,1) = w[0][0][0]");
+            check_eq(u_syn_curr_mem.mem[2], 32'd2, "T8 syn(0,2) = w[0][0][1]");
+            check_eq(u_syn_curr_mem.mem[3], 32'd3, "T8 syn(0,3) = w[0][0][2]");
             check_eq(u_syn_curr_mem.mem[4], 32'd0, "T8 syn(1,0) (no kernel hit)");
-            check_eq(u_syn_curr_mem.mem[5], 32'd6, "T8 syn(1,1) MAC=7 -> wb=6 (= w[1][0][0]-1)");
-            check_eq(u_syn_curr_mem.mem[6], 32'd7, "T8 syn(1,2) MAC=8 -> wb=7 (= w[1][0][1]-1)");
-            check_eq(u_syn_curr_mem.mem[7], 32'd8, "T8 syn(1,3) MAC=9 -> wb=8 (= w[1][0][2]-1)");
+            check_eq(u_syn_curr_mem.mem[5], 32'd7, "T8 syn(1,1) = w[1][0][0]");
+            check_eq(u_syn_curr_mem.mem[6], 32'd8, "T8 syn(1,2) = w[1][0][1]");
+            check_eq(u_syn_curr_mem.mem[7], 32'd9, "T8 syn(1,3) = w[1][0][2]");
         end
 
         // Reset MC sizing back to 1 in case future tests are added.
