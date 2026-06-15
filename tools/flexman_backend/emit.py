@@ -5,18 +5,22 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-08
+# Last modified: 2026-06-15
 #
 # Pure-Python (no torch). `write_hex` produces $readmemh-loadable images; the
 # `Emitter` builds a Verilog include of axi_write(addr, data) statements. The
 # Emitter handles mechanics only — the front-end supplies the file header text,
 # keeping deployment-specific wording out of the back-end.
+# `emit_lut_image` packs activation LUT tables into a thresh_mem .hex image
+# (§5.3) — generic table mechanics only; the front-end chooses which functions
+# and scales (keeping application specifics out of the back-end).
 # =============================================================================
 from __future__ import annotations
 from pathlib import Path
 from typing import Sequence
 
 from . import regmap
+from .quant import pack_table
 
 
 def write_hex(path, words: Sequence[int]) -> None:
@@ -26,6 +30,36 @@ def write_hex(path, words: Sequence[int]) -> None:
     with path.open("w") as f:
         for w in words:
             f.write(f"{w & 0xFFFFFFFF:08x}\n")
+
+
+def emit_lut_image(tables: Sequence[Sequence[int]], path, elem_bits: int = 16,
+                   bases: Sequence[int] | None = None) -> list[int]:
+    """Pack one or more flat activation LUT tables into a single thresh_mem image
+    and write it as a $readmemh .hex (annAcc LUT load path, §5.3).
+
+    Each table is packed `32 // elem_bits` entries-per-word, LSB-first, via
+    `pack_table` (two's-complement masked to elem_bits — correct for signed tanh
+    and unsigned sigmoid alike). Tables are laid out at ascending 32-bit WORD
+    bases: contiguous from 0 by default, or at the explicit `bases` given. Any
+    gap or tail is zero-filled so the image is a dense word list.
+
+    Returns the list of word bases — each is the `np_thresh_base` to configure
+    for the gate task that uses that table. The caller records the matching
+    `out_frac` per table (the activation bin point) in its own manifest.
+    """
+    packed = [pack_table(list(t), elem_bits) for t in tables]
+    if bases is None:
+        bases, nxt = [], 0
+        for p in packed:
+            bases.append(nxt)
+            nxt += len(p)
+    bases = list(bases)
+    end = max((b + len(p) for b, p in zip(bases, packed)), default=0)
+    image = [0] * end
+    for b, p in zip(bases, packed):
+        image[b:b + len(p)] = p
+    write_hex(path, image)
+    return bases
 
 
 class Emitter:
