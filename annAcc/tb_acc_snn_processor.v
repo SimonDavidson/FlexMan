@@ -600,6 +600,128 @@ module tb_acc_snn_processor;
             check_eq(u_pot_mem.mem[51],   32'd5,  "T4 pot[1] decayed=5");
         end
 
+        // ============================================================
+        // Test 5: §5.5 bias accumulator-seed — RELU (activating pass)
+        //   bias_curr[0]=7, bias_curr[1]=-3 at bias_bin_point=bin_point_syn_curr
+        //   (shift 0). Preload seeds syn_curr BEFORE the MAC, so:
+        //     syn_curr[0] = 7  + 2×(1×10) = 27
+        //     syn_curr[1] = -3 + 2×(1×10) = 17
+        //   RELU pass-through -> act_out 27/17 ; decay ×0.5 -> pot 13/8.
+        //   Also reads back syn_curr_mem to prove the seed landed in memory.
+        // ============================================================
+        $display("Test 5: bias seed (RELU) bias=+7/-3 -> syn_curr 27/17");
+
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_weight_mem.mem[i_init]   = 32'h0A0A_0A0A;  // +10 per slot
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
+        end
+        u_bias_curr_mem.mem[0] = 32'd7;
+        u_bias_curr_mem.mem[1] = -32'sd3;            // 0xFFFF_FFFD
+        cfg_write(32'hFFFF_0004, 32'd10);            // weight_base_addr = 10
+        cfg_write(32'hFFFF_000C, 32'd0);             // bias_base_addr   = 0
+        cfg_write(32'hFFFF_0034, 32'h8003_5353);     // M0: RELU + np_bias_en (bit31)
+        cfg_write(32'hFFFF_0038, 32'h0000_0100);     // M1: bin_pts=0, bias_bin_point=0
+
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
+        wait_pipeline(timed_out);
+        if (!timed_out) begin
+            check_eq(u_syn_curr_mem.mem[20], 32'd27, "T5 syn_curr[0] seed+MAC=27");
+            check_eq(u_syn_curr_mem.mem[21], 32'd17, "T5 syn_curr[1] seed+MAC=17");
+            check_eq(u_spike_mem.mem[60],    32'd27, "T5 act_out[0] RELU(27)=27");
+            check_eq(u_spike_mem.mem[61],    32'd17, "T5 act_out[1] RELU(17)=17");
+            check_eq(u_pot_mem.mem[50],      32'd13, "T5 pot[0] decayed=13");
+            check_eq(u_pot_mem.mem[51],      32'd8,  "T5 pot[1] decayed=8");
+        end
+
+        // ============================================================
+        // Test 6: §5.5 bias seed on a SKIP pass — the GRU c_n case.
+        //   skip_neuron=1 (no neuron_processing): the bias-seeded accumulator
+        //   is LEFT in syn_curr for a downstream consumer (the Hadamard).
+        //   bias=+7/-3, MAC +20 -> syn_curr 27/17; no spike/pot written.
+        // ============================================================
+        $display("Test 6: bias seed on skip pass (GRU c_n) -> syn_curr 27/17, no NP");
+
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'hDEAD_BEEF;  // sentinel: NP must not write
+            u_spike_mem.mem[i_init]    = 32'hDEAD_BEEF;
+        end
+        cfg_write(32'hFFFF_0038, 32'h0000_0101);     // M1: skip_neuron=1 (bit0)
+
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
+        // Skip pass: no neuron_processing, so acc_finished == spike_proc_finished
+        // (one pulse). wait_pipeline's two-phase wait is for activating passes;
+        // wait on spike_proc_finished_o here, then let the last writeback settle.
+        timed_out = 0; timeout = 500; @(posedge clk);
+        while (!spike_proc_finished_o && timeout > 0) begin
+            timeout = timeout - 1; @(posedge clk);
+        end
+        if (timeout == 0) begin
+            $display("FAIL: T6 spike_proc_finished_o timeout");
+            errors = errors + 1; timed_out = 1;
+        end
+        repeat (4) @(posedge clk); #1;               // last syn_curr writeback settles
+        if (!timed_out) begin
+            check_eq(u_syn_curr_mem.mem[20], 32'd27, "T6 syn_curr[0] seed+MAC=27 (skip)");
+            check_eq(u_syn_curr_mem.mem[21], 32'd17, "T6 syn_curr[1] seed+MAC=17 (skip)");
+            check_eq(u_pot_mem.mem[50],   32'hDEAD_BEEF, "T6 pot untouched (skip)");
+            check_eq(u_spike_mem.mem[60], 32'hDEAD_BEEF, "T6 spike untouched (skip)");
+        end
+
+        // ============================================================
+        // Test 7: §5.5 bias binary-point shift. bias stored at bias_bin_point=2,
+        //   accumulator at bin_point_syn_curr=4 -> left-shift by 2.
+        //   bias_curr[0]=3 -> 3<<2=12 ; +MAC 20 = 32. bias[1]=1 -> 4 ; +20 = 24.
+        //   RELU, np_out_bin_point=0 (requant off) so output = raw accumulator.
+        // ============================================================
+        $display("Test 7: bias bin-point shift (<<2) -> syn_curr 32/24");
+
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
+        end
+        u_bias_curr_mem.mem[0] = 32'd3;
+        u_bias_curr_mem.mem[1] = 32'd1;
+        cfg_write(32'hFFFF_0034, 32'h8003_5353);     // M0: RELU + np_bias_en
+        // M1: skip=0, weights_per_word=4, bin_point_syn_curr=4 ([15:10]), bias_bin_point=2 ([27:22])
+        cfg_write(32'hFFFF_0038, 32'h0080_1100);
+
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
+        wait_pipeline(timed_out);
+        if (!timed_out) begin
+            check_eq(u_syn_curr_mem.mem[20], 32'd32, "T7 syn_curr[0] (3<<2)+20=32");
+            check_eq(u_syn_curr_mem.mem[21], 32'd24, "T7 syn_curr[1] (1<<2)+20=24");
+        end
+
+        // ============================================================
+        // Test 8: negative control — np_bias_en=0 with bias_curr still loaded.
+        //   The bias must be IGNORED: syn_curr = pure MAC = 20/20.
+        //   Proves the §5.5 path is fully default-off (bit-identical to legacy).
+        // ============================================================
+        $display("Test 8: np_bias_en=0 (default-off) -> bias ignored, syn_curr=20");
+
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
+        end
+        cfg_write(32'hFFFF_0034, 32'h0003_5353);     // M0: RELU, np_bias_en=0
+        cfg_write(32'hFFFF_0038, 32'h0000_0100);     // M1: bin_pts=0
+
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
+        wait_pipeline(timed_out);
+        if (!timed_out) begin
+            check_eq(u_syn_curr_mem.mem[20], 32'd20, "T8 syn_curr[0] no bias = 20");
+            check_eq(u_syn_curr_mem.mem[21], 32'd20, "T8 syn_curr[1] no bias = 20");
+        end
+
         $display("=== tb_acc_snn_processor: %0d failure(s) ===", errors);
         if (errors == 0) $display("PASS"); else $display("FAIL");
         $finish;

@@ -209,6 +209,8 @@ module ann_processor # (
     reg                     [1:0] np_thresh_op_r;            // 00=RELU 01=LUT 10=ABS
     reg                           np_lut_window_r;           // §5.1: 1 = windowed/saturated LUT index; default 0
     reg                           np_out_signed_r;           // §5.2: 1 = sign-extend signed LUT (tanh) output; default 0
+    reg                           np_bias_en_r;              // §5.5: 1 = seed syn_curr with the per-neuron bias before the MAC; default 0
+    reg                    [4:0]  bias_bin_point_r;          // §5.5: binary point of the stored bias (aligned to bin_point_syn_curr)
 
     //----------------------------------------------------------------
     // Shared config registers
@@ -308,6 +310,8 @@ module ann_processor # (
             np_thresh_op_r          <= 2'b0;
             np_lut_window_r         <= 1'b0;
             np_out_signed_r         <= 1'b0;
+            np_bias_en_r            <= 1'b0;
+            bias_bin_point_r        <= 5'b0;
             sp_skip_neuron_r        <= 1'b0;
             bin_point_syn_curr_r    <= 5'b0;
             np_out_bin_point_r      <= 5'b0;
@@ -351,6 +355,7 @@ module ann_processor # (
                     act_signed_r      <= sys_data_i[28];   // §5.4 signed-activation MAC (default 0)
                     np_lut_window_r   <= sys_data_i[29];   // §5.1 windowed/saturated LUT index (default 0)
                     np_out_signed_r   <= sys_data_i[30];   // §5.2 signed LUT (tanh) output (default 0)
+                    np_bias_en_r      <= sys_data_i[31];   // §5.5 per-neuron bias accumulator-seed (default 0)
                 end
                 8'h38: begin                                       // M1
                     sp_skip_neuron_r      <= sys_data_i[0];
@@ -358,6 +363,7 @@ module ann_processor # (
                     sp_weights_per_word_r <= sys_data_i[ 9:6];
                     bin_point_syn_curr_r  <= sys_data_i[15:10];
                     np_out_bin_point_r    <= sys_data_i[21:16];
+                    bias_bin_point_r      <= sys_data_i[27:22]; // §5.5 bias binary point
                 end
                 // ---- boot-only conv/sparse params (out-of-packed-window, >=0x5C) ----
                 8'h5C: sp_weight_idx_sz_r      <= sys_data_i[SP_WEIGHT_IDX_SZ-1:0];
@@ -396,27 +402,45 @@ module ann_processor # (
     //================================================================
     // Synaptic-current memory arbiter (NP has fixed higher priority)
     //================================================================
+    // §5.5 bias-preload requester (drives syn_curr while seeding the per-neuron
+    // bias before the MAC). Declared below; highest priority — it runs only
+    // before spike_processing starts, so NP/SP are idle during the preload.
+    wire                  pl_syn_curr_rd;
+    wire                  pl_syn_curr_wr;
+    wire [`ADDR_SIZE-1:0] pl_syn_curr_addr;
+    wire  [`POT_BITS-1:0] pl_syn_curr_data;
+    wire                  pl_bias_rd;
+    wire [`ADDR_SIZE-1:0] pl_bias_addr;
+    wire                  pl_busy;
+
+    wire pl_req = pl_syn_curr_rd | pl_syn_curr_wr;
     wire np_req = np_syn_curr_mem_rd | np_syn_curr_mem_wr;
     wire sp_req = sp_syn_curr_mem_rd | sp_syn_curr_mem_wr;
 
-    wire grant_np = np_req;
-    wire grant_sp = sp_req & ~np_req;
+    wire grant_pl = pl_req;
+    wire grant_np = np_req & ~pl_req;
+    wire grant_sp = sp_req & ~np_req & ~pl_req;
 
-    assign syn_curr_mem_wr_o   = grant_np ? np_syn_curr_mem_wr
+    assign syn_curr_mem_wr_o   = grant_pl ? pl_syn_curr_wr
+                               : grant_np ? np_syn_curr_mem_wr
                                           : (grant_sp ? sp_syn_curr_mem_wr  : 1'b0);
-    assign syn_curr_mem_rd_o   = grant_np ? np_syn_curr_mem_rd
+    assign syn_curr_mem_rd_o   = grant_pl ? pl_syn_curr_rd
+                               : grant_np ? np_syn_curr_mem_rd
                                           : (grant_sp ? sp_syn_curr_mem_rd  : 1'b0);
-    assign syn_curr_mem_addr_o = grant_np ? np_syn_curr_mem_addr
+    assign syn_curr_mem_addr_o = grant_pl ? pl_syn_curr_addr
+                               : grant_np ? np_syn_curr_mem_addr
                                           : sp_syn_curr_mem_addr;
-    assign syn_curr_mem_data_o = grant_np ? np_syn_curr_mem_data_wr
+    assign syn_curr_mem_data_o = grant_pl ? pl_syn_curr_data
+                               : grant_np ? np_syn_curr_mem_data_wr
                                           : sp_syn_curr_mem_data_wr;
 
     assign np_syn_curr_mem_wait = (~grant_np & np_req) | (grant_np & syn_curr_mem_wait_i);
     assign sp_syn_curr_mem_wait = (~grant_sp & sp_req) | (grant_sp & syn_curr_mem_wait_i);
 
-    // bias_curr ports are unused in annAcc — tie outputs off
-    assign bias_curr_mem_rd_o   = 1'b0;
-    assign bias_curr_mem_addr_o = {`ADDR_SIZE{1'b0}};
+    // §5.5 bias_curr read — driven by the preload FSM when np_bias_en, else off
+    // (bit-identical to the old tie-off: pl_bias_rd is 0 when the preload idles).
+    assign bias_curr_mem_rd_o   = pl_bias_rd;
+    assign bias_curr_mem_addr_o = pl_bias_addr;
 
     //----------------------------------------------------------------
     // Internal scheduler wires
@@ -427,7 +451,7 @@ module ann_processor # (
     wire np_acc_busy;
     wire np_acc_finished;
 
-    assign acc_busy_o     = sp_acc_busy | np_acc_busy;
+    assign acc_busy_o     = sp_acc_busy | np_acc_busy | pl_busy;   // pl_busy: §5.5 preload
     assign acc_finished_o = sp_skip_neuron_r ? sp_acc_finished : np_acc_finished;
 
     //----------------------------------------------------------------
@@ -441,6 +465,90 @@ module ann_processor # (
             dispatched_target_acc_r <= target_acc_i;
     end
     wire my_dispatch = start_new_block_i & (target_acc_i == TGT_ACC_ID);
+
+    //================================================================
+    // §5.5 Bias-channel accumulator-seed preload
+    //
+    // When np_bias_en_r is set, this small FSM runs ONCE on dispatch — before
+    // spike_processing's MAC starts — and adds the per-neuron bias from
+    // bias_curr_mem into syn_curr_mem, aligning the stored bias from its own
+    // binary point (bias_bin_point_r) to the accumulator binary point
+    // (bin_point_syn_curr_r). It is an ADD (read-modify-write), so it composes
+    // with both a FILL-zeroed accumulator (gates r/z, candidate c_n -> seed=bias)
+    // and a Hadamard-seeded accumulator (candidate n: seed = r·c_n + bias_in).
+    // Seeding BEFORE the MAC keeps the summation order bias-first, matching the
+    // emulator (mac_signed(bias, ...)). Default-off: when np_bias_en_r=0 the FSM
+    // stays IDLE, drives nothing, and spike_processing starts directly on
+    // dispatch — bit-identical to the pre-§5.5 behaviour.
+    //
+    // sram_bram is a 1-cycle registered read: PL_RD issues the syn_curr + bias
+    // reads, PL_LAT latches them when valid, PL_WB writes back the sum. The
+    // shared-pool wait is honoured (stall while syn_curr_mem_wait_i).
+    //================================================================
+    localparam PL_IDLE = 2'd0, PL_RD = 2'd1, PL_LAT = 2'd2, PL_WB = 2'd3;
+    reg [1:0]                    pl_state_r;
+    reg   [NP_NEURON_IDX_SZ-1:0] pl_neuron_r;
+    reg          [`POT_BITS-1:0] pl_syn_lat_r;
+    reg          [`WTD_BITS-1:0] pl_bias_lat_r;
+
+    assign pl_busy = (pl_state_r != PL_IDLE);
+    wire pl_last = (pl_neuron_r == np_last_neuron_idx_r);
+
+    assign pl_syn_curr_rd = (pl_state_r == PL_RD);
+    assign pl_bias_rd     = (pl_state_r == PL_RD);
+    assign pl_syn_curr_wr = (pl_state_r == PL_WB);
+    assign pl_syn_curr_addr = syn_curr_base_addr_r    + {{(`ADDR_SIZE-NP_NEURON_IDX_SZ){1'b0}}, pl_neuron_r};
+    assign pl_bias_addr     = np_bias_curr_base_addr_r + {{(`ADDR_SIZE-NP_NEURON_IDX_SZ){1'b0}}, pl_neuron_r};
+
+    // Align the stored bias to the accumulator (syn_curr) binary point.
+    wire signed [6:0] pl_shift = $signed({2'b00, bin_point_syn_curr_r})
+                               - $signed({2'b00, bias_bin_point_r});
+    wire signed [`POT_BITS-1:0] pl_bias_s = $signed(pl_bias_lat_r);
+    wire signed [`POT_BITS-1:0] pl_bias_aligned =
+            (pl_shift >= 0) ? (pl_bias_s <<<  pl_shift)
+                            : (pl_bias_s >>> (-pl_shift));
+    assign pl_syn_curr_data = pl_syn_lat_r + pl_bias_aligned;
+
+    // Pulse: the final neuron's bias write has been accepted -> release the MAC.
+    wire pl_done_pulse = (pl_state_r == PL_WB) & ~syn_curr_mem_wait_i & pl_last;
+
+    always @(posedge clk) begin
+        if (reset) begin
+            pl_state_r    <= PL_IDLE;
+            pl_neuron_r   <= {NP_NEURON_IDX_SZ{1'b0}};
+            pl_syn_lat_r  <= {`POT_BITS{1'b0}};
+            pl_bias_lat_r <= {`WTD_BITS{1'b0}};
+        end else begin
+            case (pl_state_r)
+                PL_IDLE:
+                    if (my_dispatch & np_bias_en_r) begin
+                        pl_neuron_r <= {NP_NEURON_IDX_SZ{1'b0}};
+                        pl_state_r  <= PL_RD;
+                    end
+                PL_RD:                                   // issue reads; advance when accepted
+                    if (~syn_curr_mem_wait_i)
+                        pl_state_r <= PL_LAT;
+                PL_LAT: begin                            // read data now valid — latch both
+                    pl_syn_lat_r  <= syn_curr_mem_data_i;
+                    pl_bias_lat_r <= bias_curr_mem_data_i;
+                    pl_state_r    <= PL_WB;
+                end
+                PL_WB:                                   // write syn_curr += aligned bias
+                    if (~syn_curr_mem_wait_i) begin
+                        if (pl_last)
+                            pl_state_r <= PL_IDLE;
+                        else begin
+                            pl_neuron_r <= pl_neuron_r + 1'b1;
+                            pl_state_r  <= PL_RD;
+                        end
+                    end
+            endcase
+        end
+    end
+
+    // spike_processing starts on dispatch, OR (when bias-seeding) once the
+    // preload has finished writing every neuron's seed.
+    wire sp_go = np_bias_en_r ? pl_done_pulse : my_dispatch;
 
     //================================================================
     // spike_processing instantiation
@@ -507,8 +615,8 @@ module ann_processor # (
         .act_slice_sz_i         (sp_act_sz_r),
         .act_signed_i           (act_signed_r),
 
-        // Scheduler — gated dispatch
-        .start_new_block_i      (my_dispatch),
+        // Scheduler — gated dispatch (deferred past the §5.5 bias preload)
+        .start_new_block_i      (sp_go),
         .target_acc_i           (dispatched_target_acc_r),
         .buffer_info_i          (buffer_info_i),
         .spike_proc_finished_o  (spike_proc_finished_o),

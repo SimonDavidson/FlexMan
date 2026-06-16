@@ -53,6 +53,17 @@ def test_mode_word_m0():
     assert (m0 >> 24) & 0xF == 1    # weight_mode (4-bit headroom)
 
 
+def test_mode_word_m0_annacc_bits():
+    # §5.4/§5.1/§5.2/§5.5 annAcc-only default-off mode bits at M0[28..31]
+    cfg = dict(act_signed=1, np_lut_window=1, np_out_signed=1, np_bias_en=1)
+    m0 = cfgmem.pack_cfg_words(cfg, "ann")[13]
+    assert (m0 >> 28) & 0x1 == 1    # act_signed
+    assert (m0 >> 29) & 0x1 == 1    # np_lut_window
+    assert (m0 >> 30) & 0x1 == 1    # np_out_signed
+    assert (m0 >> 31) & 0x1 == 1    # np_bias_en (§5.5)
+    assert cfgmem.pack_cfg_words({}, "ann")[13] == 0   # all default-off
+
+
 def test_mode_word_m1():
     cfg = dict(sp_skip_neuron=1, np_mode=0b101, sp_weights_per_word=4,
                bin_point_syn_curr=16, np_out_bin_point=4)
@@ -62,6 +73,14 @@ def test_mode_word_m1():
     assert (m1 >> 6)  & 0xF  == 4
     assert (m1 >> 10) & 0x3F == 16
     assert (m1 >> 16) & 0x3F == 4
+
+
+def test_mode_word_m1_bias_bin_point():
+    # §5.5 bias binary point shares M1 (annAcc); default-off packs as 0.
+    m1 = cfgmem.pack_cfg_words(dict(bin_point_syn_curr=20, bias_bin_point=20), "ann")[14]
+    assert (m1 >> 10) & 0x3F == 20   # bin_point_syn_curr (unchanged)
+    assert (m1 >> 22) & 0x3F == 20   # bias_bin_point (§5.5)
+    assert (cfgmem.pack_cfg_words({}, "ann")[14] >> 22) & 0x3F == 0
 
 
 def test_field_overflow_masked():

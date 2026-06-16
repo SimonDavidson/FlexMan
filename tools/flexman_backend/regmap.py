@@ -5,7 +5,7 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-12
+# Last modified: 2026-06-16
 #
 # Pure-Python (no torch). These maps mirror the per-accelerator AXI config-reg
 # decoders in the RTL and the scheduler's fixed control/memory address decode.
@@ -70,6 +70,7 @@ PACKED_MODE_WORDS = [          # offsets 0x34..0x38 ; (field, lsb, width)
         ("act_signed",     28, 1),   # §5.4 signed-activation MAC (annAcc only; default 0)
         ("np_lut_window",  29, 1),   # §5.1 windowed/saturated LUT index (annAcc only; default 0)
         ("np_out_signed",  30, 1),   # §5.2 signed LUT (tanh) output (annAcc only; default 0)
+        ("np_bias_en",     31, 1),   # §5.5 per-neuron bias accumulator-seed (annAcc only; default 0)
     ],
     [   # M1 0x38
         ("sp_skip_neuron",      0, 2),
@@ -77,6 +78,7 @@ PACKED_MODE_WORDS = [          # offsets 0x34..0x38 ; (field, lsb, width)
         ("sp_weights_per_word", 6, 4),
         ("bin_point_syn_curr", 10, 6),
         ("np_out_bin_point",   16, 6),
+        ("bias_bin_point",     22, 6),   # §5.5 bias binary point (annAcc only; default 0)
     ],
 ]
 PACKED_WORDS_PER_CONFIG = (len(PACKED_ADDR_WORDS)
