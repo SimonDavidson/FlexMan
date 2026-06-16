@@ -5,7 +5,7 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-09
-# Last modified: 2026-06-09
+# Last modified: 2026-06-16
 #
 # Pure-Python integer model of what the RTL actually computes — used to generate
 # golden outputs for the closed-loop integration TB. Derived from and validated
@@ -213,14 +213,18 @@ def mac_signed(stored_syn: int, weights_row, acts, bits: int = 32) -> int:
 
 
 def hadamard(a: int, b: int, z: int, z_frac: int, mode: int = 0, r_prev: int = 0) -> int:
-    """One Hadamard element: R = ((Z*(A-B)) >> z_frac) + B + mode*R_prev.
+    """One Hadamard element: R = round(Z*(A-B) / 2^z_frac) + B + mode*R_prev.
 
     Z is an unsigned gate in Q`z_frac` (representing [0,1]); A, B share one
-    fractional scale and the result is at that same scale. The shift is arithmetic
-    (Python >> floors == arithmetic shift for the signed product). Covers both
-    gated-update forms: a plain product Z*A [B=0] and a convex combination
-    Z*(A-B)+B.
+    fractional scale and the result is at that same scale. Models hu_compute.v
+    ST_TRUNCATE, which applies ROUND-HALF-UP on the down-shift (add 2^(z_frac-1),
+    then arithmetic floor) — not a plain floor — so the emulator is bit-exact with
+    the RTL Hadamard. Covers both gated-update forms: a plain product Z*A [B=0]
+    and a convex combination Z*(A-B)+B.
     """
     prod = z * (a - b)
-    shifted = prod >> z_frac          # arithmetic, back to A/B scale
+    if z_frac > 0:
+        shifted = (prod + (1 << (z_frac - 1))) >> z_frac   # round-half-up (hu_compute)
+    else:
+        shifted = prod
     return shifted + b + (r_prev if mode else 0)

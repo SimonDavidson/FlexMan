@@ -992,7 +992,14 @@ ann_processor #(
     // (sigmoid Q15, tanh Q14 both need 16 bits). Only the LUT path is affected;
     // no current net uses LUT mode (Bosch uses ABS), so this is bit-identical
     // for every existing task.
-    .NP_LUT_SLICE_BITS      (16)
+    .NP_LUT_SLICE_BITS      (16),
+    // NsNet2 GRU: the 400-wide layers exceed an 8-bit input/output grid lane
+    // (400 > 255), so widen the X grid-index fields to keep the proven 1-D dense
+    // datapath (in_y=out_y=1) the siren validated at in_x=512 — rather than rely
+    // on the untested 2-D dense path. Wider counters only; bit-identical for any
+    // task whose grid fits in 8 bits.
+    .SP_X_INPUT_SZ          (16),
+    .SP_X_OUTPUT_SZ         (16)
 ) u_ann (
     .clk                   (clk),
     .reset                 (reset),
