@@ -327,7 +327,14 @@ assign a0_pot_wr_o       = do_write & mem_sel_r[IDX_A0_POT];
 assign a0_pot_addr_o     = wr_addr;
 assign a0_pot_data_o     = wr_data;
 
-assign shared_data_wr_o   = do_write & mem_sel_r[IDX_SHARED_DATA];
+// shared_data is the only fill target behind an arbiter (shared_pool); its wait
+// can deassert combinationally when the FILL loses a bank (round-robin). Gating
+// the REQUEST on ~wait (via do_write) would form a req→wait→req zero-delay loop,
+// so hold the request stable across back-pressure and let only the address/
+// counter advance (do_write / curr_addr_r) gate on ~wait — the hold-and-retry
+// contract shared_pool expects, matching packer.v (pot_wr_o = buffer_full). The
+// dedicated-mem targets above never see arbitration wait, so they keep do_write.
+assign shared_data_wr_o   = (state_r == ST_FILLING) & mem_sel_r[IDX_SHARED_DATA];
 assign shared_data_addr_o = wr_addr;
 assign shared_data_data_o = wr_data;
 

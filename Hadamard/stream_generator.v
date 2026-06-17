@@ -82,6 +82,12 @@ dataline_cache_with_xy #(
 ) u_cache (
     .clk                 (clk),
     .reset               (reset),
+    // Invalidate the cached line at task start (matches every other cache user,
+    // which ties invalidate_i to start_new_block_i). Leaving it unconnected floats
+    // it to X, which poisons cache_valid → mem_req_o/data_valid/sys_wait go X and
+    // the stream never advances (first surfaced when the Hadamard ran through the
+    // shared pool for the GRU).
+    .invalidate_i        (start_task_i),
     .colour_select_o     (),
     .slice_sz_i          (slice_sz_i),
     .base_addr_i         (base_addr_i),

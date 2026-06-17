@@ -707,7 +707,12 @@ shared_pool #(
     .NUM_BANKS (SP_NBANK),
     .NUM_REQ   (SP_NREQ),
     .ADDR_W    (`ADDR_SIZE),
-    .DATA_W    (32)
+    .DATA_W    (32),
+    // Round-robin per-bank arbitration: an accelerator can issue two reads to the
+    // same bank and stall holding one (e.g. annAcc act + syn_curr both on bank 0);
+    // strict priority would starve the lower-index port and deadlock. RR guarantees
+    // forward progress. Bit-identical to strict for non-contending traffic.
+    .ARB_RR    (1)
 ) u_pool (
     .clk          (clk),
     .req_act_i    (sp_req_act),
