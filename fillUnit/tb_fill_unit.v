@@ -145,11 +145,16 @@ always #CLK_HALF clk = ~clk;
 
 // ─── OR of all write enables ─────────────────────────────────────────────────
 // Used to detect spurious writes on non-selected buses.
+// shared_data_wr_o is held HIGH during back-pressure (it holds the write REQUEST;
+// see fill_unit.v: shared_data_wr_o = ST_FILLING & mem_sel). The actual write only
+// advances when ~shared_data_wait_i (matching do_write), so gate the TB's write
+// detection by it — otherwise a stalled FILL is mis-counted as writes (T4).
+wire shared_data_wr_eff = shared_data_wr_o & ~shared_data_wait_i;
 wire any_wr_o =
     s0_weight_wr_o | s0_bias_curr_wr_o | s0_thresh_wr_o | s0_pot_wr_o |
     s1_weight_wr_o | s1_bias_curr_wr_o | s1_thresh_wr_o | s1_pot_wr_o |
     a0_weight_wr_o | a0_bias_curr_wr_o | a0_thresh_wr_o | a0_pot_wr_o |
-    shared_data_wr_o;
+    shared_data_wr_eff;
 
 // ─── Write capture ────────────────────────────────────────────────────────────
 // per_wr_cnt[i]: number of writes on memory bus i this test
@@ -174,7 +179,7 @@ wire [ADDR_SIZE-1:0] active_addr_o =
     a0_bias_curr_wr_o ? a0_bias_curr_addr_o :
     a0_thresh_wr_o    ? a0_thresh_addr_o    :
     a0_pot_wr_o       ? a0_pot_addr_o       :
-    shared_data_wr_o  ? shared_data_addr_o  :
+    shared_data_wr_eff ? shared_data_addr_o  :
                         {ADDR_SIZE{1'bx}};
 
 wire [DATA_SZ-1:0] active_data_o =
@@ -190,7 +195,7 @@ wire [DATA_SZ-1:0] active_data_o =
     a0_bias_curr_wr_o ? a0_bias_curr_data_o :
     a0_thresh_wr_o    ? a0_thresh_data_o    :
     a0_pot_wr_o       ? a0_pot_data_o       :
-    shared_data_wr_o  ? shared_data_data_o  :
+    shared_data_wr_eff ? shared_data_data_o  :
                         {DATA_SZ{1'bx}};
 
 // Index of the currently-active write bus (for per_wr_cnt updates)
@@ -207,7 +212,7 @@ wire [4:0] active_bus_idx =
     a0_bias_curr_wr_o ? IDX_A0_BIAS_CURR :
     a0_thresh_wr_o    ? IDX_A0_THRESH    :
     a0_pot_wr_o       ? IDX_A0_POT       :
-    shared_data_wr_o  ? IDX_SHARED_DATA  : 5'd31;   // 31 = none
+    shared_data_wr_eff ? IDX_SHARED_DATA  : 5'd31;   // 31 = none
 
 // Capture on the falling edge to see combinational outputs from last posedge
 always @(negedge clk) begin
