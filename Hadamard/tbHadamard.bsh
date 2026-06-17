@@ -1,8 +1,12 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Simon Davidson, University of Manchester
+# dataline_cache_with_xy.v is the canonical shared copy in snnAcc/ (the same copy
+# flexman.v / the e2e build compile for the Hadamard streams). The old local copy
+# was deleted — it had drifted (missing invalidate_i / the closed-loop six-bug
+# fixes), which broke elaboration once stream_generator started driving invalidate_i.
 xrun -sv -timescale 1ns/1ps -access wrc -top tb_hadamard_unit \
   hadamard_unit.v hu_compute.v hu_config_regs.v stream_generator.v \
-  packer.v dataline_cache_with_xy.v slice_and_align.v \
+  packer.v ../snnAcc/dataline_cache_with_xy.v slice_and_align.v \
   tb_hadamard_unit.v \
   ${COV_ARGS:-}
