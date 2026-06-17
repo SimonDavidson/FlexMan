@@ -5,7 +5,7 @@
 `include "../shared/constants.v"
 
 // ====================================================================
-//  tb_acc_fmiSnn_processor  (FMI variant) — automatic-check testbench
+//  tb_acc_fmiSnnMC_processor  (FMI variant) — automatic-check testbench
 //
 //  Configuration
 //  -------------
@@ -85,7 +85,7 @@
 `define BIAS_CURR_SLICE_SZ    3
 `define BIAS_CURR_SLICE_BITS  8
 
-module tb_acc_fmiSnn_processor;
+module tb_acc_fmiSnnMC_processor;
 
     localparam CLK_PERIOD = 10;
     localparam MEM_DEPTH  = 4096;   // bumped 256 -> 4096 for T6_LAYER (group4 full layer)
@@ -118,6 +118,12 @@ module tb_acc_fmiSnn_processor;
     reg [`PIN_BITS-1:0] np_src3_buff_addr_i = {`PIN_BITS{1'b0}};
     reg [`PIN_BITS-1:0] np_tgt_buff_addr_i  = {`PIN_BITS{1'b0}};
     reg [`PIN_BITS-1:0] np_weight_row_len_i = {`PIN_BITS{1'b0}};
+
+    // MC: multi-channel conv sizing (POC: testbench-driven, no AXI reg).
+    // Default 1 collapses to the legacy single-channel conv behaviour, so
+    // T1-T7 keep working unchanged.
+    reg [6:0]  tb_sp_cin_len   = 7'd1;
+    reg [6:0]  tb_sp_cout_len  = 7'd1;
 
     // ----------------------------------------------------------------
     // DUT outputs
@@ -192,7 +198,7 @@ module tb_acc_fmiSnn_processor;
     // ----------------------------------------------------------------
     // DUT instantiation
     // ----------------------------------------------------------------
-    acc_fmiSnn_processor # (
+    acc_fmiSnnMC_processor # (
         .TGT_ACC_ID               (`TGT_ACC_ID),
         .TGT_CONFIG_BASE_ADDR     (`TGT_CONFIG_BASE_ADDR),
         .SP_NUM_TIMESTEPS         (`NUM_TIMESTEPS),
@@ -313,7 +319,12 @@ module tb_acc_fmiSnn_processor;
         .scl_ada_mem_rd_o         (scl_ada_mem_rd_o),
         .scl_ada_mem_wait_i       (scl_ada_mem_wait_i),
         .scl_ada_mem_addr_o       (scl_ada_mem_addr_o),
-        .scl_ada_mem_data_i       (scl_ada_mem_data_i)
+        .scl_ada_mem_data_i       (scl_ada_mem_data_i),
+        // MC: testbench-driven multi-channel conv sizing (POC: no AXI reg).
+        // Tied to 1 for T1-T7 (collapse to legacy behaviour); overridden per
+        // test for T8 (multi-channel conv).
+        .sp_cin_len_i             (tb_sp_cin_len),
+        .sp_cout_len_i            (tb_sp_cout_len)
     );
 
     // ----------------------------------------------------------------
@@ -456,6 +467,36 @@ module tb_acc_fmiSnn_processor;
         end
     endtask
 
+    // Sticky-flag latches for the per-cycle pulses on spike_proc_finished_o
+    // and acc_finished_o. The RTL fires them as 1-cycle pulses (this is a
+    // deliberate convention — the scheduler OR-latches them in
+    // sch_buffer_state.v:103-104, so it doesn't need them sustained). The
+    // testbench polling pattern used by wait_pipeline does need them
+    // sustained, so we latch here.
+    //
+    // Cleared on the rising edge of start_new_block_i (i.e. when a new TASK
+    // dispatches), then set by either of the underlying pulses. Becomes
+    // observable to wait_pipeline as the *_latched signals below.
+    //
+    // Without this fix, wait_pipeline hangs whenever spike_proc_finished_o
+    // and acc_finished_o are the SAME wire (sp_skip_neuron=1 in M0): the
+    // first poll catches the pulse, then @(posedge clk) advances past it,
+    // and the second poll never sees it high.
+    reg spike_proc_finished_latched;
+    reg acc_finished_latched;
+    always @(posedge clk) begin
+        if (reset) begin
+            spike_proc_finished_latched <= 1'b0;
+            acc_finished_latched        <= 1'b0;
+        end else if (start_new_block_i) begin
+            spike_proc_finished_latched <= 1'b0;
+            acc_finished_latched        <= 1'b0;
+        end else begin
+            if (spike_proc_finished_o) spike_proc_finished_latched <= 1'b1;
+            if (acc_finished_o)        acc_finished_latched        <= 1'b1;
+        end
+    end
+
     task wait_pipeline;
         output reg timed_out;
         begin
@@ -463,7 +504,7 @@ module tb_acc_fmiSnn_processor;
 
             timeout = 500;
             @(posedge clk);
-            while (!spike_proc_finished_o && timeout > 0) begin
+            while (!spike_proc_finished_latched && timeout > 0) begin
                 timeout = timeout - 1;
                 @(posedge clk);
             end
@@ -477,7 +518,7 @@ module tb_acc_fmiSnn_processor;
 
             timeout = 500;
             @(posedge clk);
-            while (!acc_finished_o && timeout > 0) begin
+            while (!acc_finished_latched && timeout > 0) begin
                 timeout = timeout - 1;
                 @(posedge clk);
             end
@@ -546,7 +587,7 @@ module tb_acc_fmiSnn_processor;
         cfg_write(32'hFFFF_007C, 32'd1);    // x_kernel_step      = 1
         cfg_write(32'hFFFF_0084, 32'd0);    // x_kernel_offset    = 0
 
-        $display("=== tb_acc_fmiSnn_processor (FMI variant) ===");
+        $display("=== tb_acc_fmiSnnMC_processor (FMI variant) ===");
 
         // ============================================================
         // Test 1: no spike  (threshold=50 > new_mem=10)
@@ -958,7 +999,137 @@ module tb_acc_fmiSnn_processor;
             check_eq(u_thresh_mem.mem[1],   32'h0000_4000, "T7 thresh[1] = 1.0 at K=14");
         end
 
-        $display("=== tb_acc_fmiSnn_processor: %0d failure(s) ===", errors);
+        // ============================================================
+        // Test 8: native multi-channel conv (MC POC)
+        //
+        //   Cin=2, Cout=2, Kx=3, Ky=1, in_x=4, stride=1, pad=1, out_x=4.
+        //   12 hand-computable 32-bit weights, PyTorch row-major
+        //   (Cout, Cin, Kx) flatten:
+        //     w_idx 0..2  = w[0][0][0..2] = 1, 2, 3
+        //     w_idx 3..5  = w[0][1][0..2] = 4, 5, 6
+        //     w_idx 6..8  = w[1][0][0..2] = 7, 8, 9
+        //     w_idx 9..11 = w[1][1][0..2] = 10, 11, 12
+        //
+        //   Single input spike at (cin=0, in_x=2). With stride=1, pad=1:
+        //     for kx in 0..2: out_x = act_x + kx - offset = 2 + kx - 1 in {1,2,3}
+        //   Hardware projects this input to outputs (cout, out_x):
+        //     kx=0 -> out_x=1, weight = w[cout][0][0]
+        //     kx=1 -> out_x=2, weight = w[cout][0][1]
+        //     kx=2 -> out_x=3, weight = w[cout][0][2]
+        //
+        //   Channel-major syn_curr layout (cout * out_x_len + out_x):
+        //     syn_curr_mem[0] = (cout=0, x=0) = 0      (no kernel hits)
+        //     syn_curr_mem[1] = (cout=0, x=1) = 1
+        //     syn_curr_mem[2] = (cout=0, x=2) = 2
+        //     syn_curr_mem[3] = (cout=0, x=3) = 3
+        //     syn_curr_mem[4] = (cout=1, x=0) = 0
+        //     syn_curr_mem[5] = (cout=1, x=1) = 7
+        //     syn_curr_mem[6] = (cout=1, x=2) = 8
+        //     syn_curr_mem[7] = (cout=1, x=3) = 9
+        //
+        //   sp_skip_neuron=1: dispatch SP only, no NP (no LIF decay applied
+        //   to syn_curr, so the raw MAC accumulator is observable).
+        //   weight_mode=2'b10 (conv), weight_sz=5 (32-bit), weights_per_word=1.
+        // ============================================================
+        $display("Test 8: native multi-channel conv (Cin=2, Cout=2, K=3)");
+
+        // Zero the bytes we care about. With sp_skip_neuron=1 below, NP is
+        // not dispatched so dcy_syn/dcy_mem/thresh leftovers from T7 are
+        // irrelevant.
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
+            u_weight_mem.mem[i_init]   = 32'd0;
+            u_act_mem.mem[i_init]      = 32'd0;
+        end
+
+        // 12 32-bit weights in PyTorch row-major (Cout, Cin, Kx) order.
+        u_weight_mem.mem[ 0] = 32'd1;
+        u_weight_mem.mem[ 1] = 32'd2;
+        u_weight_mem.mem[ 2] = 32'd3;
+        u_weight_mem.mem[ 3] = 32'd4;
+        u_weight_mem.mem[ 4] = 32'd5;
+        u_weight_mem.mem[ 5] = 32'd6;
+        u_weight_mem.mem[ 6] = 32'd7;
+        u_weight_mem.mem[ 7] = 32'd8;
+        u_weight_mem.mem[ 8] = 32'd9;
+        u_weight_mem.mem[ 9] = 32'd10;
+        u_weight_mem.mem[10] = 32'd11;
+        u_weight_mem.mem[11] = 32'd12;
+
+        // Single spike at (cin=0, in_x=2): flat index = 0*4 + 2 = 2 -> bit 2.
+        u_act_mem.mem[0] = 32'h0000_0004;
+
+        // Drive MC sizing wires for T8.
+        tb_sp_cin_len  = 7'd2;
+        tb_sp_cout_len = 7'd2;
+
+        // PACKED_FMI config for T8.
+        // Base addresses all 0:
+        cfg_write(32'hFFFF_0000, 32'd0);    // act_base_addr
+        cfg_write(32'hFFFF_0004, 32'd0);    // weight_base_addr
+        cfg_write(32'hFFFF_0008, 32'd0);    // syn_curr_base_addr
+        cfg_write(32'hFFFF_000C, 32'd0);    // thresh_base (unused with skip)
+        cfg_write(32'hFFFF_0010, 32'd0);    // pot_base
+        cfg_write(32'hFFFF_0014, 32'd0);    // spike_base
+        cfg_write(32'hFFFF_0018, 32'd0);    // dcy_syn_base
+        cfg_write(32'hFFFF_001C, 32'd0);    // dcy_mem_base
+        cfg_write(32'hFFFF_0020, 32'd0);    // ada_base
+        cfg_write(32'hFFFF_0024, 32'd0);    // b_eff_base
+        cfg_write(32'hFFFF_0028, 32'd0);    // dcy_ada_base
+        cfg_write(32'hFFFF_002C, 32'd0);    // scl_ada_base
+
+        // S0: in_x_len=4 | out_x_len=4
+        cfg_write(32'hFFFF_0030, 32'h0004_0004);
+        // S1: last_neuron_idx=7 | rows_per_neuron=12
+        cfg_write(32'hFFFF_0034, 32'h0007_000C);
+        // S2: total_timesteps=1
+        cfg_write(32'hFFFF_0038, 32'h0000_0001);
+        // M0: skip_neuron=1, np_mode=0, weights_per_word=1, bin_point=0,
+        //     weight_sz=5(32b), syn_curr_sz=5, pot_sz=5, weight_mode=10(conv), has_ada=0
+        //     Skip-neuron: only spike_processing runs, so syn_curr_mem holds
+        //     the raw MAC output (no LIF decay applied). This relies on the
+        //     sticky-flag latch in wait_pipeline above — without it, the
+        //     same-cycle acc_finished_o pulse would race.
+        cfg_write(32'hFFFF_003C, 32'h2555_0041);
+        // Boot regs (conv params):
+        cfg_write(32'hFFFF_005C, 32'd4);   // weight_idx_sz = 4 (Cout*Cin*K=12 fits in 4)
+        cfg_write(32'hFFFF_0074, 32'd3);   // x_kernel_len = 3
+        cfg_write(32'hFFFF_007C, 32'd1);   // x_kernel_step = 1
+        cfg_write(32'hFFFF_0084, 32'd1);   // x_kernel_offset = 1 (pad=1)
+
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
+
+        wait_pipeline(timed_out);
+        if (!timed_out) begin
+            $display("  T8 syn_curr_mem[0..7] = %0d %0d %0d %0d  %0d %0d %0d %0d",
+                     u_syn_curr_mem.mem[0], u_syn_curr_mem.mem[1],
+                     u_syn_curr_mem.mem[2], u_syn_curr_mem.mem[3],
+                     u_syn_curr_mem.mem[4], u_syn_curr_mem.mem[5],
+                     u_syn_curr_mem.mem[6], u_syn_curr_mem.mem[7]);
+            // With sp_skip_neuron=1, NP doesn't run, so syn_curr_mem holds the
+            // raw MAC accumulator output. Expected values are exactly the
+            // weights routed via the conv projection:
+            //   (cout=0, x=1..3) = w[0][0][0..2] = 1, 2, 3
+            //   (cout=1, x=1..3) = w[1][0][0..2] = 7, 8, 9
+            // Channel-major flatten: cout=0 in [0..3], cout=1 in [4..7].
+            check_eq(u_syn_curr_mem.mem[0], 32'd0, "T8 syn(0,0) (no kernel hit)");
+            check_eq(u_syn_curr_mem.mem[1], 32'd1, "T8 syn(0,1) = w[0][0][0]");
+            check_eq(u_syn_curr_mem.mem[2], 32'd2, "T8 syn(0,2) = w[0][0][1]");
+            check_eq(u_syn_curr_mem.mem[3], 32'd3, "T8 syn(0,3) = w[0][0][2]");
+            check_eq(u_syn_curr_mem.mem[4], 32'd0, "T8 syn(1,0) (no kernel hit)");
+            check_eq(u_syn_curr_mem.mem[5], 32'd7, "T8 syn(1,1) = w[1][0][0]");
+            check_eq(u_syn_curr_mem.mem[6], 32'd8, "T8 syn(1,2) = w[1][0][1]");
+            check_eq(u_syn_curr_mem.mem[7], 32'd9, "T8 syn(1,3) = w[1][0][2]");
+        end
+
+        // Reset MC sizing back to 1 in case future tests are added.
+        tb_sp_cin_len  = 7'd1;
+        tb_sp_cout_len = 7'd1;
+
+        $display("=== tb_acc_fmiSnnMC_processor: %0d failure(s) ===", errors);
         if (errors == 0) $display("PASS"); else $display("FAIL");
         $finish;
     end

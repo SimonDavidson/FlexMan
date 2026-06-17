@@ -37,6 +37,7 @@ localparam PROG_IDX_BITS = 6;   // $clog2(PROG_DEPTH)
 // Default AXI base addresses (match flexman defaults)
 localparam [31:0] FU_TABLE_ADDR      = 32'hC000_0000;
 localparam [31:0] FU_TABLE_ADDR_MASK = 32'hFF00_0000;
+localparam [31:0] POOL_RD_BASE       = 32'h1010_0000;  // host pool-readback window
 
 // ─── Instruction encoding ─────────────────────────────────────────────────────
 localparam STOP_INST = 32'h0000_0002;   // opcode 3'b010
@@ -402,7 +403,8 @@ flexman #(
     .PROG_ADDR_BITS      (PROG_ADDR_BITS),
     .PROG_DATA_BITS      (PROG_DATA_BITS),
     .NUM_SCH_ENTRIES     (NUM_SCH_ENTRIES),
-    .COL_BUFF_ID_SZ      (COL_BUFF_ID_SZ)
+    .COL_BUFF_ID_SZ      (COL_BUFF_ID_SZ),
+    .POOL_RD_BASE        (POOL_RD_BASE)
 ) dut (
     .clk                  (clk),
     .reset                (reset),
@@ -652,6 +654,28 @@ task axi_write;
     end
 endtask
 
+// Variable-latency AXI read: hold sys_req_i until sys_ack_o, then sample data.
+task axi_read;
+    input  [31:0] addr;
+    output [31:0] data;
+    integer guard;
+    begin
+        @(posedge clk); #1;
+        sys_req_i  = 1'b1;
+        sys_addr_i = addr;
+        sys_data_i = 32'h0;
+        guard      = 0;
+        @(posedge clk); #1;
+        while (sys_ack_o !== 1'b1 && guard < 1000) begin
+            @(posedge clk); #1;
+            guard = guard + 1;
+        end
+        data       = sys_data_o;
+        sys_req_i  = 1'b0;
+        sys_addr_i = 32'h0;
+    end
+endtask
+
 // ─── Shared init helper ───────────────────────────────────────────────────────
 integer mi;
 task clear_all_mems;
@@ -793,6 +817,38 @@ initial begin
                  fill_wr_count,
                  pool_rd(0), pool_rd(1), pool_rd(2), pool_rd(3));
         #20 $finish;
+    end
+
+    // -----------------------------------------------------------------------
+    // T4: HOST POOL READBACK via the POOL_RD_BASE AXI window
+    //   Backdoor-load distinct values into pool words 64..75 (all 4 banks),
+    //   then read them back through the memory-mapped window and compare.  No
+    //   program runs here, so the pool is quiescent.  Placed before the known-
+    //   failing T3 so it always executes; uses a disjoint word range (64..75)
+    //   so it cannot perturb T3's pool[0]/[8]/[24].
+    reset = 1'b1; @(posedge clk); #1; @(posedge clk); #1; reset = 1'b0;
+    @(posedge clk); #1;
+    begin : t4
+        integer    a;
+        reg [31:0] got;
+        reg        t4_ok;
+        t4_ok = 1'b1;
+        for (a = 64; a < 76; a = a + 1)
+            pool_wr(a, 32'hA5A5_0000 | a);          // distinct value per word
+        for (a = 64; a < 76; a = a + 1) begin
+            axi_read(POOL_RD_BASE + (a << 2), got);
+            if (got !== (32'hA5A5_0000 | a)) begin
+                t4_ok = 1'b0;
+                $display("[T4] FAIL  word %0d (bank %0d): got %08h exp %08h",
+                         a, a % 4, got, 32'hA5A5_0000 | a);
+            end
+        end
+        if (t4_ok)
+            $display("[T4] PASS  host read 12 pool words back through POOL_RD_BASE (all 4 banks)");
+        else begin
+            $display("[T4] FAIL  pool readback mismatch via POOL_RD_BASE");
+            #20 $finish;
+        end
     end
 
     // ══════════════════════════════════════════════════════════════════════
