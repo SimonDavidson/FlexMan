@@ -215,7 +215,7 @@ syn_curr_cache (
 //        detected on the FULL-WIDTH value before truncation, so a large |pot|
 //        pins to the endpoint entries (which carry the sigmoid/tanh asymptotes)
 //        instead of aliasing. Assumes bin_point_syn_curr >= F (acc_frac >= F),
-//        true for every NsNet2 LUT layer; the left-shift branch is for
+//        true for every LUT layer; the left-shift branch is for
 //        completeness only.
 ///////////////////////////////////////////////////////////////////////
 localparam integer               F       = LUT_IDX_SZ - 3;      // = emulator lut_in_frac

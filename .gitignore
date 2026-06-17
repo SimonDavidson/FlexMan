@@ -28,9 +28,3 @@ vivado/
 
 # Claude Code development files
 CLAUDE.md
-
-# Generated sim copies — staged from the Bosch front-end artifacts by
-# siren_detector/sim_siren_e2e.bsh (flexman_program.hex is already ignored
-# by the default-deny rule; these two need explicit ignores past !*.vh)
-siren_detector/cfg_mem.vh
-siren_detector/static_config.vh

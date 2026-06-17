@@ -5,11 +5,11 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-15
+# Last modified: 2026-06-17
 #
 # Pure-Python (no torch). The config_manager streams WORDS_PER_CONFIG (=15) words
 # from cfg_mem[cfg_id*WPC ..] to a target accelerator on every TASK dispatch. It
-# carries NO register address — the top's glue (siren_detector_top.v: cfg_cnt_N)
+# carries NO register address — the application top's glue (e.g. cfg_cnt_N)
 # forms the accelerator address as CFG_BASE | (word_index << 2). So cfg_mem word i
 # lands at the accelerator register at byte-offset i*4 (offsets 0x00..0x38).
 #

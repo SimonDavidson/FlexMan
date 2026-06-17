@@ -1055,24 +1055,24 @@ ann_processor #(
     .TGT_CONFIG_BASE_ADDR (ANN_CFG_BASE),
     // annAcc already defaults NP_SYN_CURR/NP_POT slices to 32; spike_processing's
     // syn_curr slice still defaults to 10 — bump it so a real task on annAcc reads
-    // full-precision 32-bit syn_curr (matches siren's u_ann).
+    // full-precision 32-bit syn_curr (matches the dense ANN configuration).
     .SP_SYN_CURR_SLICE_BITS (32),
-    // §5.2: widen LUT entries from int8 to int16 so the NsNet2 gate tables fit
+    // §5.2: widen LUT entries from int8 to int16 so 16-bit gate tables fit
     // (sigmoid Q15, tanh Q14 both need 16 bits). Only the LUT path is affected;
-    // no current net uses LUT mode (Bosch uses ABS), so this is bit-identical
+    // no current net uses LUT mode (default is ABS), so this is bit-identical
     // for every existing task.
     .NP_LUT_SLICE_BITS      (16),
-    // NsNet2 GRU: the 400-wide layers exceed an 8-bit input/output grid lane
-    // (400 > 255), so widen the X grid-index fields to keep the proven 1-D dense
-    // datapath (in_y=out_y=1) the siren validated at in_x=512 — rather than rely
+    // Wide layers: layers wider than an 8-bit input/output grid lane (>255)
+    // need wider X grid-index fields to keep the proven 1-D dense
+    // datapath (in_y=out_y=1) validated at in_x=512 — rather than rely
     // on the untested 2-D dense path. Wider counters only; bit-identical for any
     // task whose grid fits in 8 bits.
     .SP_X_INPUT_SZ          (16),
     .SP_X_OUTPUT_SZ         (16),
-    // NsNet2 GRU: weight_generator's output-element index (out_elem_count, drives
+    // Wide layers: weight_generator's output-element index (out_elem_count, drives
     // the weight-cache word/slice address) is WEIGHT_IDX_SZ-wide and defaults to 5
-    // bits = 2^5 = 32. With 400 output neurons it wrapped at o=32, re-reading the
-    // first 8 weight words for every block of 32 (frame-0 R bit-exact for o<32,
+    // bits = 2^5 = 32. With >32 output neurons it wrapped at o=32, re-reading the
+    // first 8 weight words for every block of 32 (output bit-exact for o<32,
     // diverged for o>=32). Widen to match SP_X_OUTPUT_SZ. annAcc-only; the default
     // 5 is bit-identical for snnAcc/ipSnnAcc and any task with <=32 output neurons.
     .SP_WEIGHT_IDX_SZ       (16)

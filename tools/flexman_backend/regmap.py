@@ -5,7 +5,7 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-16
+# Last modified: 2026-06-17
 #
 # Pure-Python (no torch). These maps mirror the per-accelerator AXI config-reg
 # decoders in the RTL and the scheduler's fixed control/memory address decode.
@@ -13,8 +13,7 @@
 # by tools/tests/test_regmap_vs_rtl.py.
 #
 # Sources:
-#   PACKED_* / BOOT_REG_OFFSETS : snnAcc / annAcc / ipSnnAcc acc_snn_processor.v,
-#                                 siren_detector/acc_ipsnn_processor.v
+#   PACKED_* / BOOT_REG_OFFSETS : snnAcc / annAcc / ipSnnAcc acc_snn_processor.v
 #   PACKED_FMI_*                : fmiSnnAcc/acc_fmiSnn_processor.v
 #   HU_REG_OFFSETS              : Hadamard/hu_config_regs.v
 #   scheduler control/mem addrs : scheduler/ISA_REFERENCE.md
@@ -134,7 +133,7 @@ PACKED_FMI_WORDS_PER_CONFIG = (len(PACKED_FMI_ADDR_WORDS)
                                + len(PACKED_FMI_MODE_WORDS))   # = 16
 
 # Boot-only (out-of-packed-window) registers, set once via direct AXI for the
-# rare conv/sparse layers. Not per-task; the dense siren app never writes these.
+# rare conv/sparse layers. Not per-task; dense applications never write these.
 BOOT_REG_OFFSETS = {
     "sp_weight_idx_sz":   0x5C,
     "sp_x_kernel_len":    0x74,

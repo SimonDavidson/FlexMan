@@ -1,7 +1,7 @@
 <!--
   Author: Simon Davidson & Claude
   Created: 2026-06-08
-  Last modified: 2026-06-08
+  Last modified: 2026-06-17
 -->
 # FlexMan deployment toolchain
 
@@ -29,10 +29,8 @@ register change updates one place and every front-end picks it up.
 asserts the maps match — the check a separate-repo toolchain cannot do.
 
 Application-specific logic (which layer maps to which accelerator, the
-quantization source, the per-frame schedule) lives in each front-end, NOT here:
-
-- **Bosch siren** front-end: in the Bosch repo (`~/work/Bosch/`).
-- **JABRA NsNet2** front-end: in the JABRA workspace (`~/work/jabra/frontends/nsnet2/`).
+quantization source, the per-frame schedule) lives in each front-end, NOT
+here. Each deployment front-end is maintained in its own application repository.
 
 ## The back-end is torch-free
 

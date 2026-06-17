@@ -5,7 +5,7 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-08
+# Last modified: 2026-06-17
 #
 # Pure-Python (no torch). Operates on plain Python integers / nested int lists so
 # the back-end is testable without a deep-learning stack. Front-ends own the
@@ -13,8 +13,8 @@
 # `.tolist()`, and pass the result here.
 #
 # The column-major packing convention matches weight_generator.v (out_elem_count
-# resets per input neuron) and is the same layout the Bosch siren tooling proved
-# against the standalone testbenches.
+# resets per input neuron) and is the same layout the reference front-end
+# tooling proved against the standalone testbenches.
 # =============================================================================
 from __future__ import annotations
 import math

@@ -5,10 +5,10 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-08
+# Last modified: 2026-06-17
 #
-# Pure-Python (no torch). Shared by every deployment front-end (Bosch siren,
-# JABRA NsNet2, ...). Tracks the RTL it is versioned alongside; see
+# Pure-Python (no torch). Shared by every deployment front-end. Tracks the RTL
+# it is versioned alongside; see
 # tools/README.md and tools/tests/test_regmap_vs_rtl.py.
 # =============================================================================
 from __future__ import annotations

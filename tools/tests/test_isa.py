@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-08
+# Last modified: 2026-06-17
 # Unit tests for flexman_backend.isa (no torch, no pytest required).
 from flexman_backend import isa
 
@@ -31,7 +31,7 @@ def test_fill_w1_fields():
 
 
 def test_task_word_roundtrip():
-    # A siren-style feature_extraction TASK: acc=2, cfg=0, TGT buf 0 in slot5 ntgt=1
+    # A feature-extraction TASK: acc=2, cfg=0, TGT buf 0 in slot5 ntgt=1
     w1 = isa.tw1(2, 0, 0, isa.M_UNUSED, 0, isa.M_UNUSED, 0, isa.M_UNUSED, 0)
     w2 = isa.tw2(isa.M_UNUSED, 0, 0, isa.M_UNUSED, 0, 0, isa.M_TGT, 0, 1)
     assert (w1 & 0x7) == isa.OP_TASK

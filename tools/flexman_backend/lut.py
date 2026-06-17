@@ -5,11 +5,11 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-08
+# Last modified: 2026-06-17
 #
 # Pure-Python (no torch). Generates fixed-point function tables for the annAcc
-# LUT activation path (np_thresh_op = LUT), to be loaded into thresh_mem. See
-# ~/work/jabra/nsnet2_flexman_mapping.md §5: the table is indexed by a
+# LUT activation path (np_thresh_op = LUT), to be loaded into thresh_mem.
+# The table is indexed by a
 # sign-centred, saturated window of the accumulator —
 #   idx = clamp( (syn_curr >> (bin_point_syn_curr - F)) + entries/2, 0, entries-1 )
 # so entry `idx` corresponds to input x = (idx - entries/2) / 2^F.

@@ -5,7 +5,7 @@
 //
 // Authors      : Simon Davidson & Claude
 // Created      : 2026-05-08
-// Last modified: 2026-06-13
+// Last modified: 2026-06-17
 //
 // Threshold (RELU/LUT/ABS) + decay, checked against the np_ann_threshold /
 // np_ann_decay golden over directed corner cases + a constrained-random loop.
@@ -13,7 +13,7 @@
 //
 // §5.2 coverage: out_signed_i sign-extends a signed (tanh) LUT entry from its
 // slice MSB instead of zero-extending. Proven on the 8-bit DUT (extend from
-// bit 7) AND a second 16-bit DUT (extend from bit 15 — the NsNet2 deploy width).
+// bit 7) AND a second 16-bit DUT (extend from bit 15 — the 16-bit deploy width).
 // out_signed_i defaults 0 for the whole random loop, so the legacy zero-extend
 // path stays bit-identical.
 // =============================================================================

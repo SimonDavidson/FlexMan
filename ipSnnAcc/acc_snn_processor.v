@@ -462,7 +462,7 @@ module acc_snn_processor # (
     // Latched dispatch target_acc
     //
     // start_new_block_i only pulses for one cycle (either from the
-    // scheduler directly or, in `siren_detector_top`, from
+    // scheduler directly or, in an application top-level, from
     // cm_config_finished_o). target_acc_i is then released. To keep
     // neuron_processing's `target_acc_i == TGT_ACC_ID` start gate
     // happy when it fires on sp_acc_finished (many cycles later), and
