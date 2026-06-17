@@ -47,7 +47,17 @@ wire                 last;
 wire                 advance;
 
 assign last    = ({1'b0, index} == stream_len_i - 1'b1);
-assign advance = active & data_valid_o & ~cache_wait;
+// Advance the element index when the consumer actually TAKES the element, not on
+// the cache's internal hit/fetch phase. The old `~cache_wait` gate advanced only
+// on a cache HIT-and-taken, never on a fresh-fetch-and-taken cycle, so it
+// deferred the advance to a later hit. A 32-bit stream (1 elem/word, miss every
+// element) self-corrects, but when streams of DIFFERENT element sizes are taken
+// in lockstep (op1: Z=r 16-bit vs A=c_n 32-bit) their fetch/hit phases differ:
+// on the shared take of element 0 one presented as a hit (advanced) while the
+// other was a fresh fetch (suppressed), leaving it permanently one element
+// behind. `take` already requires all streams valid, and data_valid_o guards
+// pre-delivery, so taking-as-the-advance keeps every stream in true lockstep.
+assign advance = active & data_valid_o & data_taken_i;
 
 always @(posedge clk)
     if (reset) begin

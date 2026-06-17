@@ -1004,7 +1004,14 @@ ann_processor #(
     // on the untested 2-D dense path. Wider counters only; bit-identical for any
     // task whose grid fits in 8 bits.
     .SP_X_INPUT_SZ          (16),
-    .SP_X_OUTPUT_SZ         (16)
+    .SP_X_OUTPUT_SZ         (16),
+    // NsNet2 GRU: weight_generator's output-element index (out_elem_count, drives
+    // the weight-cache word/slice address) is WEIGHT_IDX_SZ-wide and defaults to 5
+    // bits = 2^5 = 32. With 400 output neurons it wrapped at o=32, re-reading the
+    // first 8 weight words for every block of 32 (frame-0 R bit-exact for o<32,
+    // diverged for o>=32). Widen to match SP_X_OUTPUT_SZ. annAcc-only; the default
+    // 5 is bit-identical for snnAcc/ipSnnAcc and any task with <=32 output neurons.
+    .SP_WEIGHT_IDX_SZ       (16)
 ) u_ann (
     .clk                   (clk),
     .reset                 (reset),
