@@ -7,6 +7,7 @@ xrun -sv -elaborate -timescale 10ps/1ps -top flexman_fpga_wrap \
   ../shared/bram_sp.v \
   ../shared/bram_sdp.v \
   ../shared/bram_tdp.v \
+  ../shared/bram_dist.v \
   ../scheduler/scheduler.v \
   ../scheduler/sch_table.v \
   ../scheduler/sch_entry.v \

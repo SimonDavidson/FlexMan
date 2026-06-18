@@ -20,7 +20,11 @@
 `define MRPT_BITS  16		// CNN subsequence repeat counter
 `define BRST_BITS  10		// Memory burst size
 
+// ADDR_SIZE guarded so a build can override it (e.g. +define+ADDR_SIZE=16 for a
+// right-sized Bosch deployment) without editing this file. Default = 30 (trunk).
+`ifndef ADDR_SIZE
 `define ADDR_SIZE  30
+`endif
 
 `define BINPOINT_SZ 4
 `define POT_OUT_SZ_SZ 3

@@ -445,7 +445,9 @@ flexman #(
 // ─── System memories ──────────────────────────────────────────────────────────
 
 // Program memory: scheduler loads via AXI (prog_mem_wr_*), reads instructions.
-bram_sdp #(.DEPTH(PROG_MEM_DEPTH), .DATA_W(PROG_DATA_BITS)) u_prog_mem (
+// COMBINATIONAL-read (distributed RAM): the scheduler instruction fetch assumes
+// 0-cycle program memory under wait=0 and double-fires NXT with a 1-cycle BRAM.
+bram_dist #(.DEPTH(PROG_MEM_DEPTH), .DATA_W(PROG_DATA_BITS)) u_prog_mem (
     .clk   (clk),
     .we    (prog_mem_wr_o),
     .waddr (prog_mem_wr_addr),
