@@ -888,17 +888,27 @@ initial begin
     cfg_snn_static(32'h1000_0000, 32'd8);    // snn0: spike out -> pool[8] (MID)
     cfg_snn_static(32'h1001_0000, 32'd32);   // snn1: spike out -> pool[32] (OUT)
 
-    // --- per-task cfg_mem (16 words each, registers 0x00..0x3C) ---
-    // cfg_id 0 (snn0): act_base=0, weight_base=12, syn_curr_base=16
-    cfg_mem[ 0]=32'd0;  cfg_mem[ 1]=32'd12; cfg_mem[ 2]=32'd20; cfg_mem[ 3]=32'd3;   // act, weight, syn_curr base=20, weight_sz
-    cfg_mem[ 4]=32'h0; cfg_mem[ 5]=32'd1;  cfg_mem[ 6]=32'hFFFF_FFFF; cfg_mem[ 7]=32'hFFFF_FFFF; // task_ctrl=0 (accumulate, skip=0)
-    cfg_mem[ 8]=32'd1;  cfg_mem[ 9]=32'd0;  cfg_mem[10]=32'd30; cfg_mem[11]=32'd40;  // last_neuron, rsvd, bias_base, thresh_base
-    cfg_mem[12]=32'd50; cfg_mem[13]=32'd5;  cfg_mem[14]=32'd3;  cfg_mem[15]=32'd5;   // pot_base, syn_curr_sz, bias_sz, pot_sz
-    // cfg_id 1 (snn1): act_base=8 (=MID), weight_base=12, syn_curr_base=24
-    cfg_mem[16]=32'd8;  cfg_mem[17]=32'd12; cfg_mem[18]=32'd24; cfg_mem[19]=32'd3;
-    cfg_mem[20]=32'h4; cfg_mem[21]=32'd1;  cfg_mem[22]=32'hFFFF_FFFF; cfg_mem[23]=32'hFFFF_FFFF;  // task_ctrl=0x4 (clear)
-    cfg_mem[24]=32'd1;  cfg_mem[25]=32'd0;  cfg_mem[26]=32'd30; cfg_mem[27]=32'd40;
-    cfg_mem[28]=32'd50; cfg_mem[29]=32'd5;  cfg_mem[30]=32'd3;  cfg_mem[31]=32'd5;
+    // --- per-task cfg_mem (16 words each → packed offsets 0x00..0x3C, word i→i*4) ---
+    //   PACKED LAYOUT (snnAcc/acc_snn_processor.v, commit 08211ba):
+    //     W0..W8 (0x00..0x20): act/weight/syn_curr/bias/thresh/pot/spike base,
+    //                          syn_curr_decay, pot_decay
+    //     S0 (0x24)={in_y<<16 | in_x}   S1 (0x28)={out_y<<16 | out_x}
+    //     S2 (0x2C)={last_neuron<<16 | rows_per_neuron}   S3 (0x30)=total_timesteps
+    //     M0 (0x34)= weight_mode<<24 | pot_sz<<12 | bias_sz<<8 | syn_curr_sz<<4 | weight_sz
+    //     M1 (0x38)= bin_point<<10 | weights_per_word<<6 | np_mode<<2 | skip
+    //   2 neurons, 2 inputs (in 2x1, out 2x1), 8-bit weights, 32-bit syn/bias/pot,
+    //   decay ~1.0, full mode. (Grid/decay/spike_base/sizes/mode all moved into
+    //   this packed window; cfg_snn_static's old 0x40..0x70 writes are now no-ops.)
+    // cfg_id 0 (snn0): act_base=0(IN), weight=12, syn_curr=20, spike=8(MID)
+    cfg_mem[ 0]=32'd0;          cfg_mem[ 1]=32'd12;         cfg_mem[ 2]=32'd20;         cfg_mem[ 3]=32'd30;          // W0 act, W1 weight, W2 syn_curr, W3 bias
+    cfg_mem[ 4]=32'd40;         cfg_mem[ 5]=32'd50;         cfg_mem[ 6]=32'd8;          cfg_mem[ 7]=32'hFFFF_FFFF;   // W4 thresh, W5 pot, W6 spike(MID), W7 syn_decay
+    cfg_mem[ 8]=32'hFFFF_FFFF;  cfg_mem[ 9]=32'h0001_0002;  cfg_mem[10]=32'h0001_0002;  cfg_mem[11]=32'h0001_0001;   // W8 pot_decay, S0 in(2x1), S1 out(2x1), S2 last=1/rows=1
+    cfg_mem[12]=32'd1;          cfg_mem[13]=32'h0000_5553;  cfg_mem[14]=32'h0000_0100;  cfg_mem[15]=32'd0;           // S3 timesteps=1, M0 sizes/mode, M1 wpw=4, (0x3C unused)
+    // cfg_id 1 (snn1): act_base=8(MID), weight=12, syn_curr=24, spike=32(OUT)
+    cfg_mem[16]=32'd8;          cfg_mem[17]=32'd12;         cfg_mem[18]=32'd24;         cfg_mem[19]=32'd30;
+    cfg_mem[20]=32'd40;         cfg_mem[21]=32'd50;         cfg_mem[22]=32'd32;         cfg_mem[23]=32'hFFFF_FFFF;
+    cfg_mem[24]=32'hFFFF_FFFF;  cfg_mem[25]=32'h0001_0002;  cfg_mem[26]=32'h0001_0002;  cfg_mem[27]=32'h0001_0001;
+    cfg_mem[28]=32'd1;          cfg_mem[29]=32'h0000_5553;  cfg_mem[30]=32'h0000_0100;  cfg_mem[31]=32'd0;
 
     // --- buffer base-address table (all 0; cfg bases are absolute) ---
     bba_mem[0] = 32'd0;  bba_mem[1] = 32'd0;  bba_mem[2] = 32'd0;
