@@ -447,6 +447,11 @@ module tb_acc_snn_processor;
 
     initial begin
         errors           = 0;
+        $display("snnAcc SNN_ACC_VERSION = 0x%08h", u_dut.SNN_ACC_VERSION);
+        if (u_dut.SNN_ACC_VERSION === 32'h0) begin
+            $display("FAIL: SNN_ACC_VERSION is zero/unset");
+            errors = errors + 1;
+        end
         reset            = 1'b1;
         sys_req_i        = 1'b0;
         start_new_block_i= 1'b0;

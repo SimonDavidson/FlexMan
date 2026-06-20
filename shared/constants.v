@@ -26,6 +26,10 @@
 `define ADDR_SIZE  30
 `endif
 
+`ifndef SNN_ACC_VERSION
+`define SNN_ACC_VERSION 32'h2026_0620   // snnAcc build/version tag, YYYYMMDD (traceability only)
+`endif
+
 `define BINPOINT_SZ 4
 `define POT_OUT_SZ_SZ 3
 `define GUARDBITS_SZ 3

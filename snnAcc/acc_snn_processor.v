@@ -184,6 +184,9 @@ module acc_snn_processor # (
     output wire  [`ACT_BITS-1:0] spike_mem_data_o
 );
 
+    // Traceability tag (no functional effect): snnAcc build version, YYYYMMDD in hex.
+    localparam [31:0] SNN_ACC_VERSION = `SNN_ACC_VERSION;
+
     //----------------------------------------------------------------
     // spike_processing config registers
     //----------------------------------------------------------------
