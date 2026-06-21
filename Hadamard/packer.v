@@ -101,7 +101,7 @@ assign pot_data_o = output_buffer;
 always @ (posedge clk)
 if (reset || writing) output_buffer <= 32'h0000_0000;
 else                         /* OR in data - easier than separate enables (?) */
-if (pak_write_i) output_buffer     <= output_buffer | new_data;
+if (pak_write_i && !buffer_full) output_buffer <= output_buffer | new_data;   /* F8: never OR while full/pending */
 
 assign index_shift  = (5 - pak_out_sz_i);   /* Complementary shift for offset */
 

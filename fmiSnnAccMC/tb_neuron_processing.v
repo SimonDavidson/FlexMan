@@ -161,9 +161,12 @@ module tb_neuron_processing;
     // R/W (read-modify-write style): syn_curr, pot, ada.  Each neuron owns a
     // distinct 32-bit word (one element per word), so read and write-back never
     // collide.
-    `SRAM_RW (syn_sram, syn_curr_mem_rd, syn_curr_mem_wr, syn_curr_mem_addr, syn_curr_mem_data_wr, syn_curr_mem_data_rd)
-    `SRAM_RW (pot_sram, pot_mem_rd, pot_mem_wr, pot_mem_addr, pot_mem_data_wr, pot_mem_data_rd)
-    `SRAM_RW (ada_sram, ada_mem_rd, ada_mem_wr, ada_mem_addr, ada_mem_data_wr, ada_mem_data_rd)
+    // Wait-honouring so write back-pressure (bp_en) stalls the packer writeback —
+    // the F8 path. The shared WAIT pin gates both read and write (mirrors the DUT
+    // mem_wait_i = wait | wb_wr).
+    `SRAM_RW_WAIT (syn_sram, syn_curr_mem_rd, syn_curr_mem_wr, syn_curr_mem_wait, syn_curr_mem_addr, syn_curr_mem_data_wr, syn_curr_mem_data_rd)
+    `SRAM_RW_WAIT (pot_sram, pot_mem_rd, pot_mem_wr, pot_mem_wait, pot_mem_addr, pot_mem_data_wr, pot_mem_data_rd)
+    `SRAM_RW_WAIT (ada_sram, ada_mem_rd, ada_mem_wr, ada_mem_wait, ada_mem_addr, ada_mem_data_wr, ada_mem_data_rd)
     // Read-only, honour mem_wait (back-pressure injection on all read-only mems).
     `SRAM_RD_WAIT(thr_sram,     thresh_mem_rd,  thresh_mem_wait,  thresh_mem_addr,  thresh_mem_data)
     `SRAM_RD_WAIT(dcy_syn_sram, dcy_syn_mem_rd, dcy_syn_mem_wait, dcy_syn_mem_addr, dcy_syn_mem_data)
@@ -171,8 +174,9 @@ module tb_neuron_processing;
     `SRAM_RD_WAIT(b_eff_sram,   b_eff_mem_rd,   b_eff_mem_wait,   b_eff_mem_addr,   b_eff_mem_data)
     `SRAM_RD_WAIT(dcy_ada_sram, dcy_ada_mem_rd, dcy_ada_mem_wait, dcy_ada_mem_addr, dcy_ada_mem_data)
     `SRAM_RD_WAIT(scl_ada_sram, scl_ada_mem_rd, scl_ada_mem_wait, scl_ada_mem_addr, scl_ada_mem_data)
-    // Write-only: spike.
-    `SRAM_WR (spk_sram, spike_mem_wr, spike_mem_addr, spike_mem_data)
+    // Write-only: spike (wait-honouring — the 1-bit packer's held flush is the
+    // clearest F8 trigger).
+    `SRAM_WR_WAIT (spk_sram, spike_mem_wr, spike_mem_wait, spike_mem_addr, spike_mem_data)
 
     initial clk = 0; always #5 clk = ~clk;
 
@@ -184,15 +188,22 @@ module tb_neuron_processing;
     reg signed [31:0] in_syn[0:127], in_thr[0:127], in_pot[0:127], in_beff[0:127];
     reg        [31:0] in_dsyn[0:127], in_dmem[0:127], in_ada[0:127], in_dada[0:127], in_sada[0:127];
 
-    // back-pressure driver — drives all read-only mems' mem_wait when bp_en.
+    // back-pressure driver — when bp_en, drives BOTH the read-only mems' wait
+    // (latency-invariance) AND the writeback mems' wait (the F8 packer-cadence
+    // path — robustness coverage; the reliable F8 discriminator is
+    // tb_packer_cadence). Spike held heavier to stress the 1-bit packer.
     reg bp_en;
     always @(posedge clk) begin
-        thresh_mem_wait  <= bp_en ? ($urandom_range(99) < 30) : 1'b0;
-        dcy_syn_mem_wait <= bp_en ? ($urandom_range(99) < 30) : 1'b0;
-        dcy_mem_mem_wait <= bp_en ? ($urandom_range(99) < 30) : 1'b0;
-        b_eff_mem_wait   <= bp_en ? ($urandom_range(99) < 30) : 1'b0;
-        dcy_ada_mem_wait <= bp_en ? ($urandom_range(99) < 30) : 1'b0;
-        scl_ada_mem_wait <= bp_en ? ($urandom_range(99) < 30) : 1'b0;
+        thresh_mem_wait   <= bp_en ? ($urandom_range(99) < 30) : 1'b0;
+        dcy_syn_mem_wait  <= bp_en ? ($urandom_range(99) < 30) : 1'b0;
+        dcy_mem_mem_wait  <= bp_en ? ($urandom_range(99) < 30) : 1'b0;
+        b_eff_mem_wait    <= bp_en ? ($urandom_range(99) < 30) : 1'b0;
+        dcy_ada_mem_wait  <= bp_en ? ($urandom_range(99) < 30) : 1'b0;
+        scl_ada_mem_wait  <= bp_en ? ($urandom_range(99) < 30) : 1'b0;
+        syn_curr_mem_wait <= bp_en ? ($urandom_range(99) < 40) : 1'b0;
+        pot_mem_wait      <= bp_en ? ($urandom_range(99) < 40) : 1'b0;
+        ada_mem_wait      <= bp_en ? ($urandom_range(99) < 40) : 1'b0;
+        spike_mem_wait    <= bp_en ? ($urandom_range(99) < 55) : 1'b0;
     end
 
     integer n;
@@ -284,8 +295,11 @@ module tb_neuron_processing;
 
             `VT_PULSE(start_new_block)
             `VT_WAIT_FINISH(neuron_proc_finished, 6000)
-            repeat (40) @(posedge clk); #1;       // let packers drain
+            // Drop back-pressure FIRST, then drain wait-free: neuron_proc_finished
+            // leads the final packer writeback, which under write back-pressure can
+            // still be stalled. Any corruption already happened during the run.
             bp_en = 0;
+            repeat (60) @(posedge clk); #1;       // let packers drain (wait-free)
 
             // check syn_curr + pot write-backs (full 32-bit per neuron)
             // syn writeback is at memory scale (g_syn << binpt); pot stays at neuron scale.

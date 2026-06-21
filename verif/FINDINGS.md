@@ -3,7 +3,7 @@
 Confirmed issues surfaced by the aggressive test suite (`verif/` library + per-module
 testbenches). Each entry: what, where, evidence, impact, status.
 
-Authors: Simon Davidson & Claude · Created 2026-06-07 · Last modified 2026-06-07
+Authors: Simon Davidson & Claude · Created 2026-06-07 · Last modified 2026-06-21
 
 ---
 
@@ -292,6 +292,9 @@ worth documenting in the RTL:
   `pak_write_i` even when `buffer_full` and the writeback is stalled on `pot_wait`.
   Safe only because `neuron_processing` gates `result_taken` on `~packer_full`. A
   defensive internal guard (or a comment) would harden it.
+  **RESOLVED 2026-06-21 (see F8):** this was not merely latent — it was the F8 bug.
+  `packer.v` (all 6 copies) now guards the accumulate with
+  `pak_write_i && !buffer_full`, and the driver now strobes on `result_taken`.
 - **D2 `weight_generator.finished_pass_o` is a one-delta combinational pulse** —
   must be sampled AT the posedge, not at `#1` after (sampling late intermittently
   misses the conv pulse). Same hazard class as the `syn_curr_update`/conv
@@ -362,25 +365,58 @@ the cases genuinely exercise multi-word addressing. `tb_hu_compute` 20056/0 and
 
 ---
 
-## F8 — fmiSnnAcc neuron_processing sub-32-bit slice writeback corrupts fields (SUSPECTED)
+## F8 — neuron_processing packers strobe on held result_valid, corrupting writeback under back-pressure (CONFIRMED → FIXED)
 
-**Where:** `fmiSnnAcc/neuron_processing.v` multi-packer writeback path (and the shared
-`packer.v`); very likely also `snnAcc`/`annAcc` neuron_processing (same structure).
+**Where:** all five `neuron_processing.v` variants (`snnAcc`, `ipSnnAcc`, `annAcc`,
+`fmiSnnAcc`, `fmiSnnAccMC`) + the shared `packer.v`.
 
-**What:** With 16-bit `syn_curr`/`pot` slices, the per-neuron write-backs corrupt at the
-field level. The spike packer fills one word every 32 neurons while the syn_curr/pot
-packers fill one every 2 neurons; at these mismatched cadences a neuron's value appears
-to land in the wrong field/word. The fmiSnnAcc agent ruled out two testbench artifacts
-(identical paired neurons in a word still fails; fully decoupled frozen-read / write-
-capture arrays still fail), which points at the RTL — but it is not yet confirmed vs a
-golden-prediction subtlety at mixed cadences.
+**Root cause (broader than the original sub-32-bit framing):** every writeback packer was
+wired `.pak_write_i(result_valid)`. `result_valid` is a **level** held high for many
+cycles whenever any packer is back-pressured (`result_taken = result_valid & ~packer_full
+& ~*_wb_full`). `packer.v` OR-accumulates `output_buffer` on **every** cycle `pak_write_i`
+is high, so under sustained writeback memory back-pressure it:
+- **(a) sub-32-bit:** OR-accumulates the *next* neuron's field into a full, not-yet-flushed
+  word (the field-level corruption originally reported); and
+- **(b) the 1-bit spike packer / 32-bit packers:** after a word flushes while
+  `result_valid` is still held, re-accumulates the current neuron and **re-flushes**,
+  overwriting the correct word — this hits **even in all-32-bit configs** (e.g. FMI),
+  where the spike packer is the corruption site, so F8 is *not* sub-32-bit-only.
+
+Every other consumer in the system (caches' `slice_data_taken_i`, the neuron counter)
+advances on the one-cycle `result_taken`/`neuron_taken` accept — only the packers latched
+the held level.
 
 **Why untested before:** every neuron_processing unit/integration test (all variants)
-only ever used **32-bit slices** (1 element/word, where the packers never interleave).
+hard-wired the **write-side** `*_mem_wait` to `1'b0`, so a held writeback was structurally
+unreachable. (Read-side back-pressure was exercised; write-side never.)
 
-**Status:** SUSPECTED — the committed fmiSnnAcc unit test runs on the 32-bit path (793
-checks, 0 failures — the path the FMI models actually use). Needs a dedicated
-packer-cadence test + RTL investigation before being called a confirmed bug.
+**Evidence:** new `fmiSnnAcc/tb_packer_cadence.v` (+ `tbPackerCadence.bsh`, cloned to
+`fmiSnnAccMC`) drives the REAL `update_state_for_neuron` + REAL `packer` ×4 wired exactly
+as `neuron_processing`, with wait-honouring writeback SRAMs and injectable write
+back-pressure across the full slice-size matrix. Over an identical matrix
+`pak_write_i = result_valid` → **70 failures**; `pak_write_i = result_taken` → **0
+failures** (783 checks incl. an "exactly one accumulate per accepted neuron" assertion).
+
+**Fix (2026-06-21):**
+- Driver: drive every packer's `pak_write_i` from the existing one-cycle `result_taken`
+  instead of `result_valid` (the ada packer keeps `& has_ada_i`). One line per packer in
+  all five `neuron_processing.v`. No new wire/constant/port; no combinational loop
+  (`result_valid`/`*_full` are registered, `pak_full_o` is registered `buffer_full`).
+  Behaviour-identical when not back-pressured, so all existing 32-bit suites stay green.
+- Defensive: `packer.v` (all 6 copies incl. Hadamard) now guards the accumulate with
+  `else if (pak_write_i && !buffer_full)` so a future level-strobe reuse cannot
+  re-introduce the OR-while-full case. **This supersedes design observation D1** (the
+  write-while-full guard is now in the primitive); the held-flush re-accumulate is closed
+  by the `result_taken` driver fix (the guard alone does not close it).
+
+**Verification:** `tb_packer_cadence` 783/0 (fmiSnnAcc + fmiSnnAccMC). All existing suites
+green post-fix across every variant + Hadamard (`tbNeuronProc`, acc-level, `tbPacker`,
+`tbHuCompute`/`tbHadamard`). The acc-level `tb_neuron_processing` (fmiSnnAcc/MC) additionally
+gained write-side back-pressure as **integration robustness coverage** ("still correct
+under a stalled writeback"); note a 32-bit acc-level test is **not** a reliable F8
+discriminator (the 32-bit re-OR is idempotent with a frozen counter, and the narrow
+spike-flush race is masked by the shared read/write `mem_wait` stalling the producer) —
+`tb_packer_cadence` is the canonical, reliable F8 regression.
 
 ---
 

@@ -103,7 +103,7 @@ always @ (posedge clk)
         output_buffer <= 32'h0000_0000;
     else if (writing)
         output_buffer <= 32'h0000_0000;
-    else if (pak_write_i) 
+    else if (pak_write_i && !buffer_full)        /* F8: never OR while full/pending */
 	output_buffer <= output_buffer | new_data;
 
 assign index_shift  = (5 - pak_out_sz_i);   /* Complementary shift for offset */

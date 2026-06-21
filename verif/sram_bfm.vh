@@ -54,6 +54,26 @@
     always @(posedge clk)                                                     \
         if (WR) ARR[ADDR[7:0]] <= WDATA;
 
+// Write-only array honouring write back-pressure: the write commits ONLY when
+// the interface is not stalled (WR & ~WAIT).  Models a memory that holds off a
+// write under arbitration — needed to exercise the F8 packer-cadence path
+// (a held writeback) which `SRAM_WR` (commits unconditionally) cannot.
+`define SRAM_WR_WAIT(ARR, WR, WAIT, ADDR, WDATA)                              \
+    reg [31:0] ARR [0:255];                                                   \
+    always @(posedge clk)                                                     \
+        if (WR & ~WAIT) ARR[ADDR[7:0]] <= WDATA;
+
+// Read/write array honouring back-pressure on BOTH read and write (read-modify-
+// write style: syn_curr, pot, ada).  The single WAIT pin is shared by the read
+// cache and the write packer in neuron_processing (mem_wait_i = WAIT | wb_wr),
+// so neither read nor write commits while WAIT is asserted.
+`define SRAM_RW_WAIT(ARR, RD, WR, WAIT, ADDR, WDATA, RDATA)                   \
+    reg [31:0] ARR [0:255];                                                   \
+    always @(posedge clk) begin                                              \
+        if (RD & ~WAIT) RDATA <= ARR[ADDR[7:0]];                             \
+        if (WR & ~WAIT) ARR[ADDR[7:0]] <= WDATA;                             \
+    end
+
 // Random back-pressure generator: drive a mem_wait reg high with PROB_PCT %
 // probability each cycle.  WAITREG must be a reg declared in the TB and driven
 // by nothing else.  (SystemVerilog $urandom_range; requires -sv.)

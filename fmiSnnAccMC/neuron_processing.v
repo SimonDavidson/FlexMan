@@ -607,7 +607,7 @@ module neuron_processing # (
     packer spike_packer0 (
         .clk(clk), .reset(reset),
         .busy_o(packer_busy), .finish_o(packer_finish),
-        .pak_write_i(result_valid),   .pak_full_o(packer_full),
+        .pak_write_i(result_taken),   .pak_full_o(packer_full),
         .pak_colour_i(1'b0),          .pak_last_i(last_neuron),
         .pak_index_i({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
         .pak_acc_data_i({spike, {(`POT_BITS-1){1'b0}}}),
@@ -621,7 +621,7 @@ module neuron_processing # (
     packer syn_curr_wb_packer (
         .clk(clk), .reset(reset),
         .busy_o(), .finish_o(),
-        .pak_write_i(result_valid),   .pak_full_o(syn_curr_wb_full),
+        .pak_write_i(result_taken),   .pak_full_o(syn_curr_wb_full),
         .pak_colour_i(1'b0),          .pak_last_i(last_neuron),
         .pak_index_i({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
         .pak_acc_data_i(syn_curr_wb_lj),
@@ -635,7 +635,7 @@ module neuron_processing # (
     packer pot_wb_packer (
         .clk(clk), .reset(reset),
         .busy_o(), .finish_o(),
-        .pak_write_i(result_valid),   .pak_full_o(pot_wb_full),
+        .pak_write_i(result_taken),   .pak_full_o(pot_wb_full),
         .pak_colour_i(1'b0),          .pak_last_i(last_neuron),
         .pak_index_i({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
         .pak_acc_data_i(pot_wb_lj),
@@ -653,7 +653,7 @@ module neuron_processing # (
     packer ada_wb_packer (
         .clk(clk), .reset(reset),
         .busy_o(), .finish_o(),
-        .pak_write_i(result_valid & has_ada_i),  .pak_full_o(ada_wb_full_raw),
+        .pak_write_i(result_taken & has_ada_i),  .pak_full_o(ada_wb_full_raw),
         .pak_colour_i(1'b0),                     .pak_last_i(last_neuron),
         .pak_index_i({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
         .pak_acc_data_i(updated_ada),
