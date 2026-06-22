@@ -2,4 +2,4 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Simon Davidson, University of Manchester
 xrun -sv -timescale 1ns/1ps -access wrc -top tb_packer \
-  packer.v tb_packer.v ${COV_ARGS:-}
+  ../shared/packer.v tb_packer.v ${COV_ARGS:-}

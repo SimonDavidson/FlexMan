@@ -10,5 +10,5 @@
 # neuron_processing, with wait-honouring writeback SRAMs, to confirm/characterise
 # the sub-32-bit slice writeback corruption.
 xrun -sv -timescale 1ns/1ps -access wrc -top tb_packer_cadence \
-  packer.v update_state_for_neuron.v tb_packer_cadence.v \
+  ../shared/packer.v update_state_for_neuron.v tb_packer_cadence.v \
   ${COV_ARGS:-}

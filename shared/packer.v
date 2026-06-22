@@ -3,7 +3,7 @@
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 `include "../shared/constants.v"
 
-module packer #( parameter PAK_IDX_SZ = `PIN_BITS )  // MC: index width, override per-instance
+module packer #( parameter PAK_IDX_SZ = `PIN_BITS )  // shared parameterised packer: per-instance index width (default `PIN_BITS)
              (input  wire                  clk,
               input  wire                  reset,
 

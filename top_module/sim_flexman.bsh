@@ -22,7 +22,7 @@ xrun -sv -timescale 10ps/1ps -top tb_flexman \
   ../snnAcc/update_state_for_neuron.v \
   ../shared/dataline_cache_with_xy.v \
   ../shared/slice_and_align.v \
-  ../snnAcc/packer.v \
+  ../shared/packer.v \
   ../annAcc/acc_snn_processor.v \
   ../annAcc/spike_processing.v \
   ../annAcc/neuron_processing.v \

@@ -9,5 +9,5 @@ weight_gen="./weight_gen"
 pot_ss="./pot_subsystem"
 
 # Test bench for neuron state update:
-xrun -sv -timescale 1ns/1ps -access wrc -top tb_acc_snn_processor acc_snn_processor.v spike_processing.v act_index_generator.v weight_generator.v syn_curr_update.v update_state_for_neuron.v neuron_processing.v ../shared/dataline_cache_with_xy.v ../shared/slice_and_align.v packer.v tb_acc_snn_processor.v
+xrun -sv -timescale 1ns/1ps -access wrc -top tb_acc_snn_processor acc_snn_processor.v spike_processing.v act_index_generator.v weight_generator.v syn_curr_update.v update_state_for_neuron.v neuron_processing.v ../shared/dataline_cache_with_xy.v ../shared/slice_and_align.v ../shared/packer.v tb_acc_snn_processor.v
 
