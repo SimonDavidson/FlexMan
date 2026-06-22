@@ -10,6 +10,6 @@
 # every memory write-back against the np_ref_fmi golden, covering both the
 # plain (has_ada=0) and adaptive (has_ada=1) datapaths.
 xrun -sv -timescale 1ns/1ps -access wrc -top tb_neuron_processing \
-  dataline_cache_with_xy.v slice_and_align.v packer.v \
+  dataline_cache_with_xy.v ../shared/slice_and_align.v packer.v \
   update_state_for_neuron.v neuron_processing.v tb_neuron_processing.v \
   ${COV_ARGS:-}

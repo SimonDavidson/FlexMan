@@ -7,6 +7,6 @@
 # fixes), which broke elaboration once stream_generator started driving invalidate_i.
 xrun -sv -timescale 1ns/1ps -access wrc -top tb_hadamard_unit \
   hadamard_unit.v hu_compute.v hu_config_regs.v stream_generator.v \
-  packer.v ../snnAcc/dataline_cache_with_xy.v slice_and_align.v \
+  packer.v ../snnAcc/dataline_cache_with_xy.v ../shared/slice_and_align.v \
   tb_hadamard_unit.v \
   ${COV_ARGS:-}
