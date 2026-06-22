@@ -2,5 +2,5 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Simon Davidson, University of Manchester
 xrun -sv -timescale 1ns/1ps -access wrc -top tb_spike_processing \
-  ../shared/slice_and_align.v dataline_cache_with_xy.v act_index_generator.v \
+  ../shared/slice_and_align.v ../shared/dataline_cache_with_xy.v act_index_generator.v \
   weight_generator.v syn_curr_update.v spike_processing.v tb_spike_processing.v

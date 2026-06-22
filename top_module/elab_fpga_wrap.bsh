@@ -23,7 +23,7 @@ xrun -sv -elaborate -timescale 10ps/1ps -top flexman_fpga_wrap \
   ../snnAcc/weight_generator.v \
   ../snnAcc/syn_curr_update.v \
   ../snnAcc/update_state_for_neuron.v \
-  ../snnAcc/dataline_cache_with_xy.v \
+  ../shared/dataline_cache_with_xy.v \
   ../shared/slice_and_align.v \
   ../snnAcc/packer.v \
   ../annAcc/acc_snn_processor.v \

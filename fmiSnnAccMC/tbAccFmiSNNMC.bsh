@@ -5,5 +5,5 @@
 xrun -sv -timescale 1ns/1ps -access wrc -top tb_acc_fmiSnnMC_processor \
   acc_fmiSnnMC_processor.v spike_processing.v act_index_generator.v \
   weight_generator.v syn_curr_update.v update_state_for_neuron.v \
-  neuron_processing.v dataline_cache_with_xy.v ../shared/slice_and_align.v \
+  neuron_processing.v ../shared/dataline_cache_with_xy.v ../shared/slice_and_align.v \
   packer.v ../shared/sram_bram.v tb_acc_fmiSnnMC_processor.v
