@@ -53,8 +53,8 @@ reg                [X_INPUT_SZ-1:0] in_x_index_r;
 reg                [Y_INPUT_SZ-1:0] in_y_index_r;
 wire               [X_INPUT_SZ-1:0] in_x_index_nxt;
 wire               [Y_INPUT_SZ-1:0] in_y_index_nxt;
-wire                [`PIN_BITS-1:0] in_elem_count_nxt;
-reg                 [`PIN_BITS-1:0] in_elem_count_r;
+wire                [ACT_IDX_SZ-1:0] in_elem_count_nxt;
+reg                 [ACT_IDX_SZ-1:0] in_elem_count_r;
 reg                                 act_index_gen_running_r;
 
 always @ (posedge clk)

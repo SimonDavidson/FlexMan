@@ -396,7 +396,7 @@ assign result_taken = result_valid & ~packer_full & ~pot_wb_full;
 // 8) Pack output activations → spike_mem
 ///////////////////////////////////////////////////////////////////////
 
-packer spike_packer0 (
+packer #(.PAK_IDX_SZ(NEURON_IDX_SZ)) spike_packer0 (
     .clk                 (clk),
     .reset               (reset),
     .busy_o              (packer_busy),
@@ -405,7 +405,7 @@ packer spike_packer0 (
     .pak_full_o          (packer_full),
     .pak_colour_i        (1'b0),
     .pak_last_i          (neuron_counter_r == last_neuron_idx_i),
-    .pak_index_i         ({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
+    .pak_index_i         (neuron_counter_r),
     .pak_acc_data_i      (act_out_lj),
     .pot_wr_o            (spike_mem_wr_o),
     .pot_wait_i          (spike_mem_wait_i),
@@ -421,7 +421,7 @@ packer spike_packer0 (
 // 9) Pack decayed activations → pot_mem
 ///////////////////////////////////////////////////////////////////////
 
-packer pot_wb_packer (
+packer #(.PAK_IDX_SZ(NEURON_IDX_SZ)) pot_wb_packer (
     .clk                 (clk),
     .reset               (reset),
     .busy_o              (),
@@ -430,7 +430,7 @@ packer pot_wb_packer (
     .pak_full_o          (pot_wb_full),
     .pak_colour_i        (1'b0),
     .pak_last_i          (neuron_counter_r == last_neuron_idx_i),
-    .pak_index_i         ({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
+    .pak_index_i         (neuron_counter_r),
     .pak_acc_data_i      (pot_wb_lj),
     .pot_wr_o            (pot_wb_wr),
     .pot_wait_i          (pot_mem_wait_i),

@@ -604,12 +604,12 @@ module neuron_processing # (
                           ~pot_wb_full & ~ada_wb_full;
 
     // Spike packer
-    packer spike_packer0 (
+    packer #(.PAK_IDX_SZ(NEURON_IDX_SZ)) spike_packer0 (
         .clk(clk), .reset(reset),
         .busy_o(packer_busy), .finish_o(packer_finish),
         .pak_write_i(result_taken),   .pak_full_o(packer_full),
         .pak_colour_i(1'b0),          .pak_last_i(last_neuron),
-        .pak_index_i({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
+        .pak_index_i(neuron_counter_r),
         .pak_acc_data_i({spike, {(`POT_BITS-1){1'b0}}}),
         .pot_wr_o(spike_mem_wr_o),    .pot_wait_i(spike_mem_wait_i),
         .pot_addr_o(spike_mem_addr_o),.pot_data_o(spike_mem_data_o),
@@ -618,12 +618,12 @@ module neuron_processing # (
     );
 
     // Syn curr writeback packer
-    packer syn_curr_wb_packer (
+    packer #(.PAK_IDX_SZ(NEURON_IDX_SZ)) syn_curr_wb_packer (
         .clk(clk), .reset(reset),
         .busy_o(), .finish_o(),
         .pak_write_i(result_taken),   .pak_full_o(syn_curr_wb_full),
         .pak_colour_i(1'b0),          .pak_last_i(last_neuron),
-        .pak_index_i({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
+        .pak_index_i(neuron_counter_r),
         .pak_acc_data_i(syn_curr_wb_lj),
         .pot_wr_o(syn_curr_wb_wr),    .pot_wait_i(syn_curr_mem_wait_i),
         .pot_addr_o(syn_curr_wb_addr),.pot_data_o(syn_curr_wb_data_bus),
@@ -632,12 +632,12 @@ module neuron_processing # (
     );
 
     // Potential writeback packer
-    packer pot_wb_packer (
+    packer #(.PAK_IDX_SZ(NEURON_IDX_SZ)) pot_wb_packer (
         .clk(clk), .reset(reset),
         .busy_o(), .finish_o(),
         .pak_write_i(result_taken),   .pak_full_o(pot_wb_full),
         .pak_colour_i(1'b0),          .pak_last_i(last_neuron),
-        .pak_index_i({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
+        .pak_index_i(neuron_counter_r),
         .pak_acc_data_i(pot_wb_lj),
         .pot_wr_o(pot_wb_wr),         .pot_wait_i(pot_mem_wait_i),
         .pot_addr_o(pot_wb_addr),     .pot_data_o(pot_wb_data_bus),
@@ -650,12 +650,12 @@ module neuron_processing # (
     wire ada_wb_full_raw;
     assign ada_wb_full = has_ada_i & ada_wb_full_raw;
 
-    packer ada_wb_packer (
+    packer #(.PAK_IDX_SZ(NEURON_IDX_SZ)) ada_wb_packer (
         .clk(clk), .reset(reset),
         .busy_o(), .finish_o(),
         .pak_write_i(result_taken & has_ada_i),  .pak_full_o(ada_wb_full_raw),
         .pak_colour_i(1'b0),                     .pak_last_i(last_neuron),
-        .pak_index_i({{(`PIN_BITS-NEURON_IDX_SZ){1'b0}}, neuron_counter_r}),
+        .pak_index_i(neuron_counter_r),
         .pak_acc_data_i(updated_ada),
         .pot_wr_o(ada_wb_wr),         .pot_wait_i(ada_mem_wait_i),
         .pot_addr_o(ada_wb_addr),     .pot_data_o(ada_wb_data_bus),
