@@ -3,7 +3,8 @@
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 `include "../shared/constants.v"
 
-module packer(input  wire                  clk,
+module packer #( parameter PAK_IDX_SZ = `PIN_BITS )  // MC: index width, override per-instance
+             (input  wire                  clk,
               input  wire                  reset,
 
               output wire                  busy_o,               /* Not empty */
@@ -13,7 +14,7 @@ module packer(input  wire                  clk,
               output wire                  pak_full_o,         /* Don't input */
               input  wire                  pak_colour_i,
               input  wire                  pak_last_i,
-              input  wire  [`PIN_BITS-1:0] pak_index_i,
+              input  wire [PAK_IDX_SZ-1:0] pak_index_i,
               input  wire  [`POT_BITS-1:0] pak_acc_data_i,       /* New value */
 
               output wire                  pot_wr_o,          /* RAM write en */
@@ -27,7 +28,7 @@ module packer(input  wire                  clk,
               input  wire [`ADDR_SIZE-1:0]     pak_out_base_addr_i);
 
 reg  [`POT_BITS-1:0] output_buffer;                   /* Accumulator register */
-reg  [`PIN_BITS-1:0] pak_index_latched;    /* index that goes with the buffer */
+reg  [PAK_IDX_SZ-1:0] pak_index_latched;   /* index that goes with the buffer */
 reg                  buffer_valid;                       /* Holding something */
 reg                  buffer_full;                        /* Wanting to output */
 reg                  last;                     /* End of matrix mul. sequence */
@@ -38,7 +39,7 @@ wire                 writing;                  /* Write to memory going ahead */
 wire                 top_bit;    /* Input field includes MSB: triggers output */
 
 wire [`POT_OUT_SZ_SZ-1:0] index_shift;       /* Right shifts: index => offset */
-wire      [`PIN_BITS-1:0] offset;                           /* Address offset */
+wire     [PAK_IDX_SZ-1:0] offset;                           /* Address offset */
 reg                [31:0] data_mask; /* Data size masked before justification */
 reg                 [4:0] shift_mask;
 reg                 [6:0] data_shift;                /* To justify data field */
@@ -113,7 +114,7 @@ assign pak_colour_sel_o = pak_colour_i;
 always @ (posedge clk)
 if (reset)
   begin
-     pak_index_latched <= {`PIN_BITS{1'b0}};
+     pak_index_latched <= {PAK_IDX_SZ{1'b0}};
      pak_colour_bs_o   <= 1'b0;
      last              <= 1'b0;
   end
@@ -125,7 +126,7 @@ else if (pak_write_i)
   end
 
 assign offset = pak_index_latched >> index_shift;      /* Held for output time */
-assign pot_addr_o = pak_out_base_addr_i + {{(`ADDR_SIZE - `PIN_BITS){1'b0}}, offset};
+assign pot_addr_o = pak_out_base_addr_i + {{(`ADDR_SIZE - PAK_IDX_SZ){1'b0}}, offset};
 
 always @ (posedge clk)
 if (reset || writing)                                      /* Init. or output */

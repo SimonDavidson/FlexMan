@@ -44,6 +44,7 @@ module acc_fmiSnnMC_processor # (
     parameter SP_IN_DATA_BITS         = 32,
     parameter SP_ELEM_SZ              = 8,
     parameter SP_ACT_SLICE_SZ         = 3,
+    parameter SP_ACT_IDX_SZ           = `PIN_BITS,  // MC: input-neuron flat-index width (override per app)
     parameter SP_ACT_DATA_IDX_SZ      = 5,
     parameter SP_WEIGHT_ENTRY_BITS    = 8,
     parameter SP_WEIGHT_IDX_SZ        = 16,  // MC: widened 5 -> 16
@@ -432,6 +433,7 @@ module acc_fmiSnnMC_processor # (
         .IN_DATA_BITS         (SP_IN_DATA_BITS),
         .ELEM_SZ              (SP_ELEM_SZ),
         .ACT_SLICE_SZ         (SP_ACT_SLICE_SZ),
+        .ACT_IDX_SZ           (SP_ACT_IDX_SZ),
         .ACT_DATA_IDX_SZ      (SP_ACT_DATA_IDX_SZ),
         .WEIGHT_ENTRY_BITS    (SP_WEIGHT_ENTRY_BITS),
         .WEIGHT_IDX_SZ        (SP_WEIGHT_IDX_SZ),

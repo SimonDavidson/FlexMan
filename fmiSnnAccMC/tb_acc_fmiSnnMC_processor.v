@@ -54,28 +54,36 @@
 `define TGT_CONFIG_BASE_ADDR  32'hFFFFFFFF
 `define NUM_TIMESTEPS         32
 `define IN_DATA_SZ            32
-`define X_INPUT_SZ            5
-`define X_OUTPUT_SZ           5
+// T9 (FMI-scale conv) widened these index/coordinate fields from the original
+// POC values (X_*=5, *_IDX_SZ=10) so the harness can address a full FMI layer:
+// in_x=120 / out_x=60 (8-bit coords), 1920 output neurons (12-bit indices),
+// con2 = 2560 weights (16-bit weight index). T1-T8 use small values that still
+// fit, so they are unaffected. NOTE: the INPUT flat-fetch index (act_index_o =
+// in_elem_count_r) is the GLOBAL `PIN_BITS=10 (shared/constants.v, untouched),
+// so input neuron count >1024 aliases — benign for the T9 patterns (see T9),
+// but the scheduler/e2e will need PIN_BITS widened for arbitrary 1920-in layers.
+`define X_INPUT_SZ            8
+`define X_OUTPUT_SZ           8
 `define X_KERNEL_SZ           3
 `define X_STEP_SZ             3
 `define ELEMS_PER_ROW         4
 `define ROWS_PER_NEURON       4
 `define ELEM_SZ               8
 `define WEIGHT_SLICE_SZ       5
-`define WEIGHT_IDX_SZ         10
+`define WEIGHT_IDX_SZ         16
 `define WEIGHT_DATA_IDX_SZ    5
 `define ACT_SLICE_SZ          3
-`define ACT_IDX_SZ            10
+`define ACT_IDX_SZ            11
 `define ACT_DATA_IDX_SZ       5
-`define SYN_CURR_IDX_SZ       10
+`define SYN_CURR_IDX_SZ       12
 `define SYN_CURR_DATA_IDX_SZ  5
 `define SYN_CURR_SLICE_SZ     3
 `define SYN_CURR_SLICE_BITS   32
-`define POT_IDX_SZ            10
+`define POT_IDX_SZ            12
 `define POT_DATA_IDX_SZ       5
 `define POT_SLICE_SZ          3
 `define POT_SLICE_BITS        32
-`define SPIKE_IDX_SZ          10
+`define SPIKE_IDX_SZ          12
 `define SPIKE_DATA_IDX_SZ     5
 `define SPIKE_SLICE_SZ        3
 `define SPIKE_SLICE_BITS      8
@@ -213,6 +221,7 @@ module tb_acc_fmiSnnMC_processor;
         .SP_IN_DATA_BITS          (32),
         .SP_ELEM_SZ               (`ELEM_SZ),
         .SP_ACT_SLICE_SZ          (`ACT_SLICE_SZ),
+        .SP_ACT_IDX_SZ            (`ACT_IDX_SZ),
         .SP_ACT_DATA_IDX_SZ       (`ACT_DATA_IDX_SZ),
         .SP_WEIGHT_ENTRY_BITS     (8),
         .SP_WEIGHT_IDX_SZ         (`WEIGHT_IDX_SZ),
@@ -229,7 +238,7 @@ module tb_acc_fmiSnnMC_processor;
         .NP_NUM_TIMESTEPS         (`NUM_TIMESTEPS),
         .NP_TIMESTEP_SZ           (10),
         .NP_IN_DATA_BITS          (32),
-        .NP_NEURON_IDX_SZ         (10),
+        .NP_NEURON_IDX_SZ         (11),   // T9: 1920 output neurons need 11 bits (2^11=2048)
         .NP_SYN_CURR_IDX_SZ       (`SYN_CURR_IDX_SZ),
         .NP_SYN_CURR_DATA_IDX_SZ  (`SYN_CURR_DATA_IDX_SZ),
         .NP_SYN_CURR_SLICE_SZ     (`SYN_CURR_SLICE_SZ),
@@ -434,6 +443,13 @@ module tb_acc_fmiSnnMC_processor;
     // ----------------------------------------------------------------
     integer errors;
     integer timeout;
+    integer wait_limit;   // wait_pipeline countdown ceiling; bumped for T9 (FMI scale)
+
+    // T9 golden reference arrays ($readmemh targets), full FMI-layer sized.
+    reg [31:0] golden_syn   [0:MEM_DEPTH-1];
+    reg [31:0] golden_spike [0:MEM_DEPTH-1];
+    integer t9_i;
+    integer t9_mism;
 
     task cfg_write;
         input [31:0] addr;
@@ -502,7 +518,7 @@ module tb_acc_fmiSnnMC_processor;
         begin
             timed_out = 0;
 
-            timeout = 500;
+            timeout = wait_limit;
             @(posedge clk);
             while (!spike_proc_finished_latched && timeout > 0) begin
                 timeout = timeout - 1;
@@ -516,7 +532,7 @@ module tb_acc_fmiSnnMC_processor;
             end else
                 $display("  spike_proc_finished after %0d cycles", 500 - timeout);
 
-            timeout = 500;
+            timeout = wait_limit;
             @(posedge clk);
             while (!acc_finished_latched && timeout > 0) begin
                 timeout = timeout - 1;
@@ -545,6 +561,7 @@ module tb_acc_fmiSnnMC_processor;
 
     initial begin
         errors            = 0;
+        wait_limit        = 500;        // small-test default; T9 raises it
         reset             = 1'b1;
         sys_req_i         = 1'b0;
         start_new_block_i = 1'b0;
@@ -1010,22 +1027,23 @@ module tb_acc_fmiSnnMC_processor;
         //     w_idx 6..8  = w[1][0][0..2] = 7, 8, 9
         //     w_idx 9..11 = w[1][1][0..2] = 10, 11, 12
         //
-        //   Single input spike at (cin=0, in_x=2). With stride=1, pad=1:
-        //     for kx in 0..2: out_x = act_x + kx - offset = 2 + kx - 1 in {1,2,3}
+        //   Single input spike at (cin=0, in_x=2). With stride=1, pad=1, the
+        //   corrected (PyTorch-equivalent) projection out=(act_x+offset-kx)/step:
+        //     for kx in 0..2: out_x = (2 + 1 - kx)/1 = 3 - kx in {3,2,1}
         //   Hardware projects this input to outputs (cout, out_x):
-        //     kx=0 -> out_x=1, weight = w[cout][0][0]
+        //     kx=0 -> out_x=3, weight = w[cout][0][0]
         //     kx=1 -> out_x=2, weight = w[cout][0][1]
-        //     kx=2 -> out_x=3, weight = w[cout][0][2]
+        //     kx=2 -> out_x=1, weight = w[cout][0][2]
         //
         //   Channel-major syn_curr layout (cout * out_x_len + out_x):
         //     syn_curr_mem[0] = (cout=0, x=0) = 0      (no kernel hits)
-        //     syn_curr_mem[1] = (cout=0, x=1) = 1
-        //     syn_curr_mem[2] = (cout=0, x=2) = 2
-        //     syn_curr_mem[3] = (cout=0, x=3) = 3
-        //     syn_curr_mem[4] = (cout=1, x=0) = 0
-        //     syn_curr_mem[5] = (cout=1, x=1) = 7
-        //     syn_curr_mem[6] = (cout=1, x=2) = 8
-        //     syn_curr_mem[7] = (cout=1, x=3) = 9
+        //     syn_curr_mem[1] = (cout=0, x=1) = 3      = w[0][0][2]
+        //     syn_curr_mem[2] = (cout=0, x=2) = 2      = w[0][0][1]
+        //     syn_curr_mem[3] = (cout=0, x=3) = 1      = w[0][0][0]
+        //     syn_curr_mem[4] = (cout=1, x=0) = 0      (no kernel hits)
+        //     syn_curr_mem[5] = (cout=1, x=1) = 9      = w[1][0][2]
+        //     syn_curr_mem[6] = (cout=1, x=2) = 8      = w[1][0][1]
+        //     syn_curr_mem[7] = (cout=1, x=3) = 7      = w[1][0][0]
         //
         //   sp_skip_neuron=1: dispatch SP only, no NP (no LIF decay applied
         //   to syn_curr, so the raw MAC accumulator is observable).
@@ -1110,22 +1128,192 @@ module tb_acc_fmiSnnMC_processor;
                      u_syn_curr_mem.mem[4], u_syn_curr_mem.mem[5],
                      u_syn_curr_mem.mem[6], u_syn_curr_mem.mem[7]);
             // With sp_skip_neuron=1, NP doesn't run, so syn_curr_mem holds the
-            // raw MAC accumulator output. Expected values are exactly the
-            // weights routed via the conv projection:
-            //   (cout=0, x=1..3) = w[0][0][0..2] = 1, 2, 3
-            //   (cout=1, x=1..3) = w[1][0][0..2] = 7, 8, 9
+            // raw MAC accumulator output. Corrected (PyTorch-equivalent) conv
+            // projection out=(act_x+offset-kx)/step routes input x=2 to:
+            //   (cout=0, x=3..1) = w[0][0][0..2] = 1, 2, 3
+            //   (cout=1, x=3..1) = w[1][0][0..2] = 7, 8, 9
             // Channel-major flatten: cout=0 in [0..3], cout=1 in [4..7].
             check_eq(u_syn_curr_mem.mem[0], 32'd0, "T8 syn(0,0) (no kernel hit)");
-            check_eq(u_syn_curr_mem.mem[1], 32'd1, "T8 syn(0,1) = w[0][0][0]");
+            check_eq(u_syn_curr_mem.mem[1], 32'd3, "T8 syn(0,1) = w[0][0][2]");
             check_eq(u_syn_curr_mem.mem[2], 32'd2, "T8 syn(0,2) = w[0][0][1]");
-            check_eq(u_syn_curr_mem.mem[3], 32'd3, "T8 syn(0,3) = w[0][0][2]");
+            check_eq(u_syn_curr_mem.mem[3], 32'd1, "T8 syn(0,3) = w[0][0][0]");
             check_eq(u_syn_curr_mem.mem[4], 32'd0, "T8 syn(1,0) (no kernel hit)");
-            check_eq(u_syn_curr_mem.mem[5], 32'd7, "T8 syn(1,1) = w[1][0][0]");
+            check_eq(u_syn_curr_mem.mem[5], 32'd9, "T8 syn(1,1) = w[1][0][2]");
             check_eq(u_syn_curr_mem.mem[6], 32'd8, "T8 syn(1,2) = w[1][0][1]");
-            check_eq(u_syn_curr_mem.mem[7], 32'd9, "T8 syn(1,3) = w[1][0][2]");
+            check_eq(u_syn_curr_mem.mem[7], 32'd7, "T8 syn(1,3) = w[1][0][0]");
         end
 
-        // Reset MC sizing back to 1 in case future tests are added.
+        // Reset MC sizing back to 1 (each T9 pattern re-sets its own).
+        tb_sp_cin_len  = 7'd1;
+        tb_sp_cout_len = 7'd1;
+
+        // ============================================================
+        // Test 9: FMI-scale convolution against the PyTorch golden.
+        //
+        //   Real con2 (Cin=16, Cout=32, Kx=5) at stride=2, pad=2, driving the
+        //   full group4 plain-LIF datapath with the REAL group4 dcy/thresh hex.
+        //   in_x=120 (group3 positions) -> out_x=60 (group4 positions),
+        //   16 input channels -> 32 output channels, 1920 output neurons.
+        //
+        //   This is the regression test for the conv-projection fix
+        //   (weight_generator.v): the corrected downsampling projection
+        //   out=(act_x+pad-kx)/stride must reproduce a PyTorch strided
+        //   cross-correlation.  Goldens come from fmi/check_layer_rtl.py,
+        //   computed from the SAME con2 hex the RTL $readmemh-loads.
+        //   syn_curr_golden_* = 1920 int32 (post-writeback-decay),
+        //   spike_golden_*    = 60 packed words.  Compared exhaustively.
+        //
+        //   PIN_BITS=10 (global) caps the flat input-fetch index at 1024.
+        //   Both patterns are immune: A is all-ones (aliased reads still read
+        //   spike); B's only spike is at flat index 8*120+60=1020 (<1024) with
+        //   zeros elsewhere (aliased reads read genuine zeros).  Arbitrary
+        //   patterns would NOT be immune -> scheduler/e2e needs PIN_BITS wider.
+        // ============================================================
+
+        // ---- Test 9B: single spike (pattern B, sub-threshold) ----
+        $display("Test 9B: FMI-scale conv (con2 16->32, stride 2), single spike");
+        wait_limit = 200000;
+
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
+            u_weight_mem.mem[i_init]   = 32'd0;
+            u_act_mem.mem[i_init]      = 32'd0;
+        end
+
+        $readmemh("../../fmi/mem_files/recurrent/con2_weight.hex",   u_weight_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group4_dcy_syn.hex", u_dcy_syn_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group4_dcy_mem.hex", u_dcy_mem_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group4_thresh.hex",  u_thresh_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/test_inputs/act_input_B.hex",
+                  u_act_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/test_inputs/syn_curr_golden_B.hex",
+                  golden_syn);
+        $readmemh("../../fmi/mem_files/recurrent/test_inputs/spike_golden_B.hex",
+                  golden_spike);
+
+        tb_sp_cin_len  = 7'd16;
+        tb_sp_cout_len = 7'd32;
+
+        cfg_write(32'hFFFF_0000, 32'd0);    // act_base
+        cfg_write(32'hFFFF_0004, 32'd0);    // weight_base
+        cfg_write(32'hFFFF_0008, 32'd0);    // syn_curr_base
+        cfg_write(32'hFFFF_000C, 32'd0);    // thresh_base
+        cfg_write(32'hFFFF_0010, 32'd0);    // pot_base
+        cfg_write(32'hFFFF_0014, 32'd0);    // spike_base
+        cfg_write(32'hFFFF_0018, 32'd0);    // dcy_syn_base
+        cfg_write(32'hFFFF_001C, 32'd0);    // dcy_mem_base
+        cfg_write(32'hFFFF_0030, {16'd60, 16'd120});   // S0: out_x=60 | in_x=120
+        cfg_write(32'hFFFF_0034, {16'd1919, 16'd0});   // S1: last_neuron=1919 | rows(dont-care)
+        cfg_write(32'hFFFF_0038, 32'h0000_0001);       // S2: total_timesteps=1
+        cfg_write(32'hFFFF_003C, 32'h2555_0040);       // M0: conv, plain LIF, 32b, skip=0
+        cfg_write(32'hFFFF_005C, 32'd12);   // weight_idx_sz (Cout*Cin*K=2560 < 2^12)
+        cfg_write(32'hFFFF_0074, 32'd5);    // x_kernel_len  = 5
+        cfg_write(32'hFFFF_007C, 32'd2);    // x_kernel_step = 2 (stride)
+        cfg_write(32'hFFFF_0084, 32'd2);    // x_kernel_offset = 2 (pad)
+
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
+        wait_pipeline(timed_out);
+        if (!timed_out) begin
+            t9_mism = 0;
+            for (t9_i = 0; t9_i < 1920; t9_i = t9_i + 1)
+                if (u_syn_curr_mem.mem[t9_i] !== golden_syn[t9_i]) begin
+                    if (t9_mism < 12)
+                        $display("  T9B syn MISMATCH n=%0d got 0x%08h exp 0x%08h",
+                                 t9_i, u_syn_curr_mem.mem[t9_i], golden_syn[t9_i]);
+                    t9_mism = t9_mism + 1;
+                end
+            if (t9_mism == 0) $display("  OK  T9B syn_curr: 1920/1920 match golden");
+            else begin
+                $display("  FAIL T9B syn_curr: %0d/1920 mismatches", t9_mism);
+                errors = errors + 1;
+            end
+            t9_mism = 0;
+            for (t9_i = 0; t9_i < 60; t9_i = t9_i + 1)
+                if (u_spike_mem.mem[t9_i] !== golden_spike[t9_i]) begin
+                    if (t9_mism < 12)
+                        $display("  T9B spike MISMATCH w=%0d got 0x%08h exp 0x%08h",
+                                 t9_i, u_spike_mem.mem[t9_i], golden_spike[t9_i]);
+                    t9_mism = t9_mism + 1;
+                end
+            if (t9_mism == 0) $display("  OK  T9B spike: 60/60 words match golden");
+            else begin
+                $display("  FAIL T9B spike: %0d/60 mismatches", t9_mism);
+                errors = errors + 1;
+            end
+        end
+
+        // ---- Test 9A: all spikes (pattern A, dense stress, 1 output spike) ----
+        $display("Test 9A: FMI-scale conv (con2 16->32, stride 2), all spikes");
+        wait_limit = 2000000;
+
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
+            u_weight_mem.mem[i_init]   = 32'd0;
+            u_act_mem.mem[i_init]      = 32'd0;
+        end
+
+        $readmemh("../../fmi/mem_files/recurrent/con2_weight.hex",   u_weight_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group4_dcy_syn.hex", u_dcy_syn_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group4_dcy_mem.hex", u_dcy_mem_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group4_thresh.hex",  u_thresh_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/test_inputs/act_input_A.hex",
+                  u_act_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/test_inputs/syn_curr_golden_A.hex",
+                  golden_syn);
+        $readmemh("../../fmi/mem_files/recurrent/test_inputs/spike_golden_A.hex",
+                  golden_spike);
+
+        tb_sp_cin_len  = 7'd16;
+        tb_sp_cout_len = 7'd32;
+
+        // Bases / sizes / mode identical to T9B (config persists, but re-write
+        // bases that other tests may have moved is unnecessary — all still 0).
+        cfg_write(32'hFFFF_0030, {16'd60, 16'd120});
+        cfg_write(32'hFFFF_0034, {16'd1919, 16'd0});
+        cfg_write(32'hFFFF_0038, 32'h0000_0001);
+        cfg_write(32'hFFFF_003C, 32'h2555_0040);
+        cfg_write(32'hFFFF_005C, 32'd12);
+        cfg_write(32'hFFFF_0074, 32'd5);
+        cfg_write(32'hFFFF_007C, 32'd2);
+        cfg_write(32'hFFFF_0084, 32'd2);
+
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
+        wait_pipeline(timed_out);
+        if (!timed_out) begin
+            t9_mism = 0;
+            for (t9_i = 0; t9_i < 1920; t9_i = t9_i + 1)
+                if (u_syn_curr_mem.mem[t9_i] !== golden_syn[t9_i]) begin
+                    if (t9_mism < 12)
+                        $display("  T9A syn MISMATCH n=%0d got 0x%08h exp 0x%08h",
+                                 t9_i, u_syn_curr_mem.mem[t9_i], golden_syn[t9_i]);
+                    t9_mism = t9_mism + 1;
+                end
+            if (t9_mism == 0) $display("  OK  T9A syn_curr: 1920/1920 match golden");
+            else begin
+                $display("  FAIL T9A syn_curr: %0d/1920 mismatches", t9_mism);
+                errors = errors + 1;
+            end
+            t9_mism = 0;
+            for (t9_i = 0; t9_i < 60; t9_i = t9_i + 1)
+                if (u_spike_mem.mem[t9_i] !== golden_spike[t9_i]) begin
+                    if (t9_mism < 12)
+                        $display("  T9A spike MISMATCH w=%0d got 0x%08h exp 0x%08h",
+                                 t9_i, u_spike_mem.mem[t9_i], golden_spike[t9_i]);
+                    t9_mism = t9_mism + 1;
+                end
+            if (t9_mism == 0) $display("  OK  T9A spike: 60/60 words match golden (1 output spike)");
+            else begin
+                $display("  FAIL T9A spike: %0d/60 mismatches", t9_mism);
+                errors = errors + 1;
+            end
+        end
+
         tb_sp_cin_len  = 7'd1;
         tb_sp_cout_len = 7'd1;
 
@@ -1135,7 +1323,7 @@ module tb_acc_fmiSnnMC_processor;
     end
 
     initial begin
-        #500000;
+        #10000000;   // raised for T9A (all-spikes, ~1920*160 weight cycles)
         $display("FAIL: global simulation timeout");
         $finish;
     end

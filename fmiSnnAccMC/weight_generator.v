@@ -133,6 +133,12 @@ wire              [WEIGHT_IDX_SZ-1:0] weight_index_mc_conv;
 wire                                oob_skip;
 wire signed     [OUT_X_PROJ_SZ-1:0] out_x_proj_s;
 wire signed     [OUT_Y_PROJ_SZ-1:0] out_y_proj_s;
+wire signed     [OUT_X_PROJ_SZ-1:0] out_x_num_s;   // MC stride fix: act_x + offset - kx
+wire signed     [OUT_Y_PROJ_SZ-1:0] out_y_num_s;   // MC stride fix: act_y + offset - ky
+reg                           [2:0] x_step_log2;   // MC stride fix: log2(step), pow-2 strides
+reg                           [2:0] y_step_log2;
+wire                                x_not_multiple;// MC stride fix: (num) not a multiple of step
+wire                                y_not_multiple;
 wire                                out_x_oob;
 wire                                out_y_oob;
 wire                                is_fullConn;
@@ -225,12 +231,49 @@ assign out_y_index_nxt = (next_out_neuron & out_y_end_of_col & out_x_end_of_row)
 assign kernel_x_at_end = (kernel_x_count_r == (x_kernel_len_i - 1'b1));
 assign kernel_y_at_end = (kernel_y_count_r == (y_kernel_len_i - 1'b1));
 
-assign out_x_proj_s = $signed({1'b0, act_data_x_i})  * $signed({1'b0, x_kernel_step_i})
-                    + $signed({1'b0, kernel_x_count_r})
-                    - $signed({1'b0, x_kernel_offset_i});
-assign out_y_proj_s = $signed({1'b0, act_data_y_i})  * $signed({1'b0, y_kernel_step_i})
-                    + $signed({1'b0, kernel_y_count_r})
-                    - $signed({1'b0, y_kernel_offset_i});
+// MC stride fix (2026-06-21): conv must DOWNSAMPLE.  Output index is
+//   out = (act + offset - k) / step
+// i.e. a PyTorch-equivalent strided cross-correlation.  The previous form
+//   out = act*step + k - offset
+// was an input-UPSAMPLING (transposed-conv) scatter: correct only at step=1,
+// and kernel-flipped vs PyTorch.  FMI inter-group convs are stride-2
+// downsampling (group3 120 -> group4 60 -> group5 30).
+//
+// Division by step is an arithmetic right shift (power-of-2 strides only;
+// FMI uses 2).  A kernel tap contributes only when (act+offset-k) is an exact
+// multiple of step; non-multiples are skipped just like an OOB projection, so
+// the kernel-position counter and weight-slice pointer stay in lockstep.
+assign out_x_num_s = $signed({1'b0, act_data_x_i})
+                   + $signed({1'b0, x_kernel_offset_i})
+                   - $signed({1'b0, kernel_x_count_r});
+assign out_y_num_s = $signed({1'b0, act_data_y_i})
+                   + $signed({1'b0, y_kernel_offset_i})
+                   - $signed({1'b0, kernel_y_count_r});
+
+// log2(step) for the divide-by-step shift (power-of-2 strides).
+always @(*)
+   case (x_kernel_step_i)
+      'd1:     x_step_log2 = 3'd0;
+      'd2:     x_step_log2 = 3'd1;
+      'd4:     x_step_log2 = 3'd2;
+      default: x_step_log2 = 3'd0;   // non-power-of-2 stride unsupported
+   endcase
+always @(*)
+   case (y_kernel_step_i)
+      'd1:     y_step_log2 = 3'd0;
+      'd2:     y_step_log2 = 3'd1;
+      'd4:     y_step_log2 = 3'd2;
+      default: y_step_log2 = 3'd0;
+   endcase
+
+// Divisibility: low log2(step) bits of the numerator must be zero.
+// (step-1) is the power-of-2 modulo mask.  Negative non-multiples are caught
+// here; negative exact multiples fall through to the (<0) OOB test below.
+assign x_not_multiple = |(out_x_num_s[X_STEP_SZ-1:0] & (x_kernel_step_i - 1'b1));
+assign y_not_multiple = |(out_y_num_s[Y_STEP_SZ-1:0] & (y_kernel_step_i - 1'b1));
+
+assign out_x_proj_s = out_x_num_s >>> x_step_log2;
+assign out_y_proj_s = out_y_num_s >>> y_step_log2;
 
 assign out_x_oob = (out_x_proj_s < 0)
                  | (out_x_proj_s >= $signed({1'b0, out_x_len_i}));
@@ -238,7 +281,7 @@ assign out_y_oob = (out_y_proj_s < 0)
                  | (out_y_proj_s >= $signed({1'b0, out_y_len_i}));
 
 assign oob_skip  = is_convolution & doing_weight_pass_r & act_data_valid_i
-                 & (out_x_oob | out_y_oob);
+                 & (out_x_oob | out_y_oob | x_not_multiple | y_not_multiple);
 
 assign next_kernel_pos = is_convolution & doing_weight_pass_r & ~weight_pass_done_r
                        & act_data_valid_i

@@ -60,8 +60,8 @@ wire               [Y_INPUT_SZ-1:0] in_y_index_nxt;
 wire                   [CIN_SZ-1:0] cin_index_nxt;        // MC
 wire                                cin_at_end;           // MC: cin_index_r == cin_len_i-1
 wire                                xy_wrap;              // MC: x/y both wrap this cycle
-wire                [`PIN_BITS-1:0] in_elem_count_nxt;
-reg                 [`PIN_BITS-1:0] in_elem_count_r;
+wire               [ACT_IDX_SZ-1:0] in_elem_count_nxt;  // MC: was `PIN_BITS; sized to span 1920 inputs
+reg                [ACT_IDX_SZ-1:0] in_elem_count_r;
 reg                                 act_index_gen_running_r;
 
 always @ (posedge clk)

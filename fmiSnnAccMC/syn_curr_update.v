@@ -122,6 +122,11 @@ begin
 	   req_pending_r   <= 1'b1;
            syn_curr_addr_r <= weight_index_i;
            syn_curr_flat_index_r <= syn_curr_flat_index;
+`ifdef CONV_DEBUG
+           $display("[%0d] syn_wr: cout=%0d x=%0d y=%0d val=%0d -> flat=%0d",
+                    $time, weight_index_cout_i, weight_index_x_i, weight_index_y_i,
+                    $signed(weight_value_i), syn_curr_flat_index);
+`endif
    end
    else if (req_pending_r & ~syn_curr_mem_wait_i)
 	   req_pending_r  <= 1'b0;
