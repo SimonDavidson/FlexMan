@@ -3,7 +3,7 @@
 Confirmed issues surfaced by the aggressive test suite (`verif/` library + per-module
 testbenches). Each entry: what, where, evidence, impact, status.
 
-Authors: Simon Davidson & Claude · Created 2026-06-07 · Last modified 2026-06-21
+Authors: Simon Davidson & Claude · Created 2026-06-07 · Last modified 2026-06-23
 
 ---
 
@@ -85,7 +85,7 @@ instant.
 
 ---
 
-## F3 — flexman_fpga_wrap.v out of sync with flexman.v (won't elaborate)
+## F3 — flexman_fpga_wrap.v out of sync with flexman.v (RESOLVED)
 
 **Where:** `top_module/flexman_fpga_wrap.v` instantiating `top_module/flexman.v`.
 
@@ -101,8 +101,11 @@ reworked but the wrapper was not updated to match.
 **Impact:** The FPGA synthesis wrapper cannot be built against the current top level.
 `elab_flexman.bsh` (the core top) still elaborates clean, so only the wrapper is stale.
 
-**Status:** OPEN — reported. Out of scope for the test-coverage uplift (it is an RTL
-sync issue), flagged for Simon.
+**Status:** RESOLVED 2026-06-23 — the FPGA wrapper was re-synced to `flexman.v`'s
+reworked top-level memory interface. `elab_fpga_wrap.bsh` now elaborates clean
+(exit 0, 0 errors, the `s0_*_mem_*` CUVPOM port mismatches are gone), and
+`run_regression.sh` scores `top_module/elab_fpga_wrap` PASS(elab). Fixed outside
+the test-coverage uplift (it was an RTL-sync change on the top-level interface).
 
 ---
 
@@ -222,7 +225,7 @@ pass.
 
 ---
 
-## F6 — full-mode spike_processing accumulates with ALL-ZERO activations (spike gating ineffective)
+## F6 — full-mode spike_processing accumulates with ALL-ZERO activations (RESOLVED)
 
 **Where:** `snnAcc/spike_processing.v` — `act_data_gated_valid = act_data_valid &
 act_data_out[ACT_BITS-1]` and the act-index "ignore non-spike" path.
@@ -247,9 +250,15 @@ top-level gating reads as if it should suppress zero activations in all modes.
 activations expecting event-driven suppression, every input would be processed
 regardless. Needs Simon's intent confirmation.
 
-**Status:** OPEN — reported as a non-fatal NOTE in the test (kept green pending
-decision). Surfaced via partial spike patterns having no effect, then confirmed
-with the all-zero probe.
+**Status:** RESOLVED 2026-06-23 — settled as a real CORRECTNESS bug (NOT a
+performance issue): all-zero activations produced `syn_curr = nin·w` instead of 0
+(wrong value, not merely wasted work). Fixed by the activation-gate rework
+(`act_data_gated_valid` / `act_ignore_non_spike`, 2026-06-10) which suppresses
+non-spike accumulation in full mode too. The snnAcc `tb_spike_processing` no-spike
+probe now reports "full mode correctly suppresses accumulation for zero activations"
+(syn=0; 820 checks, 0 failures, re-confirmed 2026-06-23), and the gating line is
+identical across all five variants (incl. fmiSnnAccMC). The earlier bug-vs-intent
+open question is closed: it was a bug, now fixed.
 
 ---
 
