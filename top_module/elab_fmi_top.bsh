@@ -1,0 +1,34 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude   Created: 2026-06-23   Last modified: 2026-06-23
+#
+# Elaborate fmi_top (no simulation — compile/link check only). Run from this
+# directory (top_module/). Derived from elab_example_app.bsh, retargeted to the
+# single multi-channel FMI accelerator (acc_fmiSnnMC_processor).
+xrun -sv -elaborate -timescale 10ps/1ps -top fmi_top \
+  fmi_top.v \
+  ../shared/shared_pool.v \
+  ../scheduler/scheduler.v \
+  ../scheduler/sch_table.v \
+  ../scheduler/sch_entry.v \
+  ../scheduler/sch_buffer_state.v \
+  ../scheduler/buffer_state_entry.v \
+  ../scheduler/acc_hw_buffer_tracker.v \
+  ../scheduler/prog_cache.v \
+  ../config_manager/config_manager.v \
+  ../fmiSnnAccMC/acc_fmiSnnMC_processor.v \
+  ../fmiSnnAccMC/spike_processing.v \
+  ../fmiSnnAccMC/act_index_generator.v \
+  ../fmiSnnAccMC/weight_generator.v \
+  ../fmiSnnAccMC/syn_curr_update.v \
+  ../fmiSnnAccMC/update_state_for_neuron.v \
+  ../fmiSnnAccMC/neuron_processing.v \
+  ../shared/dataline_cache_with_xy.v \
+  ../shared/slice_and_align.v \
+  ../shared/packer.v
+# Notes on file selection:
+#   - sch_ctrl.v excluded: stub module, not instantiated by scheduler
+#   - shared/sram_bram.v excluded: a memory MODEL used only by block testbenches;
+#     fmi_top exposes memory ports (the SRAMs live outside this module).
+#   - fill_unit excluded: no fill_unit this round (reserved slot tied off).
