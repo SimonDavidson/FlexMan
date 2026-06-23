@@ -127,11 +127,8 @@ module tb_acc_fmiSnnMC_processor;
     reg [`PIN_BITS-1:0] np_tgt_buff_addr_i  = {`PIN_BITS{1'b0}};
     reg [`PIN_BITS-1:0] np_weight_row_len_i = {`PIN_BITS{1'b0}};
 
-    // MC: multi-channel conv sizing (POC: testbench-driven, no AXI reg).
-    // Default 1 collapses to the legacy single-channel conv behaviour, so
-    // T1-T7 keep working unchanged.
-    reg [6:0]  tb_sp_cin_len   = 7'd1;
-    reg [6:0]  tb_sp_cout_len  = 7'd1;
+    // MC: multi-channel conv sizing (cin_len/cout_len) is set per-test via the
+    // S2 PACKED config word (0x38) high lane, not testbench wires.
 
     // ----------------------------------------------------------------
     // DUT outputs
@@ -328,12 +325,7 @@ module tb_acc_fmiSnnMC_processor;
         .scl_ada_mem_rd_o         (scl_ada_mem_rd_o),
         .scl_ada_mem_wait_i       (scl_ada_mem_wait_i),
         .scl_ada_mem_addr_o       (scl_ada_mem_addr_o),
-        .scl_ada_mem_data_i       (scl_ada_mem_data_i),
-        // MC: testbench-driven multi-channel conv sizing (POC: no AXI reg).
-        // Tied to 1 for T1-T7 (collapse to legacy behaviour); overridden per
-        // test for T8 (multi-channel conv).
-        .sp_cin_len_i             (tb_sp_cin_len),
-        .sp_cout_len_i            (tb_sp_cout_len)
+        .scl_ada_mem_data_i       (scl_ada_mem_data_i)
     );
 
     // ----------------------------------------------------------------
@@ -592,7 +584,7 @@ module tb_acc_fmiSnnMC_processor;
         // S0..S2: two 16-bit size lanes each
         cfg_write(32'hFFFF_0030, 32'h0002_0002);    // S0 out_x=2 | in_x=2
         cfg_write(32'hFFFF_0034, 32'h0001_0001);    // S1 last_neuron_idx=1 | rows_per_neuron=1
-        cfg_write(32'hFFFF_0038, 32'h0000_0001);    // S2 total_timesteps=1
+        cfg_write(32'hFFFF_0038, 32'h0101_0001);    // S2 total_timesteps=1
         // M0: [1:0] skip=0  [5:2] np_mode=0  [9:6] weights_per_word=4
         //     [15:10] bin_point=0  [19:16] weight_sz=3(8b)
         //     [23:20] syn_curr_sz=5(32b)  [27:24] pot_sz=5(32b)
@@ -1080,8 +1072,6 @@ module tb_acc_fmiSnnMC_processor;
         u_act_mem.mem[0] = 32'h0000_0004;
 
         // Drive MC sizing wires for T8.
-        tb_sp_cin_len  = 7'd2;
-        tb_sp_cout_len = 7'd2;
 
         // PACKED_FMI config for T8.
         // Base addresses all 0:
@@ -1103,7 +1093,7 @@ module tb_acc_fmiSnnMC_processor;
         // S1: last_neuron_idx=7 | rows_per_neuron=12
         cfg_write(32'hFFFF_0034, 32'h0007_000C);
         // S2: total_timesteps=1
-        cfg_write(32'hFFFF_0038, 32'h0000_0001);
+        cfg_write(32'hFFFF_0038, 32'h0202_0001);
         // M0: skip_neuron=1, np_mode=0, weights_per_word=1, bin_point=0,
         //     weight_sz=5(32b), syn_curr_sz=5, pot_sz=5, weight_mode=10(conv), has_ada=0
         //     Skip-neuron: only spike_processing runs, so syn_curr_mem holds
@@ -1144,8 +1134,6 @@ module tb_acc_fmiSnnMC_processor;
         end
 
         // Reset MC sizing back to 1 (each T9 pattern re-sets its own).
-        tb_sp_cin_len  = 7'd1;
-        tb_sp_cout_len = 7'd1;
 
         // ============================================================
         // Test 9: FMI-scale convolution against the PyTorch golden.
@@ -1193,8 +1181,6 @@ module tb_acc_fmiSnnMC_processor;
         $readmemh("../../fmi/mem_files/recurrent/test_inputs/spike_golden_B.hex",
                   golden_spike);
 
-        tb_sp_cin_len  = 7'd16;
-        tb_sp_cout_len = 7'd32;
 
         cfg_write(32'hFFFF_0000, 32'd0);    // act_base
         cfg_write(32'hFFFF_0004, 32'd0);    // weight_base
@@ -1206,7 +1192,7 @@ module tb_acc_fmiSnnMC_processor;
         cfg_write(32'hFFFF_001C, 32'd0);    // dcy_mem_base
         cfg_write(32'hFFFF_0030, {16'd60, 16'd120});   // S0: out_x=60 | in_x=120
         cfg_write(32'hFFFF_0034, {16'd1919, 16'd0});   // S1: last_neuron=1919 | rows(dont-care)
-        cfg_write(32'hFFFF_0038, 32'h0000_0001);       // S2: total_timesteps=1
+        cfg_write(32'hFFFF_0038, 32'h2010_0001);       // S2: total_timesteps=1
         cfg_write(32'hFFFF_003C, 32'h2555_0040);       // M0: conv, plain LIF, 32b, skip=0
         cfg_write(32'hFFFF_005C, 32'd12);   // weight_idx_sz (Cout*Cin*K=2560 < 2^12)
         cfg_write(32'hFFFF_0074, 32'd5);    // x_kernel_len  = 5
@@ -1268,14 +1254,12 @@ module tb_acc_fmiSnnMC_processor;
         $readmemh("../../fmi/mem_files/recurrent/test_inputs/spike_golden_A.hex",
                   golden_spike);
 
-        tb_sp_cin_len  = 7'd16;
-        tb_sp_cout_len = 7'd32;
 
         // Bases / sizes / mode identical to T9B (config persists, but re-write
         // bases that other tests may have moved is unnecessary — all still 0).
         cfg_write(32'hFFFF_0030, {16'd60, 16'd120});
         cfg_write(32'hFFFF_0034, {16'd1919, 16'd0});
-        cfg_write(32'hFFFF_0038, 32'h0000_0001);
+        cfg_write(32'hFFFF_0038, 32'h2010_0001);
         cfg_write(32'hFFFF_003C, 32'h2555_0040);
         cfg_write(32'hFFFF_005C, 32'd12);
         cfg_write(32'hFFFF_0074, 32'd5);
@@ -1314,8 +1298,6 @@ module tb_acc_fmiSnnMC_processor;
             end
         end
 
-        tb_sp_cin_len  = 7'd1;
-        tb_sp_cout_len = 7'd1;
 
         $display("=== tb_acc_fmiSnnMC_processor: %0d failure(s) ===", errors);
         if (errors == 0) $display("PASS"); else $display("FAIL");

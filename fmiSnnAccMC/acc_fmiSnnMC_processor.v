@@ -188,12 +188,9 @@ module acc_fmiSnnMC_processor # (
     output wire                  scl_ada_mem_rd_o,
     input  wire                  scl_ada_mem_wait_i,
     output wire [`ADDR_SIZE-1:0] scl_ada_mem_addr_o,
-    input  wire          [31:0]  scl_ada_mem_data_i,
-
-    // MC: multi-channel conv sizing — driven from the testbench in the POC.
-    // (Will be promoted to PACKED_FMI register fields in a follow-up.)
-    input  wire     [SP_CIN_SZ-1:0]  sp_cin_len_i,
-    input  wire    [SP_COUT_SZ-1:0]  sp_cout_len_i
+    input  wire          [31:0]  scl_ada_mem_data_i
+    // MC: multi-channel conv sizing (cin_len/cout_len) is now decoded from the
+    // S2 PACKED config word (0x38) high lane — see the config decode below.
 );
 
     // =========================================================================
@@ -204,6 +201,8 @@ module acc_fmiSnnMC_processor # (
     reg      [MEM_ADDR_BITS-1:0] syn_curr_base_addr_r;
     reg  [SP_WEIGHT_SLICE_SZ-1:0] sp_weight_sz_r;
     reg     [SP_TIMESTEP_SZ-1:0] sp_total_timesteps_r;
+    reg          [SP_CIN_SZ-1:0] sp_cin_len_r;    // MC: cin_len  from S2 (0x38) high lane
+    reg         [SP_COUT_SZ-1:0] sp_cout_len_r;   // MC: cout_len from S2 (0x38) high lane
     reg    [SP_X_INPUT_SZ-1:0]   sp_in_x_len_r;
     reg   [SP_X_OUTPUT_SZ-1:0]   sp_out_x_len_r;
     reg   [SP_ELEMS_PER_ROW-1:0] sp_weights_per_word_r;
@@ -278,6 +277,8 @@ module acc_fmiSnnMC_processor # (
             syn_curr_base_addr_r     <= {MEM_ADDR_BITS{1'b0}};
             sp_weight_sz_r           <= {SP_WEIGHT_SLICE_SZ{1'b0}};
             sp_total_timesteps_r     <= {SP_TIMESTEP_SZ{1'b0}};
+            sp_cin_len_r             <= {{(SP_CIN_SZ-1){1'b0}}, 1'b1};   // legacy single-channel default
+            sp_cout_len_r            <= {{(SP_COUT_SZ-1){1'b0}}, 1'b1};
             sp_in_x_len_r            <= {SP_X_INPUT_SZ{1'b0}};
             sp_out_x_len_r           <= {SP_X_OUTPUT_SZ{1'b0}};
             sp_weights_per_word_r    <= {SP_ELEMS_PER_ROW{1'b0}};
@@ -333,7 +334,11 @@ module acc_fmiSnnMC_processor # (
                     sp_rows_per_neuron_r <= sys_data_i[SP_ROWS_PER_NEURON-1:0];
                     np_last_neuron_idx_r <= sys_data_i[16 +: NP_NEURON_IDX_SZ];
                 end
-                8'h38: sp_total_timesteps_r <= sys_data_i[SP_TIMESTEP_SZ-1:0]; // S2
+                8'h38: begin                                       // S2
+                    sp_total_timesteps_r <= sys_data_i[SP_TIMESTEP_SZ-1:0];
+                    sp_cin_len_r         <= sys_data_i[16 +: SP_CIN_SZ];   // MC: cin_len  (high lane)
+                    sp_cout_len_r        <= sys_data_i[24 +: SP_COUT_SZ];  // MC: cout_len (high lane)
+                end
                 // M0: bit-packed mode / slice-size fields
                 8'h3C: begin                                       // M0
                     sp_skip_neuron_r      <= sys_data_i[0];
@@ -465,8 +470,8 @@ module acc_fmiSnnMC_processor # (
         .weights_per_word_i     (sp_weights_per_word_r),
         .rows_per_neuron_i      (sp_rows_per_neuron_r),
         .weight_idx_sz_i        (sp_weight_idx_sz_r),
-        .cin_len_i              (sp_cin_len_i),
-        .cout_len_i             (sp_cout_len_i),
+        .cin_len_i              (sp_cin_len_r),
+        .cout_len_i             (sp_cout_len_r),
         .weight_mode_i          (sp_weight_mode_r),
         .x_kernel_len_i         (sp_x_kernel_len_r),
         .y_kernel_len_i         (1'b1),

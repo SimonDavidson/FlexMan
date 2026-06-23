@@ -115,6 +115,15 @@ PACKED_FMI_SIZE_WORDS = [      # offsets 0x30..0x38 ; (low_field, high_field)
     ("sp_rows_per_neuron", "np_last_neuron_idx"),  # S1 0x34
     ("sp_total_timesteps", None),                  # S2 0x38 (high lane spare)
 ]
+# NOTE (fmiSnnAccMC only): the MULTI-CHANNEL variant additionally decodes
+# sp_cin_len at S2 bit 16 (+:SP_CIN_SZ) and sp_cout_len at S2 bit 24
+# (+:SP_COUT_SZ) — i.e. the "spare" high lane of word S2 (0x38) carries
+# {cout[14:8], cin[6:0]} when packed as a 16-bit high field. The single-channel
+# fmiSnnAcc (which this PACKED_FMI_* layout is cross-checked against in
+# tools/tests/test_regmap_vs_rtl.py) leaves it spare, so it is NOT added to the
+# (low,high) tuple above. Encoding it requires either a dedicated MC size-word
+# list or a packer that supports two sub-fields per lane — deferred to the MC
+# config generator (FMI bring-up Stage C / convert_model).
 PACKED_FMI_MODE_WORDS = [      # offset 0x3C ; (field, lsb, width)
     [   # M0 0x3C
         ("sp_skip_neuron",      0, 2),
