@@ -28,3 +28,7 @@ vivado/
 
 # Claude Code development files
 CLAUDE.md
+
+# Internal planning scratch (.flexman_plans/) — not for the public trunk.
+# Overrides the !*.md allow-rule above for anything under this directory.
+.flexman_plans/
