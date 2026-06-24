@@ -420,7 +420,8 @@ task run_variant;
         axi_write(SCH_MARKFULL, 32'h0000_0010);   // mark input buffer 0 full {cnt=1,id=0}
 
         // 1-TASK program: acc0 cfg0, slot0=SRC buf0 -> slot5=TGT buf1
-        prog_mem[0] = 32'h0000_0800;
+        //   (7-bit cfg layout: slot0=SRC@[14:13], id0@[18:15] -> 0x2000)
+        prog_mem[0] = 32'h0000_2000;
         prog_mem[1] = 32'h0470_0000;
         prog_mem[2] = STOP_INST;
 

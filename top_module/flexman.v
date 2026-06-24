@@ -70,7 +70,7 @@ module flexman #(
     parameter NUM_HW_ACCELERATORS = 5,    // 4 computation + 1 fill_unit
     parameter WORDS_PER_CONFIG    = 16,   // must be a power of 2 >= 2; 16 fits
                                           // the snnAcc per-task config (~16 regs)
-    parameter CFG_ID_SZ           = 5,
+    parameter CFG_ID_SZ           = 7,
     parameter BUFF_INDX_SZ        = 4,    // = $clog2(NUM_BUFFERS)
     parameter TGT_ACC_SZ          = 3,    // extended to hold FILL_ACC_ID=4
     parameter TGT_COUNT_SZ        = 3,
@@ -284,14 +284,14 @@ localparam SLOT_SHORT_SZ = MODE_SZ + BUFF_INDX_SZ;                            //
 localparam SLOT_LONG_SZ  = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ;            // 9
 // Entry layout: 3 short + 3 long + colour + acc_id + cfg_id
 localparam ENTRY_DATA_SZ = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ
-                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;                      // 54
+                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;                      // 56 (CFG_ID_SZ=7)
 localparam LONG_BASE     = 3 * SLOT_SHORT_SZ;                                 // 18
 // Field offsets within buffer_info_o (matches scheduler internals):
 //   Short slot 0: mode=[1:0],   id=[5:2]
 //   Long  slot 0: mode=[19:18], id=[23:20], ntgt=[26:24]   (BASE=18)
 //   Long  slot 1: mode=[28:27], id=[32:29], ntgt=[35:33]   (BASE=27)
 //   Long  slot 2: mode=[37:36], id=[41:38], ntgt=[44:42]   (BASE=36)
-//   colour=[45], acc_id=[48:46], cfg_id=[53:49]
+//   colour=[45], acc_id=[48:46], cfg_id=[55:49] (7-bit)
 localparam E_COLOUR    = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ;                    // 45
 localparam E_ACC_START = E_COLOUR + 1;                                         // 46
 localparam E_CFG_START = E_ACC_START + TGT_ACC_SZ;                            // 49

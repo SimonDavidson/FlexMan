@@ -54,7 +54,7 @@ module flexman_fpga_wrap #(
     parameter NUM_BUFFERS         = 16,
     parameter NUM_HW_ACCELERATORS = 5,
     parameter WORDS_PER_CONFIG    = 4,
-    parameter CFG_ID_SZ           = 5,
+    parameter CFG_ID_SZ           = 7,
     parameter BUFF_INDX_SZ        = 4,
     parameter TGT_ACC_SZ          = 3,
     parameter TGT_COUNT_SZ        = 3,

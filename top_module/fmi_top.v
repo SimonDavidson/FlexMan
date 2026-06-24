@@ -63,7 +63,7 @@ module fmi_top #(
     parameter NUM_HW_ACCELERATORS = 2,    // 1 compute + 1 reserved fill slot
     parameter WORDS_PER_CONFIG    = 16,   // must be a power of 2 >= 2
 
-    parameter CFG_ID_SZ           = 5,
+    parameter CFG_ID_SZ           = 7,
     parameter BUFF_INDX_SZ        = 4,    // = $clog2(NUM_BUFFERS)
     parameter TGT_ACC_SZ          = 3,    // holds FILL_ACC_ID
     parameter TGT_COUNT_SZ        = 3,
@@ -207,7 +207,7 @@ localparam MODE_SZ       = 2;
 localparam SLOT_SHORT_SZ = MODE_SZ + BUFF_INDX_SZ;                            // 6
 localparam SLOT_LONG_SZ  = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ;            // 9
 localparam ENTRY_DATA_SZ = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ
-                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;                      // 54
+                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;                      // 56 (CFG_ID_SZ=7)
 localparam LONG_BASE     = 3 * SLOT_SHORT_SZ;                                 // 18
 localparam E_COLOUR    = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ;                    // 45
 localparam E_ACC_START = E_COLOUR + 1;                                         // 46

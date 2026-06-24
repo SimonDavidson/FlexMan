@@ -91,29 +91,30 @@ Dispatches a single layer computation to a hardware accelerator. TASK is a **two
 instruction**: the scheduler fetches and decodes both words before creating a table entry.
 Up to six buffer slots are specified, each with an independent mode field.
 
-**Word 1:**
+**Word 1:** (`cfg_id` is a 7-bit field `[11:5]`; colour and the three short slots are
+shifted up by 2 bits relative to the legacy 5-bit layout.)
 
 ```
- 31  29  28   25  24  23  22   19  18  17  16   13  12  11  10   9    5   4   3   2    0
- ┌──────┬───────┬──────┬───────┬──────┬───────┬──────┬──────┬──────┬───────┬──────┬──────┐
- │ rsv  │slot2  │slot2 │slot1  │slot1 │slot0  │slot0 │colour│      cfg_id      │acc_id│  op  │
- │      │buf_id │ mode │buf_id │ mode │buf_id │ mode │      │                  │      │      │
- └──────┴───────┴──────┴───────┴──────┴───────┴──────┴──────┴──────────────────┴──────┴──────┘
+ 31  30   27  26  25  24   21  20  19  18   15  14  13  12  11         5   4   3   2    0
+ ┌────┬───────┬──────┬───────┬──────┬───────┬──────┬──────┬─────────────┬──────┬──────┐
+ │rsv │slot2  │slot2 │slot1  │slot1 │slot0  │slot0 │colour│   cfg_id     │acc_id│  op  │
+ │    │buf_id │ mode │buf_id │ mode │buf_id │ mode │      │   [11:5]     │      │      │
+ └────┴───────┴──────┴───────┴──────┴───────┴──────┴──────┴─────────────┴──────┴──────┘
 ```
 
 | Bits    | Field | Notes |
 |---------|-------|-------|
 | [2:0]   | Opcode | `3'b000` |
 | [4:3]   | Accelerator ID | 2-bit field; selects the target hardware accelerator |
-| [9:5]   | Config ID | Selects a pre-loaded configuration register set |
-| [10]    | Colour | Applied to all SOURCE and READ-WRITE slots; written to TARGET/RW outputs |
-| [12:11] | Slot 0 mode | 2-bit mode (see table above) |
-| [16:13] | Slot 0 buffer ID | 4-bit buffer ID |
-| [18:17] | Slot 1 mode | 2-bit mode |
-| [22:19] | Slot 1 buffer ID | 4-bit buffer ID |
-| [24:23] | Slot 2 mode | 2-bit mode |
-| [28:25] | Slot 2 buffer ID | 4-bit buffer ID |
-| [31:29] | Reserved | Set to zero |
+| [11:5]  | Config ID | 7-bit field; selects a pre-loaded configuration register set (up to 128) |
+| [12]    | Colour | Applied to all SOURCE and READ-WRITE slots; written to TARGET/RW outputs |
+| [14:13] | Slot 0 mode | 2-bit mode (see table above) |
+| [18:15] | Slot 0 buffer ID | 4-bit buffer ID |
+| [20:19] | Slot 1 mode | 2-bit mode |
+| [24:21] | Slot 1 buffer ID | 4-bit buffer ID |
+| [26:25] | Slot 2 mode | 2-bit mode |
+| [30:27] | Slot 2 buffer ID | 4-bit buffer ID |
+| [31]    | Reserved | Set to zero |
 
 **Word 2:**
 

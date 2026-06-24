@@ -5,7 +5,7 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-08
+# Last modified: 2026-06-23
 #
 # Pure-Python (no torch). Bit-encodings mirror scheduler/ISA_REFERENCE.md and
 # tb_scheduler.v. This is the single source of truth for ISA encoding, shared by
@@ -34,19 +34,23 @@ M_TGT    = 0b11
 
 def tw1(acc: int, cfg: int, colour: int,
         m0: int, b0: int, m1: int, b1: int, m2: int, b2: int) -> int:
-    """TASK word 1: opcode + acc_id + cfg_id + colour + slots 0..2 (short)."""
-    assert acc < 4 and cfg < 32 and colour < 2
+    """TASK word 1: opcode + acc_id + cfg_id + colour + slots 0..2 (short).
+
+    cfg_id is a 7-bit field [11:5] (up to 128 configs); colour and the three
+    short slots are shifted up by 2 bits relative to the legacy 5-bit layout.
+    """
+    assert acc < 4 and cfg < 128 and colour < 2
     return (
         OP_TASK
         | (acc    & 0x3)   << 3
-        | (cfg    & 0x1F)  << 5
-        | (colour & 0x1)   << 10
-        | (m0     & 0x3)   << 11
-        | (b0     & 0xF)   << 13
-        | (m1     & 0x3)   << 17
-        | (b1     & 0xF)   << 19
-        | (m2     & 0x3)   << 23
-        | (b2     & 0xF)   << 25
+        | (cfg    & 0x7F)  << 5
+        | (colour & 0x1)   << 12
+        | (m0     & 0x3)   << 13
+        | (b0     & 0xF)   << 15
+        | (m1     & 0x3)   << 19
+        | (b1     & 0xF)   << 21
+        | (m2     & 0x3)   << 25
+        | (b2     & 0xF)   << 27
     )
 
 

@@ -80,7 +80,7 @@ module top;
 // ---- Parameters matching DUT -----------------------------------------------
 localparam TGT_ACC_SZ          = 3;
 localparam TGT_COUNT_SZ        = 3;
-localparam CFG_ID_SZ           = 5;
+localparam CFG_ID_SZ           = 7;
 localparam NUM_BUFFERS         = 16;
 localparam COL_BUFF_ID_SZ      = 16;
 localparam NUM_SCH_ENTRIES     = 4;
@@ -95,7 +95,7 @@ localparam MODE_SZ             = 2;
 localparam SLOT_SHORT_SZ = MODE_SZ + BUFF_INDX_SZ;                    // 6
 localparam SLOT_LONG_SZ  = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ;    // 9
 localparam ENTRY_DATA_SZ = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ
-                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;              // 54
+                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;              // 56 (CFG_ID_SZ=7)
 
 // Entry field offsets within buffer_info_o:
 localparam LONG_BASE   = 3 * SLOT_SHORT_SZ;              // 18
@@ -110,11 +110,11 @@ localparam MODE_TGT    = 2'b11;
 
 // ---- Instruction encoding --------------------------------------------------
 //
-// TASK Word 1:
-//   [2:0]=3'b000(opcode), [4:3]=acc_id, [9:5]=cfg_id, [10]=colour,
-//   [12:11]=slot0_mode, [16:13]=slot0_id,
-//   [18:17]=slot1_mode, [22:19]=slot1_id,
-//   [24:23]=slot2_mode, [28:25]=slot2_id, [31:29]=reserved
+// TASK Word 1 (cfg_id widened to 7-bit; colour + slots shifted up by 2):
+//   [2:0]=3'b000(opcode), [4:3]=acc_id, [11:5]=cfg_id, [12]=colour,
+//   [14:13]=slot0_mode, [18:15]=slot0_id,
+//   [20:19]=slot1_mode, [24:21]=slot1_id,
+//   [26:25]=slot2_mode, [30:27]=slot2_id, [31]=reserved
 //
 // TASK Word 2:
 //   [1:0]=2'b00(sentinel),
@@ -123,11 +123,11 @@ localparam MODE_TGT    = 2'b11;
 //   [21:20]=slot5_mode, [25:22]=slot5_id, [28:26]=slot5_ntgt, [31:29]=reserved
 
 function [31:0] tw1;
-    input [1:0] acc;  input [4:0] cfg;  input colour;
+    input [1:0] acc;  input [6:0] cfg;  input colour;
     input [1:0] m0;   input [3:0] id0;
     input [1:0] m1;   input [3:0] id1;
     input [1:0] m2;   input [3:0] id2;
-    tw1 = {3'b000, id2, m2, id1, m1, id0, m0, colour, cfg, acc, 3'b000};
+    tw1 = {1'b0, id2, m2, id1, m1, id0, m0, colour, cfg, acc, 3'b000};
 endfunction
 
 function [31:0] tw2;
@@ -139,7 +139,7 @@ endfunction
 
 // Convenience: slot0=SRC/src0, slot1=SRC/src1, slots 2–4 unused, slot5=TGT/tgt
 function [31:0] simple_w1;
-    input [1:0] acc;  input [4:0] cfg;
+    input [1:0] acc;  input [6:0] cfg;
     input [3:0] src0; input [3:0] src1;
     simple_w1 = tw1(acc, cfg, 1'b0,
                     MODE_SRC, src0, MODE_SRC, src1, MODE_UNUSED, 4'd0);
@@ -452,7 +452,7 @@ always @(posedge clk) begin
                          ph5_dispatch_count,
                          buffer_info[E_ACC_START +: TGT_ACC_SZ],
                          buffer_info[E_CFG_START +: CFG_ID_SZ]);
-                // The first dispatch must be A (cfg=28).  If B (cfg=29) goes
+                // The first dispatch must be A (cfg=100).  If B (cfg=29) goes
                 // first, it passed the stalled older A => out-of-order.
                 if (ph5_dispatch_count == 1 &&
                     buffer_info[E_CFG_START +: CFG_ID_SZ] == 29)
@@ -595,12 +595,13 @@ initial begin
     prog_mem[54] = STOP_INST;
 
     // ---- Program 5: strict in-order dispatch test (words 60–64) ----------
-    //   A (acc0,cfg28): SRC bufA(buf8, NOT seeded -> stalls) -> TGT buf10
-    //   B (acc1,cfg29): SRC bufB(buf9, seeded -> ready)      -> TGT buf11
-    // (cfg IDs must fit the 5-bit CFG field, max 31.)
+    //   A (acc0,cfg100): SRC bufA(buf8, NOT seeded -> stalls) -> TGT buf10
+    //   B (acc1,cfg29):  SRC bufB(buf9, seeded -> ready)      -> TGT buf11
+    // (cfg IDs fit the 7-bit CFG field, max 127; A uses 100 to exercise the
+    //  widened field's high bits [11:10], proving the 7-bit decode end-to-end.)
     // No shared buffers.  In-order must dispatch A (the head) first even though
     // B is ready and A is stalled.  bufA is seeded later so A can finish.
-    prog_mem[60] = tw1(2'd0, 5'd28, 1'b0,
+    prog_mem[60] = tw1(2'd0, 7'd100, 1'b0,
                        MODE_SRC, 4'd8, MODE_UNUSED, 4'd0, MODE_UNUSED, 4'd0);
     prog_mem[61] = tw2(MODE_UNUSED, 4'd0, 3'd0,
                        MODE_UNUSED, 4'd0, 3'd0,

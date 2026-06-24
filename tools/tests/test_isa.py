@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-17
+# Last modified: 2026-06-23
 # Unit tests for flexman_backend.isa (no torch, no pytest required).
 from flexman_backend import isa
 
@@ -36,10 +36,27 @@ def test_task_word_roundtrip():
     w2 = isa.tw2(isa.M_UNUSED, 0, 0, isa.M_UNUSED, 0, 0, isa.M_TGT, 0, 1)
     assert (w1 & 0x7) == isa.OP_TASK
     assert ((w1 >> 3) & 0x3) == 2          # acc_id
-    assert ((w1 >> 5) & 0x1F) == 0         # cfg_id
+    assert ((w1 >> 5) & 0x7F) == 0         # cfg_id (7-bit field)
     assert (w2 & 0x3) == 0                 # sentinel
     assert ((w2 >> 20) & 0x3) == isa.M_TGT  # slot5 mode
     assert ((w2 >> 26) & 0x7) == 1          # slot5 #targets
+
+
+def test_task_word1_field_positions():
+    # cfg_id widened to 7 bits [11:5]; colour [12]; short slots shifted up by 2.
+    w1 = isa.tw1(acc=1, cfg=100, colour=1,
+                 m0=isa.M_SRC, b0=3, m1=isa.M_RW, b1=10, m2=isa.M_TGT, b2=15)
+    assert (w1 & 0x7) == isa.OP_TASK
+    assert ((w1 >> 3) & 0x3) == 1            # acc_id
+    assert ((w1 >> 5) & 0x7F) == 100         # cfg_id (>31 exercises the widened field)
+    assert ((w1 >> 12) & 0x1) == 1           # colour
+    assert ((w1 >> 13) & 0x3) == isa.M_SRC   # slot0 mode
+    assert ((w1 >> 15) & 0xF) == 3           # slot0 id
+    assert ((w1 >> 19) & 0x3) == isa.M_RW    # slot1 mode
+    assert ((w1 >> 21) & 0xF) == 10          # slot1 id
+    assert ((w1 >> 25) & 0x3) == isa.M_TGT   # slot2 mode
+    assert ((w1 >> 27) & 0xF) == 15          # slot2 id
+    assert (w1 >> 31) == 0                    # reserved (bit 31)
 
 
 def test_emit_addresses_and_listing():

@@ -20,7 +20,7 @@ module tb_flexman;
 localparam NUM_BUFFERS         = 16;
 localparam NUM_HW_ACCELERATORS = 5;
 localparam WORDS_PER_CONFIG    = 16;
-localparam CFG_ID_SZ           = 5;
+localparam CFG_ID_SZ           = 7;
 localparam BUFF_INDX_SZ        = 4;
 localparam TGT_ACC_SZ          = 3;
 localparam TGT_COUNT_SZ        = 3;
@@ -929,11 +929,11 @@ initial begin
     axi_write(32'hE050_0000, 32'h0000_0010);   // {cnt=1, id=0}
 
     // --- program: TASK(snn0: src IN(0) -> tgt MID(1)); TASK(snn1: src MID(1) -> tgt OUT(2)); STOP ---
-    //   TASK word1 = {3'b0, id2,m2, id1,m1, id0,m0, colour, cfg, acc, 3'b000}
+    //   TASK word1 = {1'b0, id2,m2, id1,m1, id0,m0, colour, cfg[6:0], acc, 3'b000}
     //   TASK word2 = {3'b0, n5,id5,m5, n4,id4,m4, n3,id3,m3, 2'b00}  (MODE_SRC=01, MODE_TGT=11)
-    prog_mem[0] = 32'h0000_0800;   // snn0: acc=0 cfg=0, slot0=SRC id=0
+    prog_mem[0] = 32'h0000_2000;   // snn0: acc=0 cfg=0, slot0=SRC id=0  (7-bit cfg layout)
     prog_mem[1] = 32'h0470_0000;   // slot5=TGT id=1 (MID) ntgt=1
-    prog_mem[2] = 32'h0000_2828;   // snn1: acc=1 cfg=1, slot0=SRC id=1 (MID)
+    prog_mem[2] = 32'h0000_A028;   // snn1: acc=1 cfg=1, slot0=SRC id=1 (MID)  (7-bit cfg layout)
     prog_mem[3] = 32'h04B0_0000;   // slot5=TGT id=2 (OUT) ntgt=1
     prog_mem[4] = STOP_INST;
 

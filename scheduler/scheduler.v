@@ -12,7 +12,7 @@
 
 module scheduler
    #(parameter TGT_COUNT_SZ        = 3,
-     parameter CFG_ID_SZ           = 5,
+     parameter CFG_ID_SZ           = 7,
      parameter NUM_BUFFERS         = 16,
      parameter COL_BUFF_ID_SZ      = 16,
      parameter NUM_SCH_ENTRIES     = 4,
@@ -509,12 +509,12 @@ assign fill_block_size_o = fill_block_size_r;
 // TASK word 1 fields (latched into task_w1_r):
 //   [2:0]   opcode (discarded)
 //   [4:3]   acc_id (2-bit; extended to TGT_ACC_SZ with zero MSBs)
-//   [9:5]   cfg_id
-//   [10]    colour
-//   [12:11] slot 0 mode,  [16:13] slot 0 id
-//   [18:17] slot 1 mode,  [22:19] slot 1 id
-//   [24:23] slot 2 mode,  [28:25] slot 2 id
-//   [31:29] reserved
+//   [11:5]  cfg_id (7-bit; up to 128 configs)
+//   [12]    colour
+//   [14:13] slot 0 mode,  [18:15] slot 0 id
+//   [20:19] slot 1 mode,  [24:21] slot 1 id
+//   [26:25] slot 2 mode,  [30:27] slot 2 id
+//   [31]    reserved
 //
 // TASK word 2 fields (latched into task_w2_r):
 //   [1:0]   sentinel 2'b00
@@ -539,14 +539,14 @@ begin
       // cfg_id = 0; slots 0-2, 4-5 = UNUSED (already 0 from d='b0)
    end else begin
       // Slot 0 (short: mode+id):
-      d[0*SLOT_SHORT_SZ +: MODE_SZ]                        = task_w1_r[12:11];
-      d[0*SLOT_SHORT_SZ + MODE_SZ +: BUFF_INDX_SZ]         = task_w1_r[16:13];
+      d[0*SLOT_SHORT_SZ +: MODE_SZ]                        = task_w1_r[14:13];
+      d[0*SLOT_SHORT_SZ + MODE_SZ +: BUFF_INDX_SZ]         = task_w1_r[18:15];
       // Slot 1:
-      d[1*SLOT_SHORT_SZ +: MODE_SZ]                        = task_w1_r[18:17];
-      d[1*SLOT_SHORT_SZ + MODE_SZ +: BUFF_INDX_SZ]         = task_w1_r[22:19];
+      d[1*SLOT_SHORT_SZ +: MODE_SZ]                        = task_w1_r[20:19];
+      d[1*SLOT_SHORT_SZ + MODE_SZ +: BUFF_INDX_SZ]         = task_w1_r[24:21];
       // Slot 2:
-      d[2*SLOT_SHORT_SZ +: MODE_SZ]                        = task_w1_r[24:23];
-      d[2*SLOT_SHORT_SZ + MODE_SZ +: BUFF_INDX_SZ]         = task_w1_r[28:25];
+      d[2*SLOT_SHORT_SZ +: MODE_SZ]                        = task_w1_r[26:25];
+      d[2*SLOT_SHORT_SZ + MODE_SZ +: BUFF_INDX_SZ]         = task_w1_r[30:27];
       // Slot 3 (long: mode+id+ntgt):
       // Use inst_word (live W2) not task_w2_r: load_new_entry fires in the same cycle
       // as inst_consumed_w2, before task_w2_r latches the new value at posedge.
@@ -562,9 +562,9 @@ begin
       d[LONG_BASE + 2*SLOT_LONG_SZ + MODE_SZ +: BUFF_INDX_SZ]         = inst_word[25:22];
       d[LONG_BASE + 2*SLOT_LONG_SZ + MODE_SZ + BUFF_INDX_SZ +: TGT_COUNT_SZ] = inst_word[28:26];
       // Header (acc_id zero-extended from 2-bit TASK field to TGT_ACC_SZ bits):
-      d[E_COLOUR]                   = task_w1_r[10];
+      d[E_COLOUR]                   = task_w1_r[12];
       d[E_ACC_START +: TGT_ACC_SZ] = {{(TGT_ACC_SZ-2){1'b0}}, task_w1_r[4:3]};
-      d[E_CFG_START +: CFG_ID_SZ]  = task_w1_r[9:5];
+      d[E_CFG_START +: CFG_ID_SZ]  = task_w1_r[11:5];
    end
 end
 
