@@ -421,8 +421,9 @@ task run_variant;
 
         // 1-TASK program: acc0 cfg0, slot0=SRC buf0 -> slot5=TGT buf1
         //   (7-bit cfg layout: slot0=SRC@[14:13], id0@[18:15] -> 0x2000)
+        //   (4-bit ntgt layout: slot5=TGT@[23:22], id5@[27:24], ntgt@[31:28] -> 0x11C0_0000)
         prog_mem[0] = 32'h0000_2000;
-        prog_mem[1] = 32'h0470_0000;
+        prog_mem[1] = 32'h11C0_0000;
         prog_mem[2] = STOP_INST;
 
         axi_write(SCH_LOAD_PC, 32'd0);

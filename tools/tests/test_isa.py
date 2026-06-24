@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-23
+# Last modified: 2026-06-24
 # Unit tests for flexman_backend.isa (no torch, no pytest required).
 from flexman_backend import isa
 
@@ -21,13 +21,13 @@ def test_loop_count_semantics():
 
 
 def test_fill_w1_fields():
-    # buf_id[6:3], colour[8], ntgt[11:9], block_size[31:12]
-    w = isa.fill_w1(buf_id=2, colour=1, ntgt=1, block_size=64)
+    # buf_id[6:3], colour[8], ntgt[12:9] (4-bit), block_size[31:13]
+    w = isa.fill_w1(buf_id=2, colour=1, ntgt=13, block_size=64)
     assert (w & 0x7) == isa.OP_FILL
     assert ((w >> 3) & 0xF) == 2
     assert ((w >> 8) & 0x1) == 1
-    assert ((w >> 9) & 0x7) == 1
-    assert ((w >> 12) & 0xFFFFF) == 64
+    assert ((w >> 9) & 0xF) == 13          # ntgt > 7 exercises the widened field
+    assert ((w >> 13) & 0x7FFFF) == 64
 
 
 def test_task_word_roundtrip():
@@ -38,8 +38,24 @@ def test_task_word_roundtrip():
     assert ((w1 >> 3) & 0x3) == 2          # acc_id
     assert ((w1 >> 5) & 0x7F) == 0         # cfg_id (7-bit field)
     assert (w2 & 0x3) == 0                 # sentinel
-    assert ((w2 >> 20) & 0x3) == isa.M_TGT  # slot5 mode
-    assert ((w2 >> 26) & 0x7) == 1          # slot5 #targets
+    assert ((w2 >> 22) & 0x3) == isa.M_TGT  # slot5 mode
+    assert ((w2 >> 28) & 0xF) == 1          # slot5 #targets (4-bit field)
+
+
+def test_task_word2_field_positions():
+    # ntgt widened to 4 bits per long slot; slots 4/5 shifted up, filling to bit 31.
+    # H1's N=2 usage (13) exercises the >7 range the 3-bit field could not hold.
+    w2 = isa.tw2(isa.M_SRC, 3, 5, isa.M_RW, 10, 13, isa.M_TGT, 15, 7)
+    assert (w2 & 0x3) == 0                   # sentinel [1:0]
+    assert ((w2 >> 2) & 0x3) == isa.M_SRC    # slot3 mode
+    assert ((w2 >> 4) & 0xF) == 3            # slot3 id
+    assert ((w2 >> 8) & 0xF) == 5            # slot3 ntgt
+    assert ((w2 >> 12) & 0x3) == isa.M_RW    # slot4 mode
+    assert ((w2 >> 14) & 0xF) == 10          # slot4 id
+    assert ((w2 >> 18) & 0xF) == 13          # slot4 ntgt (>7)
+    assert ((w2 >> 22) & 0x3) == isa.M_TGT   # slot5 mode
+    assert ((w2 >> 24) & 0xF) == 15          # slot5 id
+    assert ((w2 >> 28) & 0xF) == 7           # slot5 ntgt (tops at bit 31)
 
 
 def test_task_word1_field_positions():

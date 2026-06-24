@@ -6,7 +6,13 @@ module sch_table  #(parameter SCH_ENTRY_SZ        = 52,
                     parameter NUM_BUFFERS         = 16,
                     parameter COL_BUFF_ID_SZ      = 16,
                     parameter NUM_SCH_ENTRIES     = 4,
-                    parameter ACC_ID_BTM          = 0
+                    parameter ACC_ID_BTM          = 0,
+                    // Slot geometry — must match the entry built by scheduler.v, else
+                    // sch_entry parses slots at the wrong offsets (TGT_COUNT_SZ widens
+                    // SLOT_LONG_SZ).  Forwarded to every sch_entry below.
+                    parameter MODE_SZ             = 2,
+                    parameter BUFF_INDX_SZ        = 4,
+                    parameter TGT_COUNT_SZ        = 3
     )
              (input  wire                      clk,
               input  wire                      reset,
@@ -125,7 +131,8 @@ assign shift_out_valid[NUM_SCH_ENTRIES] = 1'b0;
 
 // Instantiate scheduler entries:
 sch_entry #(.SCH_ENTRY_SZ(SCH_ENTRY_SZ), .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATORS),
-            .TGT_ACC_SZ(TGT_ACC_SZ), .NUM_BUFFERS(NUM_BUFFERS), .ACC_ID_BTM(ACC_ID_BTM)
+            .TGT_ACC_SZ(TGT_ACC_SZ), .NUM_BUFFERS(NUM_BUFFERS), .ACC_ID_BTM(ACC_ID_BTM),
+            .MODE_SZ(MODE_SZ), .BUFF_INDX_SZ(BUFF_INDX_SZ), .TGT_COUNT_SZ(TGT_COUNT_SZ)
            ) sch_entry0 (
    .clk(clk), .reset(reset),
    .load_new_entry_i(load_entry[0]), .shift_entry_i(shift_entry[0]),
@@ -139,7 +146,8 @@ sch_entry #(.SCH_ENTRY_SZ(SCH_ENTRY_SZ), .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATOR
    .ready_to_execute_o(ready_to_go[0]));
 
 sch_entry #(.SCH_ENTRY_SZ(SCH_ENTRY_SZ), .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATORS),
-            .TGT_ACC_SZ(TGT_ACC_SZ), .NUM_BUFFERS(NUM_BUFFERS), .ACC_ID_BTM(ACC_ID_BTM)
+            .TGT_ACC_SZ(TGT_ACC_SZ), .NUM_BUFFERS(NUM_BUFFERS), .ACC_ID_BTM(ACC_ID_BTM),
+            .MODE_SZ(MODE_SZ), .BUFF_INDX_SZ(BUFF_INDX_SZ), .TGT_COUNT_SZ(TGT_COUNT_SZ)
            ) sch_entry1 (
    .clk(clk), .reset(reset),
    .load_new_entry_i(load_entry[1]), .shift_entry_i(shift_entry[1]),
@@ -153,7 +161,8 @@ sch_entry #(.SCH_ENTRY_SZ(SCH_ENTRY_SZ), .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATOR
    .ready_to_execute_o(ready_to_go[1]));
 
 sch_entry #(.SCH_ENTRY_SZ(SCH_ENTRY_SZ), .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATORS),
-            .TGT_ACC_SZ(TGT_ACC_SZ), .NUM_BUFFERS(NUM_BUFFERS), .ACC_ID_BTM(ACC_ID_BTM)
+            .TGT_ACC_SZ(TGT_ACC_SZ), .NUM_BUFFERS(NUM_BUFFERS), .ACC_ID_BTM(ACC_ID_BTM),
+            .MODE_SZ(MODE_SZ), .BUFF_INDX_SZ(BUFF_INDX_SZ), .TGT_COUNT_SZ(TGT_COUNT_SZ)
            ) sch_entry2 (
    .clk(clk), .reset(reset),
    .load_new_entry_i(load_entry[2]), .shift_entry_i(shift_entry[2]),
@@ -167,7 +176,8 @@ sch_entry #(.SCH_ENTRY_SZ(SCH_ENTRY_SZ), .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATOR
    .ready_to_execute_o(ready_to_go[2]));
 
 sch_entry #(.SCH_ENTRY_SZ(SCH_ENTRY_SZ), .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATORS),
-            .TGT_ACC_SZ(TGT_ACC_SZ), .NUM_BUFFERS(NUM_BUFFERS), .ACC_ID_BTM(ACC_ID_BTM)
+            .TGT_ACC_SZ(TGT_ACC_SZ), .NUM_BUFFERS(NUM_BUFFERS), .ACC_ID_BTM(ACC_ID_BTM),
+            .MODE_SZ(MODE_SZ), .BUFF_INDX_SZ(BUFF_INDX_SZ), .TGT_COUNT_SZ(TGT_COUNT_SZ)
            ) sch_entry3 (
    .clk(clk), .reset(reset),
    .load_new_entry_i(load_entry[3]), .shift_entry_i(shift_entry[3]),

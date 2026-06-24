@@ -23,7 +23,7 @@ localparam WORDS_PER_CONFIG    = 16;
 localparam CFG_ID_SZ           = 7;
 localparam BUFF_INDX_SZ        = 4;
 localparam TGT_ACC_SZ          = 3;
-localparam TGT_COUNT_SZ        = 3;
+localparam TGT_COUNT_SZ        = 4;
 localparam PROG_ADDR_BITS      = 10;
 localparam PROG_DATA_BITS      = 32;
 localparam NUM_SCH_ENTRIES     = 4;
@@ -49,12 +49,12 @@ function [31:0] nxt_inst;
 endfunction
 
 // FILL word 1: [2:0]=101, [6:3]=buf_id (4-bit), [7]=0, [8]=colour,
-//              [11:9]=#targets, [31:12]=block_size
+//              [12:9]=#targets (4-bit), [31:13]=block_size (19-bit)
 function [31:0] fill_w1;
     input [3:0]  buf_id;
     input        col;
-    input [2:0]  ntgt;
-    input [19:0] sz;
+    input [3:0]  ntgt;
+    input [18:0] sz;
     fill_w1 = {sz, ntgt, col, 1'b0, buf_id, 3'b101};
 endfunction
 
@@ -786,8 +786,8 @@ initial begin
     test_num = 2;
 
     // Program: FILL(buf=0, col=0, #tgt=1, size=4, val=0xDEADBEEF) + STOP
-    // fill_w1: [2:0]=101, [6:3]=buf_id, [7]=0, [8]=col, [11:9]=#tgt, [31:12]=sz
-    prog_mem[0] = fill_w1(4'd0, 1'b0, 3'd1, 20'd4);  // 32'h0000_4205
+    // fill_w1: [2:0]=101, [6:3]=buf_id, [7]=0, [8]=col, [12:9]=#tgt (4-bit), [31:13]=sz
+    prog_mem[0] = fill_w1(4'd0, 1'b0, 4'd1, 19'd4);  // 32'h0000_8205
     prog_mem[1] = 32'hDEAD_BEEF;                       // fill value (word 2)
     prog_mem[2] = STOP_INST;
 
@@ -930,11 +930,11 @@ initial begin
 
     // --- program: TASK(snn0: src IN(0) -> tgt MID(1)); TASK(snn1: src MID(1) -> tgt OUT(2)); STOP ---
     //   TASK word1 = {1'b0, id2,m2, id1,m1, id0,m0, colour, cfg[6:0], acc, 3'b000}
-    //   TASK word2 = {3'b0, n5,id5,m5, n4,id4,m4, n3,id3,m3, 2'b00}  (MODE_SRC=01, MODE_TGT=11)
+    //   TASK word2 = {n5,id5,m5, n4,id4,m4, n3,id3,m3, 2'b00}  (4-bit ntgt; MODE_SRC=01, MODE_TGT=11)
     prog_mem[0] = 32'h0000_2000;   // snn0: acc=0 cfg=0, slot0=SRC id=0  (7-bit cfg layout)
-    prog_mem[1] = 32'h0470_0000;   // slot5=TGT id=1 (MID) ntgt=1
+    prog_mem[1] = 32'h11C0_0000;   // slot5=TGT id=1 (MID) ntgt=1  (4-bit ntgt layout)
     prog_mem[2] = 32'h0000_A028;   // snn1: acc=1 cfg=1, slot0=SRC id=1 (MID)  (7-bit cfg layout)
-    prog_mem[3] = 32'h04B0_0000;   // slot5=TGT id=2 (OUT) ntgt=1
+    prog_mem[3] = 32'h12C0_0000;   // slot5=TGT id=2 (OUT) ntgt=1  (4-bit ntgt layout)
     prog_mem[4] = STOP_INST;
 
     axi_write(32'hE000_0000, 32'd0);   // LOAD_PC = 0

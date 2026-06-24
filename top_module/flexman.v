@@ -73,7 +73,7 @@ module flexman #(
     parameter CFG_ID_SZ           = 7,
     parameter BUFF_INDX_SZ        = 4,    // = $clog2(NUM_BUFFERS)
     parameter TGT_ACC_SZ          = 3,    // extended to hold FILL_ACC_ID=4
-    parameter TGT_COUNT_SZ        = 3,
+    parameter TGT_COUNT_SZ        = 4,    // usage count up to 15 (4-bit ntgt field)
     parameter PROG_ADDR_BITS      = 10,
     parameter PROG_DATA_BITS      = 32,
     parameter NUM_SCH_ENTRIES     = 4,

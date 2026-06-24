@@ -119,11 +119,11 @@ shifted up by 2 bits relative to the legacy 5-bit layout.)
 **Word 2:**
 
 ```
- 31  29  28  26  25   22  21  20  19   17  16   13  12  11  10    8   7    4   3   2   1   0
- ┌──────┬───────┬───────┬──────┬───────┬──────┬───────┬──────┬───────┬──────┬──────┬──────┐
- │ rsv  │slot5  │slot5  │slot5 │slot4  │slot4 │slot4  │slot3 │slot3  │slot3 │slot3 │ 0b00 │
- │      │#tgts  │buf_id │ mode │#tgts  │buf_id│ mode  │#tgts │buf_id │ mode │      │      │
- └──────┴───────┴───────┴──────┴───────┴──────┴───────┴──────┴───────┴──────┴──────┴──────┘
+ 31    28  27   24  23  22  21    18  17   14  13  12  11    8   7    4   3   2   1   0
+ ┌────────┬───────┬──────┬────────┬───────┬──────┬────────┬───────┬──────┬──────┐
+ │ slot5  │slot5  │slot5 │ slot4  │slot4  │slot4 │ slot3  │slot3  │slot3 │ 0b00 │
+ │ #tgts  │buf_id │ mode │ #tgts  │buf_id │ mode │ #tgts  │buf_id │ mode │      │
+ └────────┴───────┴──────┴────────┴───────┴──────┴────────┴───────┴──────┴──────┘
 ```
 
 | Bits    | Field | Notes |
@@ -131,14 +131,18 @@ shifted up by 2 bits relative to the legacy 5-bit layout.)
 | [1:0]   | Sentinel | Must be `2'b00` |
 | [3:2]   | Slot 3 mode | 2-bit mode |
 | [7:4]   | Slot 3 buffer ID | 4-bit buffer ID |
-| [10:8]  | Slot 3 #Targets | 3-bit consumer count (used for READ-WRITE and TARGET modes) |
-| [12:11] | Slot 4 mode | 2-bit mode |
-| [16:13] | Slot 4 buffer ID | 4-bit buffer ID |
-| [19:17] | Slot 4 #Targets | 3-bit consumer count |
-| [21:20] | Slot 5 mode | 2-bit mode |
-| [25:22] | Slot 5 buffer ID | 4-bit buffer ID |
-| [28:26] | Slot 5 #Targets | 3-bit consumer count |
-| [31:29] | Reserved | Set to zero |
+| [11:8]  | Slot 3 #Targets | **4-bit** consumer count, max 15 (used for READ-WRITE and TARGET modes) |
+| [13:12] | Slot 4 mode | 2-bit mode |
+| [17:14] | Slot 4 buffer ID | 4-bit buffer ID |
+| [21:18] | Slot 4 #Targets | **4-bit** consumer count, max 15 |
+| [23:22] | Slot 5 mode | 2-bit mode |
+| [27:24] | Slot 5 buffer ID | 4-bit buffer ID |
+| [31:28] | Slot 5 #Targets | **4-bit** consumer count, max 15 |
+
+The `#Targets` (usage count) field was widened 3→4 bits (max 7→15), packing word 2 exactly to
+bit 31 (no reserved bits). The 4-bit field is the natural ceiling for three long slots in a 32-bit
+word; it covers a recurrent buffer shared by N output-partition lanes (read by 6N+1 consumers — 13
+at N=2). 5-bit would need 33 bits — it does not fit.
 
 **Notes:**
 
@@ -278,9 +282,9 @@ accelerator task so instruction fetch continues while the fill runs.
 **Word 1:**
 
 ```
- 31              12   11     9   8   7   6    3   2    0
+ 31              13   12     9   8   7   6    3   2    0
  ┌────────────────────┬────────┬───┬───┬──────┬──────────┐
- │   Block size[19:0] │#Targets│clr│rsv│buf_id│   op    │
+ │   Block size[18:0] │#Targets│clr│rsv│buf_id│   op    │
  └────────────────────┴────────┴───┴───┴──────┴──────────┘
 ```
 
@@ -290,8 +294,8 @@ accelerator task so instruction fetch continues while the fill runs.
 | [6:3]   | Destination buffer | 4-bit buffer ID (0–15) |
 | [7]     | Reserved | Set to zero |
 | [8]     | Colour | Colour to apply to the destination buffer |
-| [11:9]  | #Targets | Consumer count for this buffer |
-| [31:12] | Block size | Number of 32-bit words to load |
+| [12:9]  | #Targets | **4-bit** consumer count, max 15 (widened with the TASK ntgt field) |
+| [31:13] | Block size | Number of 32-bit words to load (19-bit, up to 512K) |
 
 **Word 2:**
 
@@ -411,8 +415,8 @@ Canonical addresses (bits `[19:0]` = 0):
 | Bits   | Field |
 |--------|-------|
 | [3:0]  | Buffer ID (0–15) |
-| [6:4]  | Usage count (#consumers) |
-| [31:7] | Reserved (set to zero) |
+| [7:4]  | Usage count (#consumers), 4-bit (max 15) |
+| [31:8] | Reserved (set to zero) |
 
 Marks the specified buffer as full without going through the task dispatch path. Used to
 pre-seed buffers that the host has loaded directly via the buffer data port before issuing

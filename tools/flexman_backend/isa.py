@@ -5,7 +5,7 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-06-23
+# Last modified: 2026-06-24
 #
 # Pure-Python (no torch). Bit-encodings mirror scheduler/ISA_REFERENCE.md and
 # tb_scheduler.v. This is the single source of truth for ISA encoding, shared by
@@ -57,18 +57,23 @@ def tw1(acc: int, cfg: int, colour: int,
 def tw2(m3: int, b3: int, n3: int,
         m4: int, b4: int, n4: int,
         m5: int, b5: int, n5: int) -> int:
-    """TASK word 2: slots 3..5 (long), with sentinel 2'b00 in low bits."""
+    """TASK word 2: slots 3..5 (long), with sentinel 2'b00 in low bits.
+
+    ntgt (usage count) is a 4-bit field per slot (up to 15); slots 4 and 5 shift
+    up relative to the legacy 3-bit layout, filling word-2 exactly to bit 31.
+    """
+    assert max(n3, n4, n5) < 16 and max(b3, b4, b5) < 16
     return (
         0
         | (m3 & 0x3)   << 2
         | (b3 & 0xF)   << 4
-        | (n3 & 0x7)   << 8
-        | (m4 & 0x3)   << 11
-        | (b4 & 0xF)   << 13
-        | (n4 & 0x7)   << 17
-        | (m5 & 0x3)   << 20
-        | (b5 & 0xF)   << 22
-        | (n5 & 0x7)   << 26
+        | (n3 & 0xF)   << 8
+        | (m4 & 0x3)   << 12
+        | (b4 & 0xF)   << 14
+        | (n4 & 0xF)   << 18
+        | (m5 & 0x3)   << 22
+        | (b5 & 0xF)   << 24
+        | (n5 & 0xF)   << 28
     )
 
 
@@ -94,12 +99,15 @@ def loopend_inst(loop_id: int) -> int:
 
 
 def fill_w1(buf_id: int, colour: int, ntgt: int, block_size: int) -> int:
+    """FILL word 1: ntgt is a 4-bit field [12:9] (up to 15); block_size shifts up
+    to [31:13] (19-bit, up to 512K words)."""
+    assert ntgt < 16 and buf_id < 16
     return (
         OP_FILL
         | (buf_id     & 0xF)     << 3
         | (colour     & 0x1)     << 8
-        | (ntgt       & 0x7)     << 9
-        | (block_size & 0xFFFFF) << 12
+        | (ntgt       & 0xF)     << 9
+        | (block_size & 0x7FFFF) << 13
     )
 
 

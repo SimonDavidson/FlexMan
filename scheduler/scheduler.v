@@ -11,7 +11,7 @@
 `define MODE_TGT    2'b11
 
 module scheduler
-   #(parameter TGT_COUNT_SZ        = 3,
+   #(parameter TGT_COUNT_SZ        = 4,
      parameter CFG_ID_SZ           = 7,
      parameter NUM_BUFFERS         = 16,
      parameter COL_BUFF_ID_SZ      = 16,
@@ -381,11 +381,11 @@ begin
          task_w1_r         <= inst_word;
          if (inst_is_fill) begin
             // Latch FILL word 1 fields: [6:3]=buf_id (4 bits), [8]=colour,
-            // [11:9]=#targets, [31:12]=block_size (20 bits)
+            // [12:9]=#targets (4 bits), [31:13]=block_size (19 bits)
             fill_dst_buf_r    <= inst_word[3 +: BUFF_INDX_SZ];
-            fill_ntgt_r       <= inst_word[11:9];
+            fill_ntgt_r       <= inst_word[9 +: TGT_COUNT_SZ];
             fill_colour_r     <= inst_word[8];
-            fill_block_size_r <= inst_word[31:12];
+            fill_block_size_r <= inst_word[31:13];
          end
       end
       if (inst_consumed_w2)
@@ -518,10 +518,10 @@ assign fill_block_size_o = fill_block_size_r;
 //
 // TASK word 2 fields (latched into task_w2_r):
 //   [1:0]   sentinel 2'b00
-//   [3:2]   slot 3 mode,  [7:4]   slot 3 id,  [10:8]  slot 3 ntgt
-//   [12:11] slot 4 mode,  [16:13] slot 4 id,  [19:17] slot 4 ntgt
-//   [21:20] slot 5 mode,  [25:22] slot 5 id,  [28:26] slot 5 ntgt
-//   [31:29] reserved
+//   [3:2]   slot 3 mode,  [7:4]   slot 3 id,  [11:8]  slot 3 ntgt (4-bit)
+//   [13:12] slot 4 mode,  [17:14] slot 4 id,  [21:18] slot 4 ntgt (4-bit)
+//   [23:22] slot 5 mode,  [27:24] slot 5 id,  [31:28] slot 5 ntgt (4-bit)
+//   (ntgt is 4-bit, up to 15; word-2 is now packed to bit 31)
 //
 // FILL entry: slot 3 = TARGET(fill_dst_buf_r, fill_ntgt_r), others UNUSED.
 //   acc_id = FILL_ACC_ID, cfg_id = 0, colour = fill_colour_r.
@@ -552,15 +552,15 @@ begin
       // as inst_consumed_w2, before task_w2_r latches the new value at posedge.
       d[LONG_BASE + 0*SLOT_LONG_SZ +: MODE_SZ]             = inst_word[3:2];
       d[LONG_BASE + 0*SLOT_LONG_SZ + MODE_SZ +: BUFF_INDX_SZ]         = inst_word[7:4];
-      d[LONG_BASE + 0*SLOT_LONG_SZ + MODE_SZ + BUFF_INDX_SZ +: TGT_COUNT_SZ] = inst_word[10:8];
+      d[LONG_BASE + 0*SLOT_LONG_SZ + MODE_SZ + BUFF_INDX_SZ +: TGT_COUNT_SZ] = inst_word[11:8];
       // Slot 4:
-      d[LONG_BASE + 1*SLOT_LONG_SZ +: MODE_SZ]             = inst_word[12:11];
-      d[LONG_BASE + 1*SLOT_LONG_SZ + MODE_SZ +: BUFF_INDX_SZ]         = inst_word[16:13];
-      d[LONG_BASE + 1*SLOT_LONG_SZ + MODE_SZ + BUFF_INDX_SZ +: TGT_COUNT_SZ] = inst_word[19:17];
+      d[LONG_BASE + 1*SLOT_LONG_SZ +: MODE_SZ]             = inst_word[13:12];
+      d[LONG_BASE + 1*SLOT_LONG_SZ + MODE_SZ +: BUFF_INDX_SZ]         = inst_word[17:14];
+      d[LONG_BASE + 1*SLOT_LONG_SZ + MODE_SZ + BUFF_INDX_SZ +: TGT_COUNT_SZ] = inst_word[21:18];
       // Slot 5:
-      d[LONG_BASE + 2*SLOT_LONG_SZ +: MODE_SZ]             = inst_word[21:20];
-      d[LONG_BASE + 2*SLOT_LONG_SZ + MODE_SZ +: BUFF_INDX_SZ]         = inst_word[25:22];
-      d[LONG_BASE + 2*SLOT_LONG_SZ + MODE_SZ + BUFF_INDX_SZ +: TGT_COUNT_SZ] = inst_word[28:26];
+      d[LONG_BASE + 2*SLOT_LONG_SZ +: MODE_SZ]             = inst_word[23:22];
+      d[LONG_BASE + 2*SLOT_LONG_SZ + MODE_SZ +: BUFF_INDX_SZ]         = inst_word[27:24];
+      d[LONG_BASE + 2*SLOT_LONG_SZ + MODE_SZ + BUFF_INDX_SZ +: TGT_COUNT_SZ] = inst_word[31:28];
       // Header (acc_id zero-extended from 2-bit TASK field to TGT_ACC_SZ bits):
       d[E_COLOUR]                   = task_w1_r[12];
       d[E_ACC_START +: TGT_ACC_SZ] = {{(TGT_ACC_SZ-2){1'b0}}, task_w1_r[4:3]};
@@ -580,7 +580,10 @@ sch_table #(
    .NUM_BUFFERS(NUM_BUFFERS),
    .COL_BUFF_ID_SZ(COL_BUFF_ID_SZ),
    .NUM_SCH_ENTRIES(NUM_SCH_ENTRIES),
-   .ACC_ID_BTM(E_ACC_START)
+   .ACC_ID_BTM(E_ACC_START),
+   .MODE_SZ(MODE_SZ),
+   .BUFF_INDX_SZ(BUFF_INDX_SZ),
+   .TGT_COUNT_SZ(TGT_COUNT_SZ)
 ) sch_table0 (
    .clk(clk),
    .reset(reset),

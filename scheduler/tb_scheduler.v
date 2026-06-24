@@ -79,7 +79,7 @@ module top;
 
 // ---- Parameters matching DUT -----------------------------------------------
 localparam TGT_ACC_SZ          = 3;
-localparam TGT_COUNT_SZ        = 3;
+localparam TGT_COUNT_SZ        = 4;
 localparam CFG_ID_SZ           = 7;
 localparam NUM_BUFFERS         = 16;
 localparam COL_BUFF_ID_SZ      = 16;
@@ -93,9 +93,9 @@ localparam MODE_SZ             = 2;
 
 // Derived entry data layout (must match scheduler.v internals):
 localparam SLOT_SHORT_SZ = MODE_SZ + BUFF_INDX_SZ;                    // 6
-localparam SLOT_LONG_SZ  = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ;    // 9
+localparam SLOT_LONG_SZ  = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ;    // 10
 localparam ENTRY_DATA_SZ = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ
-                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;              // 56 (CFG_ID_SZ=7)
+                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;              // 59 (CFG_ID_SZ=7, TGT_COUNT_SZ=4)
 
 // Entry field offsets within buffer_info_o:
 localparam LONG_BASE   = 3 * SLOT_SHORT_SZ;              // 18
@@ -116,11 +116,11 @@ localparam MODE_TGT    = 2'b11;
 //   [20:19]=slot1_mode, [24:21]=slot1_id,
 //   [26:25]=slot2_mode, [30:27]=slot2_id, [31]=reserved
 //
-// TASK Word 2:
+// TASK Word 2 (ntgt widened to 4-bit; slots 4/5 shifted up, packed to bit 31):
 //   [1:0]=2'b00(sentinel),
-//   [3:2]=slot3_mode, [7:4]=slot3_id, [10:8]=slot3_ntgt,
-//   [12:11]=slot4_mode, [16:13]=slot4_id, [19:17]=slot4_ntgt,
-//   [21:20]=slot5_mode, [25:22]=slot5_id, [28:26]=slot5_ntgt, [31:29]=reserved
+//   [3:2]=slot3_mode, [7:4]=slot3_id, [11:8]=slot3_ntgt,
+//   [13:12]=slot4_mode, [17:14]=slot4_id, [21:18]=slot4_ntgt,
+//   [23:22]=slot5_mode, [27:24]=slot5_id, [31:28]=slot5_ntgt
 
 function [31:0] tw1;
     input [1:0] acc;  input [6:0] cfg;  input colour;
@@ -131,10 +131,11 @@ function [31:0] tw1;
 endfunction
 
 function [31:0] tw2;
-    input [1:0] m3; input [3:0] id3; input [2:0] n3;
-    input [1:0] m4; input [3:0] id4; input [2:0] n4;
-    input [1:0] m5; input [3:0] id5; input [2:0] n5;
-    tw2 = {3'b000, n5, id5, m5, n4, id4, m4, n3, id3, m3, 2'b00};
+    input [1:0] m3; input [3:0] id3; input [3:0] n3;
+    input [1:0] m4; input [3:0] id4; input [3:0] n4;
+    input [1:0] m5; input [3:0] id5; input [3:0] n5;
+    // 4-bit ntgt per long slot fills word-2 exactly (no reserved bits).
+    tw2 = {n5, id5, m5, n4, id4, m4, n3, id3, m3, 2'b00};
 endfunction
 
 // Convenience: slot0=SRC/src0, slot1=SRC/src1, slots 2–4 unused, slot5=TGT/tgt
@@ -146,11 +147,23 @@ function [31:0] simple_w1;
 endfunction
 
 function [31:0] simple_w2;
-    input [3:0] tgt; input [2:0] ntgt;
-    simple_w2 = tw2(MODE_UNUSED, 4'd0, 3'd0,
-                    MODE_UNUSED, 4'd0, 3'd0,
+    input [3:0] tgt; input [3:0] ntgt;
+    simple_w2 = tw2(MODE_UNUSED, 4'd0, 4'd0,
+                    MODE_UNUSED, 4'd0, 4'd0,
                     MODE_TGT, tgt, ntgt);
 endfunction
+
+// ntgt-widen self-check: the 4-bit usage field must round-trip through tw2's bit
+// packing at the new slot positions (slot3 [11:8], slot4 [21:18], slot5 [31:28]).
+// Exercises values > 7 that the legacy 3-bit field could not hold.
+initial begin
+    if ((((tw2(MODE_TGT,4'd5,4'd9, MODE_UNUSED,4'd0,4'd0, MODE_UNUSED,4'd0,4'd0) >> 8)  & 4'hF) === 4'd9)  &&
+        (((tw2(MODE_UNUSED,4'd0,4'd0, MODE_TGT,4'd6,4'd13, MODE_UNUSED,4'd0,4'd0) >> 18) & 4'hF) === 4'd13) &&
+        (((tw2(MODE_UNUSED,4'd0,4'd0, MODE_UNUSED,4'd0,4'd0, MODE_TGT,4'd7,4'd15) >> 28) & 4'hF) === 4'd15))
+        $display("[TW2-NTGT-SELFCHECK] PASS (4-bit usage field at [11:8]/[21:18]/[31:28])");
+    else
+        $display("[TW2-NTGT-SELFCHECK] FAIL (4-bit ntgt layout broken)");
+end
 
 localparam STOP_INST = 32'h00000002;   // opcode = 3'b010
 
