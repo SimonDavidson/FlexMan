@@ -209,6 +209,12 @@ reg  [TGT_COUNT_SZ-1:0]   fill_ntgt_r;
 reg                        fill_colour_r;
 // Registered fill constant from FILL word 2 (latched at inst_consumed_w2):
 reg  [31:0]                fill_value_r;
+// One FILL in flight at a time. block_size/value above are SINGLE registers that
+// the next FILL word-1 overwrites, but buff_id travels with the table entry — so a
+// launch delayed by a busy fill_unit could dispatch a FILL with a LATER FILL's
+// block_size/value. Set when a FILL entry loads, cleared when it launches; gates
+// the next FILL's word-1 decode.
+reg                        fill_in_flight_r;
 
 reg  inst_is_task;
 reg  inst_is_jump;
@@ -405,6 +411,21 @@ begin
    end
 end
 
+// One-FILL-in-flight gate (see fill_in_flight_r decl). Set when a FILL entry is
+// loaded (its word 2 consumed), cleared when a FILL launches. The decode gate in
+// inst_consumed prevents a new FILL's word 1 while one is in flight, so load and
+// launch are mutually exclusive per cycle (no deadlock / no same-cycle race).
+wire fill_launched = start_new_task & (to_launch_acc_hw_id == FILL_ACC_ID);
+always @ (posedge clk)
+begin
+   if (reset)
+      fill_in_flight_r <= 1'b0;
+   else if (load_new_entry & pending_is_fill_r)
+      fill_in_flight_r <= 1'b1;
+   else if (fill_launched)
+      fill_in_flight_r <= 1'b0;
+end
+
 // Suppress normal decode while fetching word 2:
 assign inst_valid_for_decode = inst_valid & ~task_w2_pending_r;
 
@@ -485,7 +506,7 @@ end
 // TASK/FILL word 1 fires when a scheduler table slot is free; word 2 consumed
 // by inst_consumed_w2 which also fires load_new_entry.
 assign inst_consumed = inst_valid_for_decode & ~test_stall_pipe & (
-                          ((inst_is_task | inst_is_fill) & table_slot_free)
+                          ((inst_is_task | (inst_is_fill & ~fill_in_flight_r)) & table_slot_free)
                         |  inst_is_jump
                         | (inst_is_check  & check_result_ready)
                         |  inst_is_loop
