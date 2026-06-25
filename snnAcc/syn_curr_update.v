@@ -58,6 +58,13 @@ wire                  [IN_DATA_BITS-1:0] aligned_weight_value;
 reg                                      syn_curr_update_running_r;
 wire                                     syn_curr_update_running_nxt;
 reg                     [`ADDR_SIZE-1:0] syn_curr_flat_index_r;
+// Accumulator read-return latch (multi-requester pool-contention fix; mirrors
+// annAcc/syn_curr_update.v). base_syn_curr below reads the LIVE pool read-return,
+// valid for one cycle after the read grant; a back-pressure-stalled write-back
+// would otherwise re-sample a value clobbered by another requester on the same
+// bank. Latch it on the first write-back cycle; use the latched copy on a retry.
+reg                  [`WTD_BITS-1:0]     acc_read_r;
+reg                                      acc_read_valid_r;
 
 always @ (posedge clk)
 if (reset)
@@ -119,6 +126,24 @@ begin
 	   req_pending_r  <= 1'b0;
 end
 
+// Latch the read-return on the first write-back cycle (req_pending_r high while
+// acc_read_valid_r is still low) and use the latched copy on any back-pressure-
+// stalled retry, so the accumulator base is immune to a same-bank clobber.
+always @ (posedge clk)
+begin
+   if (reset)
+   begin
+      acc_read_r       <= {`WTD_BITS{1'b0}};
+      acc_read_valid_r <= 1'b0;
+   end
+   else
+   begin
+      acc_read_valid_r <= req_pending_r;
+      if (req_pending_r & ~acc_read_valid_r)
+         acc_read_r <= syn_curr_mem_data_i;
+   end
+end
+
 // Select cached index if we have one, else the incoming index.
 // The address is computed from the projected output (x,y) so that
 // each output neuron's syn_curr accumulates contributions from every
@@ -142,7 +167,7 @@ assign aligned_weight_value = {{(IN_DATA_BITS-WEIGHT_BITS){weight_value_i[WEIGHT
 // syn_curr always accumulates from memory.  To start a buffer from zero, issue
 // a FILL(value=0) task on the syn_curr buffer before use (the old in-accelerator
 // clear_syn_curr first-write tracking has been removed to save fabric area).
-wire [`WTD_BITS-1:0] base_syn_curr = syn_curr_mem_data_i;
+wire [`WTD_BITS-1:0] base_syn_curr = acc_read_valid_r ? acc_read_r : syn_curr_mem_data_i;
 
 assign syn_curr_mem_data_o = base_syn_curr + aligned_weight_value;
 
