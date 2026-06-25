@@ -68,6 +68,17 @@ reg              [WEIGHT_BITS-1:0] weight_value_r;
 reg             [IN_DATA_BITS-1:0] act_value_r;
 wire                                     syn_curr_update_running_nxt;
 
+// Accumulator read-return latch (multi-annAcc pool-contention fix).
+// The shared pool presents a requester's read data for EXACTLY ONE cycle after
+// the read is granted; a write does not refresh it. The accumulator write-back
+// below is combinational off syn_curr_mem_data_i, so if the write-back stalls on
+// pool back-pressure (syn_curr_mem_wait_i) and another requester reads the same
+// bank in the gap, the live bus is clobbered and a wrong accumulator value would
+// be committed. Latch the read value the cycle after the read grant (== the first
+// write-back cycle) and use the latched copy on any stalled retry.
+reg              [`WTD_BITS-1:0]   acc_read_r;
+reg                                acc_read_valid_r;
+
 always @ (posedge clk)
 if (reset)
     syn_curr_update_running_r <= 1'b0;
@@ -134,6 +145,30 @@ begin
 	   req_pending_r  <= 1'b0;
 end
 
+// Latch the read-return one cycle after the read is granted. req_pending_r goes
+// high the cycle the read is accepted, so the cycle it is FIRST high is exactly
+// when the pool presents valid read data; sample it then. acc_read_valid_r lags
+// req_pending_r by one cycle, so it is low on that first write-back cycle (use
+// the live bus, bit-identical to before) and high on any stalled retry (use the
+// latched copy, immune to a same-bank clobber).
+always @ (posedge clk)
+begin
+   if (reset)
+   begin
+      acc_read_r       <= {`WTD_BITS{1'b0}};
+      acc_read_valid_r <= 1'b0;
+   end
+   else
+   begin
+      acc_read_valid_r <= req_pending_r;
+      if (req_pending_r & ~acc_read_valid_r)
+         acc_read_r <= syn_curr_mem_data_i;
+   end
+end
+
+wire [`WTD_BITS-1:0] acc_read_value = acc_read_valid_r ? acc_read_r
+                                                       : syn_curr_mem_data_i;
+
 // Select cached index if we have one, else the incoming index.
 // The address is computed from the projected output (x,y) so that
 // each output neuron's syn_curr accumulates contributions from every
@@ -165,7 +200,7 @@ wire signed [ACT_VAL_BITS:0]              act_operand =
         act_signed_i ? {act_value_r[ACT_VAL_BITS-1], act_value_r}   // sign-extend
                      : {1'b0,                         act_value_r}; // zero-extend
 assign mac_product = $signed(aligned_weight_value) * act_operand;
-assign syn_curr_mem_data_o = syn_curr_mem_data_i + mac_product[IN_DATA_BITS-1:0];
+assign syn_curr_mem_data_o = acc_read_value + mac_product[IN_DATA_BITS-1:0];
 
 //////////////////////////////////////////////////////////////////////////////
 // Writeback syn_curr value to memory
