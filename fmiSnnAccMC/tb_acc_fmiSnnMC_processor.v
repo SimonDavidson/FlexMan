@@ -584,7 +584,7 @@ module tb_acc_fmiSnnMC_processor;
         // S0..S2: two 16-bit size lanes each
         cfg_write(32'hFFFF_0030, 32'h0002_0002);    // S0 out_x=2 | in_x=2
         cfg_write(32'hFFFF_0034, 32'h0001_0001);    // S1 last_neuron_idx=1 | rows_per_neuron=1
-        cfg_write(32'hFFFF_0038, 32'h0101_0001);    // S2 total_timesteps=1
+        cfg_write(32'hFFFF_0038, 32'h0101_0401);    // S2 total_timesteps=1 | stride=1[12:10]
         // M0: [1:0] skip=0  [5:2] np_mode=0  [9:6] weights_per_word=4
         //     [15:10] bin_point=0  [19:16] weight_sz=3(8b)
         //     [23:20] syn_curr_sz=5(32b)  [27:24] pot_sz=5(32b)
@@ -593,7 +593,7 @@ module tb_acc_fmiSnnMC_processor;
         // boot-only conv/sparse params (out-of-window offsets unchanged)
         cfg_write(32'hFFFF_005C, 32'd5);    // weight_idx_sz      = 5
         cfg_write(32'hFFFF_0074, 32'd1);    // x_kernel_len       = 1
-        cfg_write(32'hFFFF_007C, 32'd1);    // x_kernel_step      = 1
+        // x_kernel_step now per-config in S2[12:10] (stride=1)
         cfg_write(32'hFFFF_0084, 32'd0);    // x_kernel_offset    = 0
 
         $display("=== tb_acc_fmiSnnMC_processor (FMI variant) ===");
@@ -1093,7 +1093,7 @@ module tb_acc_fmiSnnMC_processor;
         // S1: last_neuron_idx=7 | rows_per_neuron=12
         cfg_write(32'hFFFF_0034, 32'h0007_000C);
         // S2: total_timesteps=1
-        cfg_write(32'hFFFF_0038, 32'h0202_0001);
+        cfg_write(32'hFFFF_0038, 32'h0202_0401);   // +stride=1[12:10]
         // M0: skip_neuron=1, np_mode=0, weights_per_word=1, bin_point=0,
         //     weight_sz=5(32b), syn_curr_sz=5, pot_sz=5, weight_mode=10(conv), has_ada=0
         //     Skip-neuron: only spike_processing runs, so syn_curr_mem holds
@@ -1104,7 +1104,7 @@ module tb_acc_fmiSnnMC_processor;
         // Boot regs (conv params):
         cfg_write(32'hFFFF_005C, 32'd4);   // weight_idx_sz = 4 (Cout*Cin*K=12 fits in 4)
         cfg_write(32'hFFFF_0074, 32'd3);   // x_kernel_len = 3
-        cfg_write(32'hFFFF_007C, 32'd1);   // x_kernel_step = 1
+        // x_kernel_step now per-config in S2[12:10] (stride=1)
         cfg_write(32'hFFFF_0084, 32'd1);   // x_kernel_offset = 1 (pad=1)
 
         @(negedge clk); start_new_block_i = 1'b1;
@@ -1192,11 +1192,11 @@ module tb_acc_fmiSnnMC_processor;
         cfg_write(32'hFFFF_001C, 32'd0);    // dcy_mem_base
         cfg_write(32'hFFFF_0030, {16'd60, 16'd120});   // S0: out_x=60 | in_x=120
         cfg_write(32'hFFFF_0034, {16'd1919, 16'd0});   // S1: last_neuron=1919 | rows(dont-care)
-        cfg_write(32'hFFFF_0038, 32'h2010_0001);       // S2: total_timesteps=1
+        cfg_write(32'hFFFF_0038, 32'h2010_0801);       // S2: total_timesteps=1 | stride=2[12:10]
         cfg_write(32'hFFFF_003C, 32'h2555_0040);       // M0: conv, plain LIF, 32b, skip=0
         cfg_write(32'hFFFF_005C, 32'd12);   // weight_idx_sz (Cout*Cin*K=2560 < 2^12)
         cfg_write(32'hFFFF_0074, 32'd5);    // x_kernel_len  = 5
-        cfg_write(32'hFFFF_007C, 32'd2);    // x_kernel_step = 2 (stride)
+        // x_kernel_step now per-config in S2[12:10] (stride=2)
         cfg_write(32'hFFFF_0084, 32'd2);    // x_kernel_offset = 2 (pad)
 
         @(negedge clk); start_new_block_i = 1'b1;
@@ -1259,11 +1259,11 @@ module tb_acc_fmiSnnMC_processor;
         // bases that other tests may have moved is unnecessary — all still 0).
         cfg_write(32'hFFFF_0030, {16'd60, 16'd120});
         cfg_write(32'hFFFF_0034, {16'd1919, 16'd0});
-        cfg_write(32'hFFFF_0038, 32'h2010_0001);
+        cfg_write(32'hFFFF_0038, 32'h2010_0801);       // S2: total_timesteps=1 | stride=2[12:10]
         cfg_write(32'hFFFF_003C, 32'h2555_0040);
         cfg_write(32'hFFFF_005C, 32'd12);
         cfg_write(32'hFFFF_0074, 32'd5);
-        cfg_write(32'hFFFF_007C, 32'd2);
+        // x_kernel_step now per-config in S2[12:10] (stride=2)
         cfg_write(32'hFFFF_0084, 32'd2);
 
         @(negedge clk); start_new_block_i = 1'b1;

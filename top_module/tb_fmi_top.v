@@ -317,7 +317,7 @@ task load_config;
         cfg_mem[11] = 32'd0;           // 0x2C scl_ada_base
         cfg_mem[12] = {16'd60, 16'd120};   // 0x30 S0: out_x=60 | in_x=120
         cfg_mem[13] = {16'd1919, 16'd0};   // 0x34 S1: last_neuron=1919 | rows_per_neuron=0
-        cfg_mem[14] = 32'h2010_0001;       // 0x38 S2: cout=32 | cin=16 | total_timesteps=1
+        cfg_mem[14] = 32'h2010_0801;       // 0x38 S2: cout=32 | cin=16 | stride=2[12:10] | total_timesteps=1
         cfg_mem[15] = 32'h2555_0040;       // 0x3C M0: conv, plain LIF, 32b
         // BBA table — don't-care (buff_addr ports are dead); keep zero.
         for (i = 0; i < 8; i = i + 1) bba_mem[i] = 32'd0;
@@ -329,8 +329,8 @@ task write_boot_regs;
     begin
         axi_write(FMI_CFG_BASE | 32'h5C, 32'd12);  // weight_idx_sz
         axi_write(FMI_CFG_BASE | 32'h74, 32'd5);   // x_kernel_len
-        axi_write(FMI_CFG_BASE | 32'h7C, 32'd2);   // x_kernel_step (stride)
         axi_write(FMI_CFG_BASE | 32'h84, 32'd2);   // x_kernel_offset (pad)
+        // x_kernel_step (stride) is now per-config in S2[12:10] — see cfg_mem[14]
     end
 endtask
 

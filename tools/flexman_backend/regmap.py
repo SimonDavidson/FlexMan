@@ -113,11 +113,14 @@ PACKED_FMI_ADDR_WORDS = [      # offsets 0x00..0x2C
 PACKED_FMI_SIZE_WORDS = [      # offsets 0x30..0x38 ; (low_field, high_field)
     ("sp_in_x_len",        "sp_out_x_len"),        # S0 0x30
     ("sp_rows_per_neuron", "np_last_neuron_idx"),  # S1 0x34
-    ("sp_total_timesteps", None),                  # S2 0x38 (high lane spare)
+    ("sp_total_timesteps", None),                  # S2 0x38: low [9:0] tt; +stride[12:10], +cin[22:16]/cout[30:24] (MC)
 ]
 # NOTE (fmiSnnAccMC only): the MULTI-CHANNEL variant additionally decodes
+# sp_x_kernel_step (stride) at S2 bits [12:10] PER-CONFIG — so con2/con3/con4/con5
+# can alternate stride 2/1 within one program; the MC RTL drops the 0x7C boot-reg
+# decode that the single-channel fmiSnnAcc keeps. It also decodes
 # sp_cin_len at S2 bit 16 (+:SP_CIN_SZ) and sp_cout_len at S2 bit 24
-# (+:SP_COUT_SZ) — i.e. the "spare" high lane of word S2 (0x38) carries
+# (+:SP_COUT_SZ) — i.e. the "spare" lanes of word S2 (0x38) carry
 # {cout[14:8], cin[6:0]} when packed as a 16-bit high field. The single-channel
 # fmiSnnAcc (which this PACKED_FMI_* layout is cross-checked against in
 # tools/tests/test_regmap_vs_rtl.py) leaves it spare, so it is NOT added to the
@@ -161,7 +164,8 @@ BOOT_REG_OFFSETS = {
 BOOT_REG_OFFSETS_FMI = {
     "sp_weight_idx_sz":   0x5C,
     "sp_x_kernel_len":    0x74,
-    "sp_x_kernel_step":   0x7C,
+    "sp_x_kernel_step":   0x7C,   # single-channel fmiSnnAcc only; the MC variant
+                                  # decodes stride PER-CONFIG in S2[12:10] instead
     "sp_x_kernel_offset": 0x84,
     "sp_index_sz":        0x8C,
     "sp_tuple_sz":        0x90,

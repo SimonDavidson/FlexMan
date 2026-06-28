@@ -256,7 +256,8 @@ module acc_fmiSnnMC_processor # (
     //   S0..S2  0x30-0x38 : two 16-bit size lanes each (low [15:0], high [31:16]):
     //                       S0 in_x/out_x (fmi is 1-D — no y lengths),
     //                       S1 rows_per_neuron/last_neuron_idx,
-    //                       S2 total_timesteps/spare
+    //                       S2 total_timesteps[9:0] / x_kernel_step[12:10] (stride, per-config)
+    //                          / MC cin[22:16] / MC cout[30:24]
     //   M0      0x3C      : bit-packed mode/slice-size fields:
     //                       [1:0] skip_neuron, [5:2] np_mode, [9:6] weights_per_word,
     //                       [15:10] bin_point_syn_curr, [19:16] weight_sz,
@@ -264,8 +265,9 @@ module acc_fmiSnnMC_processor # (
     //                       [29:28] weight_mode, [30] has_ada
     //
     // Boot-only conv/sparse registers stay out of the packed window (>=0x5C),
-    // written once via direct AXI: 0x5C weight_idx_sz, 0x74/0x7C/0x84 x-kernel
-    // len/step/offset, 0x8C index_sz, 0x90 tuple_sz, 0x94 sparse_count.
+    // written once via direct AXI: 0x5C weight_idx_sz, 0x74/0x84 x-kernel len/offset
+    // (x_kernel_step is now PER-CONFIG in S2[12:10]), 0x8C index_sz, 0x90 tuple_sz,
+    // 0x94 sparse_count.
     // =========================================================================
     wire addr_match = (sys_addr_i[31:16] == TGT_CONFIG_BASE_ADDR[31:16]);
     assign sys_ack_o = sys_req_i & addr_match;
@@ -336,6 +338,7 @@ module acc_fmiSnnMC_processor # (
                 end
                 8'h38: begin                                       // S2
                     sp_total_timesteps_r <= sys_data_i[SP_TIMESTEP_SZ-1:0];
+                    sp_x_kernel_step_r   <= sys_data_i[10 +: SP_X_STEP_SZ]; // stride, per-config (spare [12:10])
                     sp_cin_len_r         <= sys_data_i[16 +: SP_CIN_SZ];   // MC: cin_len  (high lane)
                     sp_cout_len_r        <= sys_data_i[24 +: SP_COUT_SZ];  // MC: cout_len (high lane)
                 end
@@ -354,7 +357,7 @@ module acc_fmiSnnMC_processor # (
                 // ---- boot-only conv/sparse params (out-of-packed-window, >=0x5C) ----
                 8'h5C: sp_weight_idx_sz_r      <= sys_data_i[SP_WEIGHT_IDX_SZ-1:0];
                 8'h74: sp_x_kernel_len_r       <= sys_data_i[SP_X_KERNEL_SZ-1:0];
-                8'h7C: sp_x_kernel_step_r      <= sys_data_i[SP_X_STEP_SZ-1:0];
+                // 0x7C x_kernel_step is now PER-CONFIG in S2[12:10] (see 8'h38 above)
                 8'h84: sp_x_kernel_offset_r    <= sys_data_i[SP_X_KERNEL_OFF_SZ-1:0];
                 8'h8C: sp_index_sz_r           <= sys_data_i[SP_WEIGHT_SLICE_SZ-1:0];
                 8'h90: sp_tuple_sz_r           <= sys_data_i[SP_WEIGHT_SLICE_SZ-1:0];
