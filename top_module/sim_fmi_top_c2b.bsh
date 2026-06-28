@@ -5,9 +5,10 @@
 #
 # Simulate the FMI top-level Stage C2b testbench (scheduler hardware-loop over T
 # timesteps; group4 con2 feed-forward + con3 recurrence, two dispatches/timestep).
-# Run from this directory (top_module/). -access wrc enables the tb's hierarchical
-# references (pool bank .mem backdoor).
-xrun -sv -timescale 10ps/1ps -access wrc -top tb_fmi_top_c2b \
+# Run from this directory (top_module/). NO -access wrc: this tb uses only AXI
+# (POOL_RD readback) + a tb-side pool write port + $readmemh — zero hierarchical
+# .mem[] backdoor refs — so the optimiser stays on (much faster long runs).
+xrun -sv -timescale 10ps/1ps -top tb_fmi_top_c2b \
   tb_fmi_top_c2b.v \
   fmi_top.v \
   ../shared/shared_pool.v \
