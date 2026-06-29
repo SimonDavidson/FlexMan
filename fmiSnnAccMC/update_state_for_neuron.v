@@ -57,6 +57,7 @@ module update_state_for_neuron # (
     input  wire        [31:0]                      syn_dcy_i,     // Q0.32 unsigned
     input  wire        [31:0]                      mem_dcy_i,     // Q0.32 unsigned
     input  wire                                    has_ada_i,
+    input  wire                                    readout_mode_i, // 1 = LI readout: new_mem = dcy_mem*pot + syn, no threshold/reset/spike (con6)
     input  wire        [POT_SLICE_BITS-1:0]        ada_i,         // unsigned ada state
     input  wire signed [POT_SLICE_BITS-1:0]        b_eff_i,       // scl_mem*adapt_b, signed
     input  wire        [31:0]                      dcy_ada_i,     // Q0.32 unsigned
@@ -78,6 +79,7 @@ module update_state_for_neuron # (
     localparam [1:0] ST_IDLE = 2'd0, ST_C1 = 2'd1, ST_C2 = 2'd2, ST_C3 = 2'd3;
     reg [1:0] state_r;
     reg       has_ada_r;
+    reg       readout_mode_r;
 
     always @(posedge clk) begin
         if (reset)
@@ -117,6 +119,7 @@ module update_state_for_neuron # (
             dcy_ada_r   <= 32'b0;
             scl_ada_r   <= 32'b0;
             has_ada_r   <= 1'b0;
+            readout_mode_r <= 1'b0;
         end else if (state_r == ST_IDLE && neuron_valid_i) begin
             syn_curr_r  <= syn_curr_i;
             potential_r <= potential_i;
@@ -128,6 +131,7 @@ module update_state_for_neuron # (
             dcy_ada_r   <= dcy_ada_i;
             scl_ada_r   <= scl_ada_i;
             has_ada_r   <= has_ada_i;
+            readout_mode_r <= readout_mode_i;
         end
     end
 
@@ -195,7 +199,10 @@ module update_state_for_neuron # (
 
     // Effective synaptic input (subtract ada correction for adaptive neurons)
     assign eff_syn_wire = has_ada_r ? (syn_curr_r - ada_corr_r) : syn_curr_r;
-    assign diff_wire    = potential_r - eff_syn_wire;
+    // readout (LI) decays the carried pot directly (diff = pot) so new_mem =
+    // dcy_mem*pot + syn; the LIF form (diff = pot - eff_syn) would scale syn by
+    // (1-dcy_mem). syn here is inj6 (fresh each timestep via dcy_syn=0).
+    assign diff_wire    = readout_mode_r ? potential_r : (potential_r - eff_syn_wire);
 
     // new_mem via reformulation:  dcy_mem*(pot-eff_syn) + eff_syn
     wire signed [POT_SLICE_BITS+1:0] new_mem_wide;
@@ -214,10 +221,14 @@ module update_state_for_neuron # (
                                              new_mem_wide[POT_SLICE_BITS-1:0];
 
     wire spike_comb;
-    assign spike_comb = (new_mem_sat >= $signed(threshold_r));
+    assign spike_comb = readout_mode_r ? 1'b0 : (new_mem_sat >= $signed(threshold_r));
 
     wire signed [POT_SLICE_BITS-1:0] pot_comb;
-    assign pot_comb = spike_comb ? {POT_SLICE_BITS{1'b0}} : new_mem_sat;
+    // readout (LI): emit the WRAPPED membrane -- no threshold, no reset, no saturation
+    // (matches simulate_int_recurrent g6 wrap_signed; pot carries + decays). LIF:
+    // reset to 0 on spike, else the saturated membrane.
+    assign pot_comb = readout_mode_r ? new_mem_wide[POT_SLICE_BITS-1:0] :
+                      spike_comb     ? {POT_SLICE_BITS{1'b0}} : new_mem_sat;
 
     // =========================================================================
     // C2→C3 registers (has_ada path: hold C2 results for C3 output)

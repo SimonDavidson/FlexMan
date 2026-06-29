@@ -64,7 +64,7 @@
 // but the scheduler/e2e will need PIN_BITS widened for arbitrary 1920-in layers.
 `define X_INPUT_SZ            8
 `define X_OUTPUT_SZ           8
-`define X_KERNEL_SZ           3
+`define X_KERNEL_SZ           5   // up to 31: con6 FC-via-conv full-width kernel=30 (T11)
 `define X_STEP_SZ             3
 `define ELEMS_PER_ROW         4
 `define ROWS_PER_NEURON       4
@@ -74,7 +74,7 @@
 `define WEIGHT_DATA_IDX_SZ    5
 `define ACT_SLICE_SZ          5   // 32-bit act slices: real-MAC (con1 / T10); 1-bit spikes use runtime slice code 0
 `define ACT_IDX_SZ            11
-`define ACT_DATA_IDX_SZ       5
+`define ACT_DATA_IDX_SZ       11   // flat input-index width (full-mode FC base): 11 spans con6's 1920 inputs
 `define SYN_CURR_IDX_SZ       12
 `define SYN_CURR_DATA_IDX_SZ  5
 `define SYN_CURR_SLICE_SZ     3
@@ -449,6 +449,13 @@ module tb_acc_fmiSnnMC_processor;
     reg [31:0] c1_syn_all   [0:T_C1*1920-1];  // group3 syn_curr (post-writeback)
     reg [31:0] c1_spike_all [0:T_C1*60-1];    // group3 spike3 (packed)
     integer c1_t, c1_j, c1_mism;
+
+    // T11/T12 (con6 readout layer) per-timestep golden streams.
+    localparam integer T_C6 = 40;
+    reg [31:0] c6_spike5_all [0:T_C6*60-1];   // con6 input spike5 (packed, 64x30)
+    reg [31:0] c6_inj6_all   [0:T_C6-1];      // FC weighted sum (= syn_curr[0])
+    reg [31:0] c6_pot6_all   [0:T_C6-1];      // LI readout pot6
+    integer c6_t, c6_j, c6_mism;
 
     task cfg_write;
         input [31:0] addr;
@@ -1404,13 +1411,126 @@ module tb_acc_fmiSnnMC_processor;
             end
         end
 
+        // ============================================================
+        // Test 11: con6 READOUT — fully-connected (1920->1) weighted sum.
+        //   con6 is a DENSE 1920->1 FC layer, realised on the CONV datapath with a
+        //   FULL-WIDTH kernel: cin=64, kernel=in_x=30, out_x=1 -> the single output
+        //   sums weight[cin,x]*spike5[cin,x] over all 1920 = inj6. (Native full mode
+        //   is broken for wide-weight FC -- see weight_generator; the conv path has a
+        //   constant weight base + multi-cycle flow that the cache handles, proven by
+        //   con2-5.) This pass verifies syn_curr[0]=inj6 with skip_neuron (the LI
+        //   readout neuron is T12). spike5 is the recorded g5 output (fires ~t=13).
+        // ============================================================
+        $display("Test 11: con6 FC weighted sum (conv datapath, full-width kernel=30) -- inj6");
+        wait_limit = 2000000;
+        $readmemh("../../fmi/mem_files/recurrent/con6_weight.hex", u_weight_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/test_inputs/c6/c6_spike5_stream.hex", c6_spike5_all);
+        $readmemh("../../fmi/mem_files/recurrent/test_inputs/c6/c6_inj6_golden.hex",   c6_inj6_all);
+
+        cfg_write(32'hFFFF_0000, 32'd0);    // act_base
+        cfg_write(32'hFFFF_0004, 32'd0);    // weight_base
+        cfg_write(32'hFFFF_0008, 32'd0);    // syn_curr_base
+        cfg_write(32'hFFFF_0030, {16'd1, 16'd30});    // S0: out_x=1 | in_x=30
+        cfg_write(32'hFFFF_0034, {16'd0, 16'd0});     // S1: last_neuron=0 | rows_per_neuron=0
+        cfg_write(32'hFFFF_0038, 32'h0140_0401);      // S2: cout=1 | cin=64 | stride=1 | tt=1
+        cfg_write(32'hFFFF_003C, 32'h2555_0041);      // M0: conv, 32b weights, skip_neuron=1
+        cfg_write(32'hFFFF_005C, 32'd11);   // weight_idx_sz (cout*cin*K = 1*64*30 = 1920 < 2^11)
+        cfg_write(32'hFFFF_0074, 32'd30);   // x_kernel_len = 30 (full input width -> one output)
+        cfg_write(32'hFFFF_0084, 32'd0);    // x_kernel_offset = 0
+
+        c6_mism = 0;
+        for (c6_t = 12; c6_t < 24; c6_t = c6_t + 1) begin   // spike5 fires from ~t=13
+            for (i_init = 0; i_init < 128; i_init = i_init + 1) u_syn_curr_mem.mem[i_init] = 32'd0;
+            for (c6_j = 0; c6_j < 60; c6_j = c6_j + 1)
+                u_act_mem.mem[c6_j] = c6_spike5_all[c6_t*60 + c6_j];
+            @(negedge clk); start_new_block_i = 1'b1;
+            @(negedge clk); start_new_block_i = 1'b0;
+            wait_pipeline(timed_out);
+            if (timed_out) begin
+                $display("  T11 t=%0d: pipeline timeout", c6_t); c6_mism = c6_mism + 1;
+            end else if (u_syn_curr_mem.mem[0] !== c6_inj6_all[c6_t]) begin
+                $display("  T11 t=%0d inj6 MISMATCH got 0x%08h exp 0x%08h",
+                         c6_t, u_syn_curr_mem.mem[0], c6_inj6_all[c6_t]);
+                c6_mism = c6_mism + 1;
+            end
+        end
+        if (c6_mism == 0) $display("  OK  T11 con6 inj6: 12/12 timesteps match golden");
+        else begin
+            $display("  FAIL T11 con6 inj6: %0d mismatch(es)", c6_mism);
+            errors = errors + 1;
+        end
+
+        // ============================================================
+        // Test 12: con6 LI READOUT — the full output layer.
+        //   conv-datapath FC (T11) into syn_curr[0]=inj6, then the new LI readout
+        //   neuron (M0[3]=np_mode[1]=1): pot6 = dcy_mem*pot6 + inj6, NO threshold,
+        //   NO reset, output the wrapped pot. pot6 CARRIES across timesteps (the
+        //   leaky integral IS the continuous readout); syn_curr is fresh each step
+        //   (group6 has no synaptic decay -> dcy_syn=0 resets it). Bit-exact vs
+        //   fmi/gen_c6_golden.py pot6 (the per-timestep PESQ readout).
+        // ============================================================
+        $display("Test 12: con6 LI readout (conv FC + readout neuron), T=%0d", T_C6);
+        wait_limit = 2000000;
+
+        // pot6 zeroed ONCE (carried leaky integral); syn_curr fresh each step.
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
+            u_weight_mem.mem[i_init]   = 32'd0;
+            u_act_mem.mem[i_init]      = 32'd0;
+            u_dcy_syn_mem.mem[i_init]  = 32'd0;   // group6 has no synaptic decay
+            u_dcy_mem_mem.mem[i_init]  = 32'd0;
+        end
+        $readmemh("../../fmi/mem_files/recurrent/con6_weight.hex",    u_weight_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group6_dcy_mem.hex", u_dcy_mem_mem.mem);  // g6_dmem at [0]
+        $readmemh("../../fmi/mem_files/recurrent/test_inputs/c6/c6_spike5_stream.hex", c6_spike5_all);
+        $readmemh("../../fmi/mem_files/recurrent/test_inputs/c6/c6_pot6_golden.hex",   c6_pot6_all);
+
+        cfg_write(32'hFFFF_0000, 32'd0);    // act_base
+        cfg_write(32'hFFFF_0004, 32'd0);    // weight_base
+        cfg_write(32'hFFFF_0008, 32'd0);    // syn_curr_base
+        cfg_write(32'hFFFF_000C, 32'd0);    // thresh_base (unused: readout has no threshold)
+        cfg_write(32'hFFFF_0010, 32'd0);    // pot_base (pot6 output, carried)
+        cfg_write(32'hFFFF_0018, 32'd0);    // dcy_syn_base (=0 -> syn fresh)
+        cfg_write(32'hFFFF_001C, 32'd0);    // dcy_mem_base (g6_dmem)
+        cfg_write(32'hFFFF_0030, {16'd1, 16'd30});    // S0: out_x=1 | in_x=30
+        cfg_write(32'hFFFF_0034, {16'd0, 16'd0});     // S1: last_neuron=0 | rows=0
+        cfg_write(32'hFFFF_0038, 32'h0140_0401);      // S2: cout=1 | cin=64 | stride=1 | tt=1
+        cfg_write(32'hFFFF_003C, 32'h2555_0048);      // M0: conv, readout neuron (np_mode[1]), skip=0
+        cfg_write(32'hFFFF_005C, 32'd11);   // weight_idx_sz
+        cfg_write(32'hFFFF_0074, 32'd30);   // x_kernel_len = 30 (full input width)
+        cfg_write(32'hFFFF_0084, 32'd0);    // x_kernel_offset = 0
+
+        c6_mism = 0;
+        for (c6_t = 0; c6_t < T_C6; c6_t = c6_t + 1) begin
+            for (c6_j = 0; c6_j < 60; c6_j = c6_j + 1)
+                u_act_mem.mem[c6_j] = c6_spike5_all[c6_t*60 + c6_j];
+            @(negedge clk); start_new_block_i = 1'b1;
+            @(negedge clk); start_new_block_i = 1'b0;
+            wait_pipeline(timed_out);
+            if (timed_out) begin
+                $display("  FAIL T12 t=%0d: pipeline timeout", c6_t); c6_mism = c6_mism + 1;
+            end else if (u_pot_mem.mem[0] !== c6_pot6_all[c6_t]) begin
+                if (c6_mism < 8)
+                    $display("  T12 t=%0d pot6 MISMATCH got 0x%08h exp 0x%08h",
+                             c6_t, u_pot_mem.mem[0], c6_pot6_all[c6_t]);
+                c6_mism = c6_mism + 1;
+            end
+        end
+        if (c6_mism == 0) $display("  OK  T12 con6 readout pot6: %0d/%0d timesteps match golden", T_C6, T_C6);
+        else begin
+            $display("  FAIL T12 con6 readout pot6: %0d mismatch(es)", c6_mism);
+            errors = errors + 1;
+        end
+
         $display("=== tb_acc_fmiSnnMC_processor: %0d failure(s) ===", errors);
         if (errors == 0) $display("PASS"); else $display("FAIL");
         $finish;
     end
 
     initial begin
-        #10000000;   // raised for T9A (all-spikes, ~1920*160 weight cycles)
+        #60000000;   // raised for T9A (all-spikes) + T12 (40 con6 readout dispatches)
         $display("FAIL: global simulation timeout");
         $finish;
     end

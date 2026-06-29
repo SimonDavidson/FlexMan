@@ -35,7 +35,7 @@ module acc_fmiSnnMC_processor # (
     parameter SP_NUM_TIMESTEPS        = 32,
     parameter SP_X_INPUT_SZ           = 8,
     parameter SP_X_OUTPUT_SZ          = 8,
-    parameter SP_X_KERNEL_SZ          = 3,
+    parameter SP_X_KERNEL_SZ          = 5,   // up to 31: con6's full-width kernel=30 (FC-via-conv); con2-5 kernels <=7 unchanged
     parameter SP_X_KERNEL_OFF_SZ      = 3,
     parameter SP_X_STEP_SZ            = 3,
     parameter SP_ELEMS_PER_ROW        = 4,
@@ -45,7 +45,7 @@ module acc_fmiSnnMC_processor # (
     parameter SP_ELEM_SZ              = 8,
     parameter SP_ACT_SLICE_SZ         = 5,   // ACT_BITS=32: real-MAC reads 32-bit act values (con1); 1-bit spikes use runtime slice code 0
     parameter SP_ACT_IDX_SZ           = `PIN_BITS,  // MC: input-neuron flat-index width (override per app)
-    parameter SP_ACT_DATA_IDX_SZ      = 5,
+    parameter SP_ACT_DATA_IDX_SZ      = 11,  // flat input-index width (full/sparse base); sized to span all inputs (con6 FC = 1920); default-5 only spans 32
     parameter SP_WEIGHT_ENTRY_BITS    = 8,
     parameter SP_WEIGHT_IDX_SZ        = 16,  // MC: widened 5 -> 16
     parameter SP_WEIGHT_SLICE_SZ      = 5,
@@ -237,7 +237,7 @@ module acc_fmiSnnMC_processor # (
 
     // Shared config registers
     reg                    [4:0] bin_point_syn_curr_r;
-    reg                    [2:0] np_mode_r;   // [0]=sub_on_fire [1]=reserved (was clear_syn_curr; clear via FILL) [2]=clear_pot
+    reg                    [2:0] np_mode_r;   // [0]=sub_on_fire [1]=readout (LI neuron, con6) [2]=clear_pot
     reg                          sp_skip_neuron_r;  // 1 = skip neuron_processing after spike_processing
     // --- real-valued MAC front-end (FMI con1 input layer; default-off) -------
     reg                          sp_real_mac_r;     // M0[31]: 1 = real-valued act MAC (con1)
@@ -555,6 +555,7 @@ module acc_fmiSnnMC_processor # (
         .pot_sz_i               (np_pot_sz_r),
         .bin_point_syn_curr_i   (bin_point_syn_curr_r),
         .sub_on_fire_i          (np_mode_r[0]),
+        .readout_mode_i         (np_mode_r[1]),   // M0[3]: LI readout neuron (con6)
         .clear_pot_i            (np_mode_r[2]),
         .dcy_syn_base_addr_i    (np_dcy_syn_base_addr_r),
         .dcy_mem_base_addr_i    (np_dcy_mem_base_addr_r),

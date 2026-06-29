@@ -65,6 +65,7 @@ module neuron_processing # (
     input wire  [POT_SLICE_SZ-1:0]   pot_sz_i,
     input wire  [4:0]                bin_point_syn_curr_i,
     input wire                       sub_on_fire_i,
+    input wire                       readout_mode_i,  // 1 = LI readout neuron (con6)
     input wire                       clear_pot_i,
     // Per-neuron decay memory base addresses
     input wire  [MEM_ADDR_BITS-1:0]  dcy_syn_base_addr_i,
@@ -554,6 +555,7 @@ module neuron_processing # (
         .syn_dcy_i        (dcy_syn_data_out),
         .mem_dcy_i        (dcy_mem_data_out),
         .has_ada_i        (has_ada_i),
+        .readout_mode_i   (readout_mode_i),
         .ada_i            (ada_data_out),
         .b_eff_i          ($signed(b_eff_data_out)),
         .dcy_ada_i        (dcy_ada_data_out),

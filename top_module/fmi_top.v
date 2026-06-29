@@ -538,7 +538,7 @@ config_manager #(
 localparam FMI_NUM_TIMESTEPS      = 32;
 localparam FMI_X_INPUT_SZ         = 8;
 localparam FMI_X_OUTPUT_SZ        = 8;
-localparam FMI_X_KERNEL_SZ        = 3;
+localparam FMI_X_KERNEL_SZ        = 5;   // up to 31: con6 FC-via-conv full-width kernel=30
 localparam FMI_X_KERNEL_OFF_SZ    = 3;
 localparam FMI_X_STEP_SZ          = 3;
 localparam FMI_ELEMS_PER_ROW      = 4;
@@ -546,7 +546,7 @@ localparam FMI_ROWS_PER_NEURON    = 4;
 localparam FMI_ELEM_SZ            = 8;
 localparam FMI_ACT_SLICE_SZ       = 5;   // 32-bit act slices (real-MAC ready); legacy spikes use runtime slice code 0
 localparam FMI_ACT_IDX_SZ         = 11;   // input-neuron flat index  (>1024)
-localparam FMI_ACT_DATA_IDX_SZ    = 5;
+localparam FMI_ACT_DATA_IDX_SZ    = 11;  // flat input-index width (full-mode FC base): 11 spans con6's 1920 inputs
 localparam FMI_WEIGHT_SLICE_SZ    = 5;
 localparam FMI_WEIGHT_IDX_SZ      = 16;
 localparam FMI_WEIGHT_DATA_IDX_SZ = 5;

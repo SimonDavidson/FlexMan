@@ -176,9 +176,15 @@ assign is_fullConn    = (weight_mode_i == 2'b00)? 1'b1 : 1'b0;
 assign is_sparseConn  = (weight_mode_i == 2'b01)? 1'b1 : 1'b0;
 assign is_convolution = (weight_mode_i == 2'b10)? 1'b1 : 1'b0;
 
-// Calculate base address for synaptic row.
-// In conv mode the kernel weights are shared across all input neurons,
-// so the base address does not depend on act_data_idx_i.
+// Calculate base address for synaptic row. In conv mode the kernel weights are
+// shared across all inputs (base independent of the input index). In full/sparse
+// mode the base is the input's flat index act_data_idx_i, width SP_ACT_DATA_IDX_SZ
+// (sized per app; default 5 spans only 32 inputs).
+// NOTE: full mode is otherwise BROKEN for 1-cycle-per-input layers -- its per-input
+// weight base plus the 1-cycle weight-cache latency mistime the fetch (off-by-one
+// weights when each weight is its own word). Latent across all SNN variants (shared
+// weight_generator + shared weight cache); deferred. con6's 1920->1 FC readout uses
+// CONV mode with a full-width kernel instead.
 assign weight_row_base_addr = is_convolution ? weight_base_addr_i
                                              : (act_data_idx_i * rows_per_neuron_i
                                                               + weight_base_addr_i);
