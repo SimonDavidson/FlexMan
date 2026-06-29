@@ -43,7 +43,7 @@ module acc_fmiSnnMC_processor # (
     parameter SP_TIMESTEP_SZ          = 10,
     parameter SP_IN_DATA_BITS         = 32,
     parameter SP_ELEM_SZ              = 8,
-    parameter SP_ACT_SLICE_SZ         = 3,
+    parameter SP_ACT_SLICE_SZ         = 5,   // ACT_BITS=32: real-MAC reads 32-bit act values (con1); 1-bit spikes use runtime slice code 0
     parameter SP_ACT_IDX_SZ           = `PIN_BITS,  // MC: input-neuron flat-index width (override per app)
     parameter SP_ACT_DATA_IDX_SZ      = 5,
     parameter SP_WEIGHT_ENTRY_BITS    = 8,
@@ -239,6 +239,9 @@ module acc_fmiSnnMC_processor # (
     reg                    [4:0] bin_point_syn_curr_r;
     reg                    [2:0] np_mode_r;   // [0]=sub_on_fire [1]=reserved (was clear_syn_curr; clear via FILL) [2]=clear_pot
     reg                          sp_skip_neuron_r;  // 1 = skip neuron_processing after spike_processing
+    // --- real-valued MAC front-end (FMI con1 input layer; default-off) -------
+    reg                          sp_real_mac_r;     // M0[31]: 1 = real-valued act MAC (con1)
+    reg                    [5:0] sp_mac_shift_r;    // 0x98: MAC product right-shift (= K_MEM)
 
     // =========================================================================
     // AXI config register decode
@@ -262,12 +265,12 @@ module acc_fmiSnnMC_processor # (
     //                       [1:0] skip_neuron, [5:2] np_mode, [9:6] weights_per_word,
     //                       [15:10] bin_point_syn_curr, [19:16] weight_sz,
     //                       [23:20] syn_curr_sz, [27:24] pot_sz,
-    //                       [29:28] weight_mode, [30] has_ada
+    //                       [29:28] weight_mode, [30] has_ada, [31] real_mac
     //
     // Boot-only conv/sparse registers stay out of the packed window (>=0x5C),
     // written once via direct AXI: 0x5C weight_idx_sz, 0x74/0x84 x-kernel len/offset
     // (x_kernel_step is now PER-CONFIG in S2[12:10]), 0x8C index_sz, 0x90 tuple_sz,
-    // 0x94 sparse_count.
+    // 0x94 sparse_count, 0x98 mac_shift (real-MAC product shift, = K_MEM).
     // =========================================================================
     wire addr_match = (sys_addr_i[31:16] == TGT_CONFIG_BASE_ADDR[31:16]);
     assign sys_ack_o = sys_req_i & addr_match;
@@ -302,6 +305,8 @@ module acc_fmiSnnMC_processor # (
             bin_point_syn_curr_r     <= 5'b0;
             np_mode_r                <= 3'b0;
             sp_skip_neuron_r         <= 1'b0;
+            sp_real_mac_r            <= 1'b0;
+            sp_mac_shift_r           <= 6'd0;
             np_dcy_syn_base_addr_r   <= {MEM_ADDR_BITS{1'b0}};
             np_dcy_mem_base_addr_r   <= {MEM_ADDR_BITS{1'b0}};
             np_has_ada_r             <= 1'b0;
@@ -353,6 +358,7 @@ module acc_fmiSnnMC_processor # (
                     np_pot_sz_r           <= sys_data_i[27:24];
                     sp_weight_mode_r      <= sys_data_i[29:28];
                     np_has_ada_r          <= sys_data_i[30];
+                    sp_real_mac_r         <= sys_data_i[31];   // real-valued act MAC (con1)
                 end
                 // ---- boot-only conv/sparse params (out-of-packed-window, >=0x5C) ----
                 8'h5C: sp_weight_idx_sz_r      <= sys_data_i[SP_WEIGHT_IDX_SZ-1:0];
@@ -362,6 +368,7 @@ module acc_fmiSnnMC_processor # (
                 8'h8C: sp_index_sz_r           <= sys_data_i[SP_WEIGHT_SLICE_SZ-1:0];
                 8'h90: sp_tuple_sz_r           <= sys_data_i[SP_WEIGHT_SLICE_SZ-1:0];
                 8'h94: sp_sparse_count_r       <= sys_data_i[`PIN_BITS-1:0];
+                8'h98: sp_mac_shift_r          <= sys_data_i[5:0];   // real-MAC product shift (= K_MEM)
                 default: ;
             endcase
         end
@@ -509,7 +516,9 @@ module acc_fmiSnnMC_processor # (
         .syn_curr_mem_wait_i    (sp_syn_curr_mem_wait),
         .syn_curr_mem_addr_o    (sp_syn_curr_mem_addr),
         .syn_curr_mem_data_wr_o (sp_syn_curr_mem_data_wr),
-        .syn_curr_mem_data_rd_i (syn_curr_mem_data_i)
+        .syn_curr_mem_data_rd_i (syn_curr_mem_data_i),
+        .real_mac_i             (sp_real_mac_r),
+        .mac_shift_i            (sp_mac_shift_r)
     );
 
     // =========================================================================

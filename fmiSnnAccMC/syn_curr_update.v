@@ -48,7 +48,12 @@ module syn_curr_update
     input  wire                          syn_curr_mem_wait_i,
     output wire         [`ADDR_SIZE-1:0] syn_curr_mem_addr_o,
     input  wire          [`WTD_BITS-1:0] syn_curr_mem_data_i,
-    output wire          [`WTD_BITS-1:0] syn_curr_mem_data_o
+    output wire          [`WTD_BITS-1:0] syn_curr_mem_data_o,
+
+    // --- real-valued MAC front-end (FMI con1 input layer; default-off) ---------
+    input  wire       [IN_DATA_BITS-1:0] act_value_i,   // signed Q-K activation value
+    input  wire                          real_mac_i,    // 1 = (weight*act)>>shift accumulate
+    input  wire                    [5:0] mac_shift_i    // product right-shift (= K_MEM)
 );
 
 localparam WEIGHT_BITS     = 2**WEIGHT_SLICE_SZ;
@@ -58,6 +63,7 @@ wire              [WEIGHT_IDX_SZ-1:0]    weight_index;
 reg                                      req_pending_r;
 reg                     [`ADDR_SIZE-1:0] syn_curr_addr_r;
 wire                  [IN_DATA_BITS-1:0] aligned_weight_value;
+reg                   [IN_DATA_BITS-1:0] act_value_r;   // registered activation (real-MAC mode)
 reg                                      syn_curr_update_running_r;
 wire                                     syn_curr_update_running_nxt;
 reg                     [`ADDR_SIZE-1:0] syn_curr_flat_index_r;
@@ -115,6 +121,7 @@ begin
       syn_curr_addr_r <=  'hABABAB;
       syn_curr_flat_index_r <= 'h0;
       req_pending_r   <= 1'b0;
+      act_value_r     <= 'h0;
    end
    else if (weight_index_valid_i & weight_value_valid_i & ~req_pending_r & ~syn_curr_mem_wait_i)
    begin
@@ -122,6 +129,7 @@ begin
 	   req_pending_r   <= 1'b1;
            syn_curr_addr_r <= weight_index_i;
            syn_curr_flat_index_r <= syn_curr_flat_index;
+           act_value_r     <= act_value_i;
 `ifdef CONV_DEBUG
            $display("[%0d] syn_wr: cout=%0d x=%0d y=%0d val=%0d -> flat=%0d",
                     $time, weight_index_cout_i, weight_index_x_i, weight_index_y_i,
@@ -178,7 +186,21 @@ begin
 end
 wire [`WTD_BITS-1:0] base_syn_curr = acc_read_valid_r ? acc_read_r : syn_curr_mem_data_i;
 
-assign syn_curr_mem_data_o = base_syn_curr + aligned_weight_value;
+// --- real-valued MAC front-end (FMI con1 input layer; default-off) -----------
+// real_mac_i=0 (legacy spike-conv): syn_curr += sign-extended weight (unchanged).
+// real_mac_i=1 (con1):              syn_curr += (weight * act) >>> mac_shift.
+// Mirrors annAcc/syn_curr_update.v signed MAC; the only addition is the
+// configurable product shift (Q2K->QK; mac_shift = K_MEM). The per-channel bias is
+// folded in as a constant-input channel: con1 runs as cin=2 (channel0 = input x,
+// channel1 = the Q-K constant one), weights [w, b], so the second MAC contributes
+// (b * one) >>> K == b. Matches simulate_int_recurrent.py g3: inj3 = (w*x)>>K + b.
+wire signed   [IN_DATA_BITS:0] mac_act_operand = {act_value_r[IN_DATA_BITS-1], act_value_r};
+wire signed [2*IN_DATA_BITS:0] mac_product     = $signed(aligned_weight_value) * mac_act_operand;
+wire signed [2*IN_DATA_BITS:0] mac_scaled      = mac_product >>> mac_shift_i;
+wire        [IN_DATA_BITS-1:0] syn_add_term    = real_mac_i ? mac_scaled[IN_DATA_BITS-1:0]
+                                                            : aligned_weight_value;
+
+assign syn_curr_mem_data_o = base_syn_curr + syn_add_term;
 
 //////////////////////////////////////////////////////////////////////////////
 // Writeback syn_curr value to memory

@@ -72,7 +72,7 @@
 `define WEIGHT_SLICE_SZ       5
 `define WEIGHT_IDX_SZ         16
 `define WEIGHT_DATA_IDX_SZ    5
-`define ACT_SLICE_SZ          3
+`define ACT_SLICE_SZ          5   // 32-bit act slices: real-MAC (con1 / T10); 1-bit spikes use runtime slice code 0
 `define ACT_IDX_SZ            11
 `define ACT_DATA_IDX_SZ       5
 `define SYN_CURR_IDX_SZ       12
@@ -442,6 +442,13 @@ module tb_acc_fmiSnnMC_processor;
     reg [31:0] golden_spike [0:MEM_DEPTH-1];
     integer t9_i;
     integer t9_mism;
+
+    // T10 (con1 real-MAC input layer) per-timestep golden streams.
+    localparam integer T_C1 = 8;
+    reg [31:0] c1_input_all [0:T_C1*240-1];   // cin=2 act: x(120) then one(120)
+    reg [31:0] c1_syn_all   [0:T_C1*1920-1];  // group3 syn_curr (post-writeback)
+    reg [31:0] c1_spike_all [0:T_C1*60-1];    // group3 spike3 (packed)
+    integer c1_t, c1_j, c1_mism;
 
     task cfg_write;
         input [31:0] addr;
@@ -1298,6 +1305,104 @@ module tb_acc_fmiSnnMC_processor;
             end
         end
 
+
+        // ============================================================
+        // Test 10: con1 INPUT layer (real-valued MAC + adaptive-LIF).
+        //   The network's analog front-end. con1 fans the single real-valued
+        //   log-mel channel out to 16 channels and feeds continuous currents to
+        //   the group3 adLIF encoder. Run as a cin=2 conv: channel0 = real input
+        //   x, channel1 = the Q-K constant one (1<<14); weights [w, b]. The new
+        //   real-MAC mode (M0[31], mac_shift=14) accumulates (w*x)>>14 +
+        //   (b*one)>>14 = (w*x)>>14 + b = inj3, then the (unchanged, T7-validated)
+        //   adaptive-LIF produces spike3. T_C1 timesteps with syn_curr/pot/ada
+        //   carried across dispatches, bit-exact vs fmi/gen_c1_golden.py.
+        // ============================================================
+        $display("Test 10: con1 real-MAC input layer (cin=2, adaptive-LIF), T=%0d", T_C1);
+        wait_limit = 2000000;
+
+        // Carried state (syn_curr/pot/ada) zeroed ONCE; the hardware carries it
+        // across the per-timestep dispatches.
+        for (i_init = 0; i_init < MEM_DEPTH; i_init = i_init + 1) begin
+            u_syn_curr_mem.mem[i_init] = 32'd0;
+            u_pot_mem.mem[i_init]      = 32'd0;
+            u_ada_mem.mem[i_init]      = 32'd0;
+            u_spike_mem.mem[i_init]    = 32'd0;
+            u_weight_mem.mem[i_init]   = 32'd0;
+            u_act_mem.mem[i_init]      = 32'd0;
+        end
+
+        // Constant mems: con1 cin=2 weights [w,b] + group3 adaptive-LIF params.
+        $readmemh("../../fmi/mem_files/recurrent/test_inputs/c1/c1_weight_cin2.hex", u_weight_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group3_dcy_syn.hex", u_dcy_syn_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group3_dcy_mem.hex", u_dcy_mem_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group3_dcy_ada.hex", u_dcy_ada_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group3_scl_ada.hex", u_scl_ada_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group3_b_eff.hex",   u_b_eff_mem.mem);
+        $readmemh("../../fmi/mem_files/recurrent/group3_thresh.hex",  u_thresh_mem.mem);
+        // Per-timestep golden streams.
+        $readmemh("../../fmi/mem_files/recurrent/test_inputs/c1/c1_input_stream.hex", c1_input_all);
+        $readmemh("../../fmi/mem_files/recurrent/test_inputs/c1/c1_syn3_golden.hex",  c1_syn_all);
+        $readmemh("../../fmi/mem_files/recurrent/test_inputs/c1/c1_spike3_golden.hex", c1_spike_all);
+
+        cfg_write(32'hFFFF_0000, 32'd0);    // act_base
+        cfg_write(32'hFFFF_0004, 32'd0);    // weight_base
+        cfg_write(32'hFFFF_0008, 32'd0);    // syn_curr_base
+        cfg_write(32'hFFFF_000C, 32'd0);    // thresh_base
+        cfg_write(32'hFFFF_0010, 32'd0);    // pot_base
+        cfg_write(32'hFFFF_0014, 32'd0);    // spike_base
+        cfg_write(32'hFFFF_0018, 32'd0);    // dcy_syn_base
+        cfg_write(32'hFFFF_001C, 32'd0);    // dcy_mem_base
+        cfg_write(32'hFFFF_0020, 32'd0);    // ada_base
+        cfg_write(32'hFFFF_0024, 32'd0);    // b_eff_base
+        cfg_write(32'hFFFF_0028, 32'd0);    // dcy_ada_base
+        cfg_write(32'hFFFF_002C, 32'd0);    // scl_ada_base
+        cfg_write(32'hFFFF_0030, {16'd120, 16'd120}); // S0: out_x=120 | in_x=120
+        cfg_write(32'hFFFF_0034, {16'd1919, 16'd0});  // S1: last_neuron=1919 | rows=0
+        cfg_write(32'hFFFF_0038, 32'h1002_0401);      // S2: tt=1 | stride=1 | cin=2 | cout=16
+        cfg_write(32'hFFFF_003C, 32'hE555_0040);      // M0: conv, ws=5, has_ada=1, real_mac=1
+        cfg_write(32'hFFFF_005C, 32'd6);    // weight_idx_sz (cout*cin*k=32 < 2^6)
+        cfg_write(32'hFFFF_0074, 32'd1);    // x_kernel_len   = 1
+        cfg_write(32'hFFFF_0084, 32'd0);    // x_kernel_offset = 0 (1x1, no pad)
+        cfg_write(32'hFFFF_0098, 32'd14);   // mac_shift = K_MEM
+
+        for (c1_t = 0; c1_t < T_C1; c1_t = c1_t + 1) begin
+            // Load this timestep's cin=2 activation (x then one) into act_mem.
+            for (c1_j = 0; c1_j < 240; c1_j = c1_j + 1)
+                u_act_mem.mem[c1_j] = c1_input_all[c1_t*240 + c1_j];
+            // Clear the spike output words (the packer only sets bits).
+            for (c1_j = 0; c1_j < 60; c1_j = c1_j + 1)
+                u_spike_mem.mem[c1_j] = 32'd0;
+
+            @(negedge clk); start_new_block_i = 1'b1;
+            @(negedge clk); start_new_block_i = 1'b0;
+            wait_pipeline(timed_out);
+            if (timed_out) begin
+                $display("  FAIL T10 t=%0d: pipeline timeout", c1_t);
+                errors = errors + 1;
+            end else begin
+                c1_mism = 0;
+                for (c1_j = 0; c1_j < 1920; c1_j = c1_j + 1)
+                    if (u_syn_curr_mem.mem[c1_j] !== c1_syn_all[c1_t*1920 + c1_j]) begin
+                        if (c1_mism < 8)
+                            $display("  T10 t=%0d syn MISMATCH n=%0d got 0x%08h exp 0x%08h",
+                                     c1_t, c1_j, u_syn_curr_mem.mem[c1_j], c1_syn_all[c1_t*1920 + c1_j]);
+                        c1_mism = c1_mism + 1;
+                    end
+                for (c1_j = 0; c1_j < 60; c1_j = c1_j + 1)
+                    if (u_spike_mem.mem[c1_j] !== c1_spike_all[c1_t*60 + c1_j]) begin
+                        if (c1_mism < 8)
+                            $display("  T10 t=%0d spike MISMATCH w=%0d got 0x%08h exp 0x%08h",
+                                     c1_t, c1_j, u_spike_mem.mem[c1_j], c1_spike_all[c1_t*60 + c1_j]);
+                        c1_mism = c1_mism + 1;
+                    end
+                if (c1_mism == 0)
+                    $display("  OK  T10 t=%0d: syn3 1920/1920 + spike3 60/60 match golden", c1_t);
+                else begin
+                    $display("  FAIL T10 t=%0d: %0d mismatch(es)", c1_t, c1_mism);
+                    errors = errors + 1;
+                end
+            end
+        end
 
         $display("=== tb_acc_fmiSnnMC_processor: %0d failure(s) ===", errors);
         if (errors == 0) $display("PASS"); else $display("FAIL");

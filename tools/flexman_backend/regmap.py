@@ -138,6 +138,7 @@ PACKED_FMI_MODE_WORDS = [      # offset 0x3C ; (field, lsb, width)
         ("np_pot_sz",          24, 4),
         ("sp_weight_mode",     28, 2),
         ("np_has_ada",         30, 1),
+        ("sp_real_mac",        31, 1),   # real-valued act MAC (MC con1 input layer)
     ],
 ]
 PACKED_FMI_WORDS_PER_CONFIG = (len(PACKED_FMI_ADDR_WORDS)
@@ -170,6 +171,7 @@ BOOT_REG_OFFSETS_FMI = {
     "sp_index_sz":        0x8C,
     "sp_tuple_sz":        0x90,
     "sp_sparse_count":    0x94,
+    "sp_mac_shift":       0x98,   # real-MAC product shift (= K_MEM); MC con1 input layer
 }
 
 # Hadamard config-register offsets (Hadamard/hu_config_regs.v reg_sel = addr[7:0]).

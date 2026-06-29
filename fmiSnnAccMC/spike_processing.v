@@ -108,9 +108,11 @@ module spike_processing # (parameter NUM_TIMESTEPS      = 32,
     input  wire                  syn_curr_mem_wait_i,
     output wire [`ADDR_SIZE-1:0] syn_curr_mem_addr_o,
     output wire  [`POT_BITS-1:0] syn_curr_mem_data_wr_o,
-    input  wire  [`POT_BITS-1:0] syn_curr_mem_data_rd_i
+    input  wire  [`POT_BITS-1:0] syn_curr_mem_data_rd_i,
 
-
+    // --- real-valued MAC front-end (FMI con1 input layer; default-off) ---------
+    input  wire                    real_mac_i,
+    input  wire              [5:0] mac_shift_i
 );
 
 localparam ACT_IDX_BITS      = 2**ACT_IDX_SZ;
@@ -309,7 +311,9 @@ dataline_cache_with_xy #(
 
     .colour_select_o(),
     .invalidate_i(start_new_block_i), // task dispatch — cache quiescent
-    .slice_sz_i({ACT_SLICE_SZ{1'b0}}),
+    // real-MAC reads a full 32-bit signed activation (slice code 5); legacy spike
+    // reads a 1-bit slice (code 0). Needs ACT_SLICE_SZ>=5 so ACT_BITS>=32.
+    .slice_sz_i({{(ACT_SLICE_SZ-3){1'b0}}, (real_mac_i ? 3'd5 : 3'd0)}),
     .base_addr_i(act_base_addr_i),
 
     .sys_addr_i(act_index),
@@ -335,11 +339,15 @@ dataline_cache_with_xy #(
     .mem_wait_i(act_mem_wait_i)
 );
 
-// Only pass on activation when it is high (spike not gap).
-assign act_data_gated_valid = act_data_valid & act_data_out[ACT_BITS-1];
+// Legacy spike-conv: pass only spikes (MSB high), dump non-spikes. real-MAC mode
+// (con1): pass EVERY input so the per-output bias is added even when act==0 (else
+// that neuron's per-timestep bias is dropped — see syn_curr_update MAC).
+assign act_data_gated_valid = real_mac_i ? act_data_valid
+                                         : (act_data_valid &  act_data_out[ACT_BITS-1]);
 
 // Dump valid activations that are zero (non-spike) without passing on:
-assign act_ignore_non_spike = act_data_valid & ~act_data_out[ACT_BITS-1];
+assign act_ignore_non_spike = real_mac_i ? 1'b0
+                                         : (act_data_valid & ~act_data_out[ACT_BITS-1]);
 
 // The weight generator only sees the gated (spiking) activations, so its pass
 // termination (finished_for_this_ip_neuron & act_data_last_i) never fires when
@@ -604,7 +612,10 @@ syn_curr_update # (
    .syn_curr_mem_wait_i(syn_curr_mem_wait_i),
    .syn_curr_mem_addr_o(syn_curr_mem_addr_o),
    .syn_curr_mem_data_i(syn_curr_mem_data_rd_i),
-   .syn_curr_mem_data_o(syn_curr_mem_data_wr_o)
+   .syn_curr_mem_data_o(syn_curr_mem_data_wr_o),
+   .act_value_i(act_data_out),
+   .real_mac_i(real_mac_i),
+   .mac_shift_i(mac_shift_i)
 );
 
 endmodule

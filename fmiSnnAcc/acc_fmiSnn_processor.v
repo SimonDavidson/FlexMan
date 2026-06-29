@@ -233,6 +233,11 @@ module acc_fmiSnn_processor # (
     reg                    [4:0] bin_point_syn_curr_r;
     reg                    [2:0] np_mode_r;   // [0]=sub_on_fire [1]=reserved (was clear_syn_curr; clear via FILL) [2]=clear_pot
     reg                          sp_skip_neuron_r;  // 1 = skip neuron_processing after spike_processing
+    // Real-MAC config fields: decoded for FMI config-layout parity with the MC
+    // variant (regmap PACKED_FMI_* / BOOT_REG_OFFSETS_FMI). The real-valued MAC
+    // datapath is MC-only (con1 needs multi-channel), so these are reserved here.
+    reg                          sp_real_mac_r;     // M0[31] (reserved)
+    reg                    [5:0] sp_mac_shift_r;    // 0x98   (reserved)
 
     // =========================================================================
     // AXI config register decode
@@ -292,6 +297,8 @@ module acc_fmiSnn_processor # (
             bin_point_syn_curr_r     <= 5'b0;
             np_mode_r                <= 3'b0;
             sp_skip_neuron_r         <= 1'b0;
+            sp_real_mac_r            <= 1'b0;
+            sp_mac_shift_r           <= 6'd0;
             np_dcy_syn_base_addr_r   <= {MEM_ADDR_BITS{1'b0}};
             np_dcy_mem_base_addr_r   <= {MEM_ADDR_BITS{1'b0}};
             np_has_ada_r             <= 1'b0;
@@ -338,6 +345,7 @@ module acc_fmiSnn_processor # (
                     np_pot_sz_r           <= sys_data_i[27:24];
                     sp_weight_mode_r      <= sys_data_i[29:28];
                     np_has_ada_r          <= sys_data_i[30];
+                    sp_real_mac_r         <= sys_data_i[31];   // reserved (MC-only datapath)
                 end
                 // ---- boot-only conv/sparse params (out-of-packed-window, >=0x5C) ----
                 8'h5C: sp_weight_idx_sz_r      <= sys_data_i[SP_WEIGHT_IDX_SZ-1:0];
@@ -347,6 +355,7 @@ module acc_fmiSnn_processor # (
                 8'h8C: sp_index_sz_r           <= sys_data_i[SP_WEIGHT_SLICE_SZ-1:0];
                 8'h90: sp_tuple_sz_r           <= sys_data_i[SP_WEIGHT_SLICE_SZ-1:0];
                 8'h94: sp_sparse_count_r       <= sys_data_i[`PIN_BITS-1:0];
+                8'h98: sp_mac_shift_r          <= sys_data_i[5:0];   // reserved (MC-only datapath)
                 default: ;
             endcase
         end
