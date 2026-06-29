@@ -1,0 +1,34 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude   Created: 2026-06-29   Last modified: 2026-06-29
+#
+# Simulate con6 (the OUTPUT layer: dense 1920->1 leaky-integrator readout) on the
+# fmi_top fabric via the scheduler hardware-loop, one dispatch per timestep.
+# Exercises fmiSnnAccMC's readout-neuron mode (conv-datapath FC + LI readout)
+# through scheduler / config_manager / shared_pool. Run from this directory
+# (top_module/). -access wrc enables the tb's hierarchical references: the pool
+# bank .mem backdoor AND the dedicated pot_mem.mem readback (pot6 is not in the
+# pool, so the AXI POOL_RD window cannot reach it).
+xrun -sv -timescale 10ps/1ps -access wrc -top tb_fmi_top_c6 \
+  tb_fmi_top_c6.v \
+  fmi_top.v \
+  ../shared/shared_pool.v \
+  ../scheduler/scheduler.v \
+  ../scheduler/sch_table.v \
+  ../scheduler/sch_entry.v \
+  ../scheduler/sch_buffer_state.v \
+  ../scheduler/buffer_state_entry.v \
+  ../scheduler/acc_hw_buffer_tracker.v \
+  ../scheduler/prog_cache.v \
+  ../config_manager/config_manager.v \
+  ../fmiSnnAccMC/acc_fmiSnnMC_processor.v \
+  ../fmiSnnAccMC/spike_processing.v \
+  ../fmiSnnAccMC/act_index_generator.v \
+  ../fmiSnnAccMC/weight_generator.v \
+  ../fmiSnnAccMC/syn_curr_update.v \
+  ../fmiSnnAccMC/update_state_for_neuron.v \
+  ../fmiSnnAccMC/neuron_processing.v \
+  ../shared/dataline_cache_with_xy.v \
+  ../shared/slice_and_align.v \
+  ../shared/packer.v
