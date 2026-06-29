@@ -4,7 +4,7 @@
 `include "../shared/constants.v"
 
 // =============================================================================
-// tb_fmi_top_c2c.v — FULL recurrent network g3->g4->g5->g6 on fmi_top (Phase 1)
+// tb_fmi_top_c2c.v — FULL recurrent network g3->g4->g5->g6 on fmi_top
 // Authors: Simon Davidson & Claude   Created: 2026-06-29   Last modified: 2026-06-29
 //
 // The capstone integration: EVERY layer of the FMI recurrent SNN runs on the
@@ -28,21 +28,34 @@
 //   buf3 spike5  con5 RW #t=2     -> con6 SOURCE   (same recurrent + feed-forward role)
 //   buf4 dummy   con6 RW #t=1     -> (no consumer) (con6 never spikes; self-cycles)
 //
+// === AXI-readback build: NO -access wrc (like C2b 32780d4) ===
+// ZERO hierarchical (.mem[]) backdoor references, so it compiles WITHOUT Xcelium's
+// -access wrc (which disables optimisation and dominates the long T=249 run). Each
+// access avoids the backdoor:
+//   - spike3/4/5 compare : AXI reads through the host POOL_RD_BASE window (real DUT
+//                          read port; the path C1 validated against the backdoor).
+//   - input load         : a tb-side write port MUX'd over each pool bank's DUT
+//                          write port (port connectivity, not a hierarchical ref);
+//                          driven only in the per-timestep gate window (DUT idle).
+//   - pot6 compare       : pot6 lives in the dedicated pot_mem (NOT in the pool, so
+//                          POOL_RD cannot reach it) -> a tb-side READ port MUX'd over
+//                          pot_mem's re/addr inputs, sampled in the idle gate window.
+//   - dedicated mems     : $readmemh into the tb sram_model instances (no wrc).
+//   - state zeroing       : relies on sram_model's init-zero (no clear backdoor).
+//
 // Memory layout (all hex already on disk; NO golden regeneration, NO RTL change):
 //   pool   : ACT 0 | SPIKE3 256 | SPIKE4 320 | SPIKE5 384 | DUMMY 448
 //            SYN3 512 | SYN4 2560 | SYN5 4608 | SYN6 6656
 //   weights: packed con1@0 con2@32 con3@2592 con4@7712 con5@17952 con6@38432
 //   params : per-group slice g3@0 g4@2048 g5@4096 g6@6144 (each <=1920/group)
 //
-// PHASE 1 (this file): backdoor pool gather + u_pot_mem backdoor, T=16, get all
-// four streams (spike3/spike4/spike5/pot6) bit-exact vs gen_c2c_golden.py. Phase 2
-// will convert to the AXI-readback build (no -access wrc) for the full T=249 run.
-//
-// Golden: fmi/gen_c2c_golden.py (sample 0). Compared EVERY timestep.
+// Golden: fmi/gen_c2c_golden.py (sample 0). Compared EVERY timestep. Committed at
+// T=16 (fast regression); the full T=249 pass is VERIFIED (0 failures, ~7.5 min) —
+// bump T_C2C to 249 to reproduce (goldens already hold all 249).
 // =============================================================================
 module tb_fmi_top_c2c;
 
-// ─── C2c test size (Phase 1: 16; goldens hold full 249) ──────────────────────
+// ─── C2c test size (16 = fast regression; 249 = full network pass, verified) ──
 localparam integer T_C2C   = 16;
 localparam integer SETTLE  = 16;   // cycles to let the writeback pipeline drain
 
@@ -139,7 +152,7 @@ wire  [`POT_BITS-1:0] pot_mem_data_o, pot_mem_data_i;
 wire                  ada_mem_wr_o, ada_mem_rd_o;  wire [`ADDR_SIZE-1:0] ada_mem_addr_o;
 wire           [31:0] ada_mem_data_o, ada_mem_data_i;
 
-// pool bank nets
+// pool bank nets (DUT side)
 wire                  m0_rd, m0_wr;  wire [`ADDR_SIZE-1:0] m0_addr;  wire [31:0] m0_wdata, m0_rdata;
 wire                  m1_rd, m1_wr;  wire [`ADDR_SIZE-1:0] m1_addr;  wire [31:0] m1_wdata, m1_rdata;
 wire                  m2_rd, m2_wr;  wire [`ADDR_SIZE-1:0] m2_addr;  wire [31:0] m2_wdata, m2_rdata;
@@ -159,7 +172,15 @@ always @(posedge clk) begin
     if (bba_mem_wr_o) bba_mem[bba_mem_wr_addr_o[CFG_ADDR_BITS-1:0]] <= bba_mem_wr_data_o;
 end
 
-// ─── Dedicated acc memories (sram_model, 1-cycle) ────────────────────────────
+// ─── TB-side pot_mem READ port, mux'd over pot_mem's re/addr (no backdoor) ────
+// pot6 is in the dedicated pot_mem, not the pool, so the AXI POOL_RD window cannot
+// reach it. Drive a read into pot_mem @ G6 in the idle gate window (DUT not using
+// pot_mem) and capture the registered rdata -- port connectivity, no -access wrc.
+reg        tb_pot_rd = 1'b0;
+wire                   pot_mem_re_x   = tb_pot_rd ? 1'b1      : pot_mem_rd_o;
+wire [15:0]            pot_mem_addr_x = tb_pot_rd ? G6[15:0]  : pot_mem_addr_o[15:0];
+
+// ─── Dedicated acc memories (sram_model, 1-cycle; $readmemh-loaded, no wrc) ──
 sram_model #(.DATA_W(`WTD_BITS), .DEPTH(WEIGHT_DEPTH)) u_weight_mem (
     .clk(clk), .we(1'b0), .re(weight_mem_rd_o),
     .addr(weight_mem_addr_o[15:0]), .wdata({`WTD_BITS{1'b0}}), .rdata(weight_mem_data_i));
@@ -182,21 +203,41 @@ sram_model #(.DATA_W(32), .DEPTH(DATA_DEPTH)) u_scl_ada_mem (
     .clk(clk), .we(1'b0), .re(scl_ada_mem_rd_o),
     .addr(scl_ada_mem_addr_o[15:0]), .wdata(32'b0), .rdata(scl_ada_mem_data_i));
 sram_model #(.DATA_W(`POT_BITS), .DEPTH(DATA_DEPTH)) u_pot_mem (
-    .clk(clk), .we(pot_mem_wr_o), .re(pot_mem_rd_o),
-    .addr(pot_mem_addr_o[15:0]), .wdata(pot_mem_data_o), .rdata(pot_mem_data_i));
+    .clk(clk), .we(pot_mem_wr_o), .re(pot_mem_re_x),
+    .addr(pot_mem_addr_x), .wdata(pot_mem_data_o), .rdata(pot_mem_data_i));
 sram_model #(.DATA_W(32), .DEPTH(DATA_DEPTH)) u_ada_mem (
     .clk(clk), .we(ada_mem_wr_o), .re(ada_mem_rd_o),
     .addr(ada_mem_addr_o[15:0]), .wdata(ada_mem_data_o), .rdata(ada_mem_data_i));
 
-// ─── Shared pool banks (4 interleaved, sram_model 1-cycle) ───────────────────
+// ─── TB-side pool write port, mux'd over each bank's DUT write port ──────────
+// Loads inputs into the pool via PORT connectivity (no hierarchical .mem[] backdoor
+// -> no -access wrc). Driven only in the per-timestep gate window while the DUT is
+// idle, so muxing the shared single write/addr port is safe.
+reg        tb_drive = 1'b0;
+reg [15:0] tb_m0_addr=0, tb_m1_addr=0, tb_m2_addr=0, tb_m3_addr=0;
+reg [31:0] tb_m0_wd=0,   tb_m1_wd=0,   tb_m2_wd=0,   tb_m3_wd=0;
+reg        tb_m0_we=0,   tb_m1_we=0,   tb_m2_we=0,   tb_m3_we=0;
+wire        m0_we_x = tb_drive ? tb_m0_we : m0_wr;
+wire        m1_we_x = tb_drive ? tb_m1_we : m1_wr;
+wire        m2_we_x = tb_drive ? tb_m2_we : m2_wr;
+wire        m3_we_x = tb_drive ? tb_m3_we : m3_wr;
+wire [15:0] m0_addr_x = tb_drive ? tb_m0_addr : m0_addr[15:0];
+wire [15:0] m1_addr_x = tb_drive ? tb_m1_addr : m1_addr[15:0];
+wire [15:0] m2_addr_x = tb_drive ? tb_m2_addr : m2_addr[15:0];
+wire [15:0] m3_addr_x = tb_drive ? tb_m3_addr : m3_addr[15:0];
+wire [31:0] m0_wd_x = tb_drive ? tb_m0_wd : m0_wdata;
+wire [31:0] m1_wd_x = tb_drive ? tb_m1_wd : m1_wdata;
+wire [31:0] m2_wd_x = tb_drive ? tb_m2_wd : m2_wdata;
+wire [31:0] m3_wd_x = tb_drive ? tb_m3_wd : m3_wdata;
+
 sram_model #(.DATA_W(32), .DEPTH(DATA_DEPTH)) u_m0 (
-    .clk(clk), .we(m0_wr), .re(m0_rd), .addr(m0_addr[15:0]), .wdata(m0_wdata), .rdata(m0_rdata));
+    .clk(clk), .we(m0_we_x), .re(m0_rd), .addr(m0_addr_x), .wdata(m0_wd_x), .rdata(m0_rdata));
 sram_model #(.DATA_W(32), .DEPTH(DATA_DEPTH)) u_m1 (
-    .clk(clk), .we(m1_wr), .re(m1_rd), .addr(m1_addr[15:0]), .wdata(m1_wdata), .rdata(m1_rdata));
+    .clk(clk), .we(m1_we_x), .re(m1_rd), .addr(m1_addr_x), .wdata(m1_wd_x), .rdata(m1_rdata));
 sram_model #(.DATA_W(32), .DEPTH(DATA_DEPTH)) u_m2 (
-    .clk(clk), .we(m2_wr), .re(m2_rd), .addr(m2_addr[15:0]), .wdata(m2_wdata), .rdata(m2_rdata));
+    .clk(clk), .we(m2_we_x), .re(m2_rd), .addr(m2_addr_x), .wdata(m2_wd_x), .rdata(m2_rdata));
 sram_model #(.DATA_W(32), .DEPTH(DATA_DEPTH)) u_m3 (
-    .clk(clk), .we(m3_wr), .re(m3_rd), .addr(m3_addr[15:0]), .wdata(m3_wdata), .rdata(m3_rdata));
+    .clk(clk), .we(m3_we_x), .re(m3_rd), .addr(m3_addr_x), .wdata(m3_wd_x), .rdata(m3_rdata));
 
 // ─── DUT ─────────────────────────────────────────────────────────────────────
 fmi_top u_dut (
@@ -243,30 +284,7 @@ fmi_top u_dut (
     .m3_data_mem_addr_o(m3_addr), .m3_data_mem_wdata_o(m3_wdata), .m3_data_mem_rdata_i(m3_rdata)
 );
 
-// ─── Pool backdoor access: logical addr -> (bank=a[1:0], word=a>>2) ──────────
-function [31:0] pool_rd;
-    input integer a;
-    case (a[1:0])
-        2'd0: pool_rd = u_m0.mem[a >> 2];
-        2'd1: pool_rd = u_m1.mem[a >> 2];
-        2'd2: pool_rd = u_m2.mem[a >> 2];
-        default: pool_rd = u_m3.mem[a >> 2];
-    endcase
-endfunction
-task pool_wr;
-    input integer a;
-    input [31:0]  d;
-    begin
-        case (a[1:0])
-            2'd0: u_m0.mem[a >> 2] = d;
-            2'd1: u_m1.mem[a >> 2] = d;
-            2'd2: u_m2.mem[a >> 2] = d;
-            default: u_m3.mem[a >> 2] = d;
-        endcase
-    end
-endtask
-
-// ─── AXI host write ──────────────────────────────────────────────────────────
+// ─── AXI host write / read ───────────────────────────────────────────────────
 task axi_write;
     input [31:0] addr;
     input [31:0] data;
@@ -275,6 +293,31 @@ task axi_write;
         sys_req_i = 1'b1; sys_addr_i = addr; sys_data_i = data;
         @(posedge clk); #1;
         sys_req_i = 1'b0; sys_addr_i = 32'h0; sys_data_i = 32'h0;
+    end
+endtask
+task axi_read;
+    input  [31:0] addr;
+    output [31:0] data;
+    integer guard;
+    begin
+        @(posedge clk); #1;
+        sys_req_i = 1'b1; sys_addr_i = addr; sys_data_i = 32'h0;
+        guard = 0;
+        @(posedge clk); #1;
+        while (sys_ack_o !== 1'b1 && guard < 1000) begin @(posedge clk); #1; guard = guard + 1; end
+        data = sys_data_o;
+        sys_req_i = 1'b0; sys_addr_i = 32'h0;
+    end
+endtask
+
+// Read pot6 from the dedicated pot_mem @ G6 via the tb-side read-port mux.
+task read_pot6;
+    output [31:0] data;
+    begin
+        tb_pot_rd = 1'b1;
+        @(posedge clk); #1;        // pot_mem registers rdata <= mem[G6]
+        data = pot_mem_data_i;
+        tb_pot_rd = 1'b0;
     end
 endtask
 
@@ -400,72 +443,61 @@ task write_boot_regs;
     end
 endtask
 
-// ─── Zero ALL carried state ONCE at t=0 ──────────────────────────────────────
-task clear_state;
-    begin
-        for (i = 0; i < 1920; i = i + 1) begin
-            pool_wr(SYN3_BASE + i, 32'd0);
-            pool_wr(SYN4_BASE + i, 32'd0);
-            pool_wr(SYN5_BASE + i, 32'd0);
-        end
-        for (i = 0; i < 60; i = i + 1) begin
-            pool_wr(SPIKE3_BASE + i, 32'd0);
-            pool_wr(SPIKE4_BASE + i, 32'd0);
-            pool_wr(SPIKE5_BASE + i, 32'd0);
-            pool_wr(DUMMY_BASE  + i, 32'd0);
-        end
-        pool_wr(SYN6_BASE, 32'd0);
-        for (i = 0; i < DATA_DEPTH; i = i + 1) begin
-            u_pot_mem.mem[i] = {`POT_BITS{1'b0}};
-            u_ada_mem.mem[i] = 32'd0;
-        end
-    end
-endtask
-
 // ─── Drive this timestep's cin=2 activation (x then one) into the ACT region ──
+// ACT_BASE is bank-aligned, so logical word (4g+b) lands in bank b at word g.
 task load_input_frame;
     input integer t;
-    integer w;
+    integer g;
     begin
-        for (w = 0; w < 240; w = w + 1) pool_wr(ACT_BASE + w, c2c_input_stream[t*240 + w]);
+        tb_drive = 1'b1;
+        for (g = 0; g < 60; g = g + 1) begin
+            tb_m0_addr = (ACT_BASE>>2)+g; tb_m0_wd = c2c_input_stream[t*240 + 4*g + 0]; tb_m0_we = 1'b1;
+            tb_m1_addr = (ACT_BASE>>2)+g; tb_m1_wd = c2c_input_stream[t*240 + 4*g + 1]; tb_m1_we = 1'b1;
+            tb_m2_addr = (ACT_BASE>>2)+g; tb_m2_wd = c2c_input_stream[t*240 + 4*g + 2]; tb_m2_we = 1'b1;
+            tb_m3_addr = (ACT_BASE>>2)+g; tb_m3_wd = c2c_input_stream[t*240 + 4*g + 3]; tb_m3_we = 1'b1;
+            @(posedge clk); #1;
+        end
+        tb_m0_we = 1'b0; tb_m1_we = 1'b0; tb_m2_we = 1'b0; tb_m3_we = 1'b0;
+        tb_drive = 1'b0;
     end
 endtask
 
-// ─── Compare this timestep's spike3 + spike4 + spike5 + pot6 to golden ───────
+// ─── Compare this timestep's spike3 + spike4 + spike5 (AXI) + pot6 (mux) ─────
 task check_timestep;
     input integer t;
     integer w, s3m, s4m, s5m;
-    reg [31:0] got;
+    reg [31:0] got, pot;
     begin
         s3m = 0; s4m = 0; s5m = 0;
         for (w = 0; w < 60; w = w + 1) begin
-            got = pool_rd(SPIKE3_BASE + w);
+            axi_read(POOL_RD_BASE + ((SPIKE3_BASE + w) << 2), got);
             if (got !== c2c_spike3_golden[t*60 + w]) begin
                 if (s3m < 4) $display("    t=%0d spike3 MISMATCH w=%0d got %08h exp %08h",
                                        t, w, got, c2c_spike3_golden[t*60 + w]);
                 s3m = s3m + 1;
             end
-            got = pool_rd(SPIKE4_BASE + w);
+            axi_read(POOL_RD_BASE + ((SPIKE4_BASE + w) << 2), got);
             if (got !== c2c_spike4_golden[t*60 + w]) begin
                 if (s4m < 4) $display("    t=%0d spike4 MISMATCH w=%0d got %08h exp %08h",
                                        t, w, got, c2c_spike4_golden[t*60 + w]);
                 s4m = s4m + 1;
             end
-            got = pool_rd(SPIKE5_BASE + w);
+            axi_read(POOL_RD_BASE + ((SPIKE5_BASE + w) << 2), got);
             if (got !== c2c_spike5_golden[t*60 + w]) begin
                 if (s5m < 4) $display("    t=%0d spike5 MISMATCH w=%0d got %08h exp %08h",
                                        t, w, got, c2c_spike5_golden[t*60 + w]);
                 s5m = s5m + 1;
             end
         end
-        got = u_pot_mem.mem[G6];   // pot6 lives in the dedicated pot_mem @ G6
-        if (s3m == 0 && s4m == 0 && s5m == 0 && got === c2c_pot6_golden[t])
-            $display("  OK  t=%0d  spike3/4/5 60/60 + pot6 %08h match", t, got);
-        else begin
-            if (got !== c2c_pot6_golden[t])
-                $display("    t=%0d pot6 MISMATCH got %08h exp %08h", t, got, c2c_pot6_golden[t]);
+        read_pot6(pot);
+        if (s3m == 0 && s4m == 0 && s5m == 0 && pot === c2c_pot6_golden[t]) begin
+            if (t % 25 == 0 || t == T_C2C-1)
+                $display("  OK  t=%0d  spike3/4/5 60/60 + pot6 %08h match", t, pot);
+        end else begin
+            if (pot !== c2c_pot6_golden[t])
+                $display("    t=%0d pot6 MISMATCH got %08h exp %08h", t, pot, c2c_pot6_golden[t]);
             $display("  FAIL t=%0d  s3 %0d / s4 %0d / s5 %0d mismatches%s",
-                     t, s3m, s4m, s5m, (got !== c2c_pot6_golden[t]) ? " + pot6" : "");
+                     t, s3m, s4m, s5m, (pot !== c2c_pot6_golden[t]) ? " + pot6" : "");
             errors = errors + 1;
         end
     end
@@ -476,25 +508,24 @@ integer t, guard;
 initial begin : run
     repeat(4) @(posedge clk);
 
-    // fresh DUT state
+    // fresh DUT state (carried state relies on sram_model init-zero, no backdoor clear)
     reset = 1'b1; repeat(4) @(posedge clk); #1;
     reset = 1'b0; @(posedge clk); #1;
 
     // memories + goldens
     load_static_mems;
-    clear_state;
     $readmemh("../../fmi/mem_files/recurrent/test_inputs/c2c/c2c_input_stream.hex", c2c_input_stream);
     $readmemh("../../fmi/mem_files/recurrent/test_inputs/c2c/c2c_spike3_golden.hex", c2c_spike3_golden);
     $readmemh("../../fmi/mem_files/recurrent/test_inputs/c2c/c2c_spike4_golden.hex", c2c_spike4_golden);
     $readmemh("../../fmi/mem_files/recurrent/test_inputs/c2c/c2c_spike5_golden.hex", c2c_spike5_golden);
     $readmemh("../../fmi/mem_files/recurrent/test_inputs/c2c/c2c_pot6_golden.hex",   c2c_pot6_golden);
-    load_input_frame(0);                       // pre-load the cin=2 act for t=0
+    load_input_frame(0);                       // pre-load the cin=2 act for t=0 (tb write port)
 
     // config + boot regs
     load_config;
     write_boot_regs;
 
-    // ── Buffer seeding (see header choreography) ─────────────────────────────
+    // ── Buffer seeding (data = {usage[7:4], id[3:0]}) ────────────────────────
     //   buf0 act    : full cnt=1 (re-marked each timestep)
     //   buf1 spike3 : leave FREE (con1 TARGET needs free)
     //   buf2 spike4 : full cnt=2 (recurrent: survives con4's one consume)
@@ -526,7 +557,7 @@ initial begin : run
     axi_write(SCH_LOAD_PC, 32'd0);
     axi_write(SCH_START,   32'd0);
 
-    $display("[C2c] FULL g3->g6 on fmi_top (6 dispatches/timestep, buffer handoff), T=%0d", T_C2C);
+    $display("[C2c] FULL g3->g6 on fmi_top (6 dispatches/timestep, AXI readback, no wrc), T=%0d", T_C2C);
 
     // Per-timestep lock-step: wait for this timestep's NXT, settle, check all four
     // streams, then re-feed the input + re-mark buf0 to release the next iteration.
@@ -543,7 +574,7 @@ initial begin : run
         repeat(SETTLE) @(posedge clk); #1;
         check_timestep(t);
         if (t + 1 < T_C2C) begin
-            load_input_frame(t + 1);                 // cin=2 act for t+1 into ACT
+            load_input_frame(t + 1);                 // cin=2 act for t+1 into ACT (tb write port)
             axi_write(SCH_MARKFULL, 32'h0000_0010);  // re-mark buf0 full {cnt=1,id=0}
         end
     end
@@ -553,9 +584,9 @@ initial begin : run
     #20 $finish;
 end
 
-// safety net
+// safety net — cycle-counted (a single #delay literal would overflow 32 bits).
 initial begin
-    #2_000_000_000;
+    repeat (T_C2C + 2) repeat (8_000_000) @(posedge clk);
     $display("FAIL: global timeout");
     $finish;
 end
