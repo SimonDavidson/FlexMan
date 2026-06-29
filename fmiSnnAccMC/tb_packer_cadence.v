@@ -5,7 +5,7 @@
 //
 // Authors      : Simon Davidson & Claude
 // Created      : 2026-06-21
-// Last modified: 2026-06-21
+// Last modified: 2026-06-29
 //
 // Purpose
 // -------
@@ -108,6 +108,7 @@ module tb_packer_cadence;
         .syn_dcy_i  (in_dsyn[neuron_counter_r]),
         .mem_dcy_i  (in_dmem[neuron_counter_r]),
         .has_ada_i  (has_ada),
+        .readout_mode_i(1'b0),   // default-off: plain/adaptive LIF (readout = con6 only)
         .ada_i      (in_ada [neuron_counter_r]),
         .b_eff_i    (in_beff[neuron_counter_r]),
         .dcy_ada_i  (in_dada[neuron_counter_r]),

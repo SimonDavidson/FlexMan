@@ -5,7 +5,7 @@
 //
 // Authors      : Simon Davidson & Claude
 // Created      : 2026-06-08
-// Last modified: 2026-06-08
+// Last modified: 2026-06-29
 //
 // FIRST aggressive unit test for fmiSnnAcc/neuron_processing.  Drives whole
 // layers of neurons through the neuron loop and checks every memory write-back
@@ -119,6 +119,7 @@ module tb_neuron_processing;
         .sub_on_fire_i(sub_on_fire), .clear_pot_i(clear_pot),
         .dcy_syn_base_addr_i(dcy_syn_base), .dcy_mem_base_addr_i(dcy_mem_base),
         .has_ada_i(has_ada),
+        .readout_mode_i(1'b0),   // default-off: plain/adaptive LIF (readout = con6 only)
         .ada_base_addr_i(ada_base), .b_eff_base_addr_i(b_eff_base),
         .dcy_ada_base_addr_i(dcy_ada_base), .scl_ada_base_addr_i(scl_ada_base),
         .start_new_block_i(start_new_block), .target_acc_i(target_acc), .buffer_info_i(buffer_info),

@@ -5,7 +5,7 @@
 //
 // Authors      : Simon Davidson & Claude
 // Created      : 2026-05-15
-// Last modified: 2026-06-07
+// Last modified: 2026-06-29
 //
 // FMI membrane update checked against np_ref_fmi over directed corner cases +
 // a constrained-random loop, exercising both the plain (has_ada=0, 2-cycle) and
@@ -46,6 +46,7 @@ module tb_update_state_for_neuron;
         .syn_dcy_i(syn_dcy), .mem_dcy_i(mem_dcy),
         .has_ada_i(has_ada), .ada_i(ada), .b_eff_i(b_eff),
         .dcy_ada_i(dcy_ada), .scl_ada_i(scl_ada),
+        .readout_mode_i(1'b0),   // default-off: plain/adaptive LIF (readout = con6 only)
         .neuron_taken_o(neuron_taken),
         .result_valid_o(result_valid),
         .potential_o(potential_o), .syn_curr_o(syn_curr_o), .spike_o(spike_o),
