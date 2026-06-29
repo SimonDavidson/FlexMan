@@ -5,7 +5,7 @@
 
 // =============================================================================
 // tb_fmi_top_c2a.v — Stage C2a integration testbench for fmi_top.v
-// Authors: Simon Davidson & Claude   Created: 2026-06-26   Last modified: 2026-06-26
+// Authors: Simon Davidson & Claude   Created: 2026-06-26   Last modified: 2026-06-29
 //
 // Exercises the SCHEDULER'S HARDWARE TIMESTEP LOOP (LOOP / NXT / LOOPEND) driving
 // group4 con2 FEED-FORWARD ONLY over T timesteps. One dispatch per timestep; the
@@ -289,7 +289,7 @@ task load_config;
         cfg_mem[10] = 32'd0;           // 0x28 dcy_ada_base
         cfg_mem[11] = 32'd0;           // 0x2C scl_ada_base
         cfg_mem[12] = {16'd60, 16'd120};   // 0x30 S0: out_x=60 | in_x=120
-        cfg_mem[13] = {16'd1919, 16'd0};   // 0x34 S1: last_neuron=1919 | rows_per_neuron=0
+        cfg_mem[13] = {16'd1919, 16'h0045};   // 0x34 S1: last_neuron=1919 | kernel=5,offset=2 (0x45)
         cfg_mem[14] = 32'h2010_0801;       // 0x38 S2: cout=32 | cin=16 | stride=2[12:10] | total_timesteps=1
         cfg_mem[15] = 32'h2555_0040;       // 0x3C M0: conv, plain LIF, 32b
         for (i = 0; i < 8; i = i + 1) bba_mem[i] = 32'd0;
@@ -300,8 +300,7 @@ endtask
 task write_boot_regs;
     begin
         axi_write(FMI_CFG_BASE | 32'h5C, 32'd12);  // weight_idx_sz
-        axi_write(FMI_CFG_BASE | 32'h74, 32'd5);   // x_kernel_len
-        axi_write(FMI_CFG_BASE | 32'h84, 32'd2);   // x_kernel_offset (pad)
+        // x_kernel_len=5 / offset=2 are now per-config in S1[7:0] (=0x45) — see cfg_mem[13]
         // x_kernel_step (stride) is now per-config in S2[12:10] — see cfg_mem[14]
     end
 endtask

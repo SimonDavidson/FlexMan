@@ -340,6 +340,13 @@ module acc_fmiSnnMC_processor # (
                 8'h34: begin                                       // S1
                     sp_rows_per_neuron_r <= sys_data_i[SP_ROWS_PER_NEURON-1:0];
                     np_last_neuron_idx_r <= sys_data_i[16 +: NP_NEURON_IDX_SZ];
+                    // MC: conv kernel_len/offset are PER-CONFIG, overloaded into the
+                    // S1 low bits. rows_per_neuron is unused in conv mode, so [15:0]
+                    // is free to share -- this lets ONE scheduler program mix layers
+                    // with different kernel geometry (con1=1, con2-5=5, con6=30). The
+                    // stride is already per-config in S2[12:10]; this completes it.
+                    sp_x_kernel_len_r    <= sys_data_i[SP_X_KERNEL_SZ-1:0];                    // S1[4:0]
+                    sp_x_kernel_offset_r <= sys_data_i[SP_X_KERNEL_SZ +: SP_X_KERNEL_OFF_SZ];  // S1[7:5]
                 end
                 8'h38: begin                                       // S2
                     sp_total_timesteps_r <= sys_data_i[SP_TIMESTEP_SZ-1:0];
@@ -362,9 +369,8 @@ module acc_fmiSnnMC_processor # (
                 end
                 // ---- boot-only conv/sparse params (out-of-packed-window, >=0x5C) ----
                 8'h5C: sp_weight_idx_sz_r      <= sys_data_i[SP_WEIGHT_IDX_SZ-1:0];
-                8'h74: sp_x_kernel_len_r       <= sys_data_i[SP_X_KERNEL_SZ-1:0];
-                // 0x7C x_kernel_step is now PER-CONFIG in S2[12:10] (see 8'h38 above)
-                8'h84: sp_x_kernel_offset_r    <= sys_data_i[SP_X_KERNEL_OFF_SZ-1:0];
+                // x_kernel_len (was 0x74) + x_kernel_offset (was 0x84) are now
+                // PER-CONFIG in the S1 low bits (see 8'h34); x_kernel_step in S2[12:10].
                 8'h8C: sp_index_sz_r           <= sys_data_i[SP_WEIGHT_SLICE_SZ-1:0];
                 8'h90: sp_tuple_sz_r           <= sys_data_i[SP_WEIGHT_SLICE_SZ-1:0];
                 8'h94: sp_sparse_count_r       <= sys_data_i[`PIN_BITS-1:0];

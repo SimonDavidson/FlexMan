@@ -5,7 +5,7 @@
 
 // =============================================================================
 // tb_fmi_top_c2b.v — Stage C2b integration testbench for fmi_top.v
-// Authors: Simon Davidson & Claude   Created: 2026-06-27   Last modified: 2026-06-28
+// Authors: Simon Davidson & Claude   Created: 2026-06-27   Last modified: 2026-06-29
 //
 // group4 con2 feed-forward + con3 recurrence, TWO dispatches/timestep through the
 // scheduler hardware loop (see git history for the full datapath rationale):
@@ -288,7 +288,7 @@ task load_config;
         cfg_mem[ 6] = 32'd0;           cfg_mem[ 7] = 32'd0;           cfg_mem[ 8] = 32'd0;
         cfg_mem[ 9] = 32'd0;           cfg_mem[10] = 32'd0;           cfg_mem[11] = 32'd0;
         cfg_mem[12] = {16'd60, 16'd120};   // S0: out_x=60 | in_x=120
-        cfg_mem[13] = {16'd1919, 16'd0};   // S1: last_neuron=1919 | rows_per_neuron=0
+        cfg_mem[13] = {16'd1919, 16'h0045};   // S1: last_neuron=1919 | kernel=5,offset=2 (0x45)
         cfg_mem[14] = 32'h2010_0801;       // S2: cout=32 | cin=16 | stride=2[12:10] | tt=1
         cfg_mem[15] = 32'h2555_0041;       // M0: conv, plain LIF, skip_neuron=1
         // ---- cfg_id 1 : con3 recurrent (dispatch B) ----
@@ -297,19 +297,19 @@ task load_config;
         cfg_mem[22] = 32'd0;           cfg_mem[23] = 32'd0;           cfg_mem[24] = 32'd0;
         cfg_mem[25] = 32'd0;           cfg_mem[26] = 32'd0;           cfg_mem[27] = 32'd0;
         cfg_mem[28] = {16'd60, 16'd60};    // S0: out_x=60 | in_x=60
-        cfg_mem[29] = {16'd1919, 16'd0};   // S1: last_neuron=1919 | rows_per_neuron=0
+        cfg_mem[29] = {16'd1919, 16'h0045};   // S1: last_neuron=1919 | kernel=5,offset=2 (0x45)
         cfg_mem[30] = 32'h2020_0401;       // S2: cout=32 | cin=32 | stride=1[12:10] | tt=1
         cfg_mem[31] = 32'h2555_0040;       // M0: conv, plain LIF, skip_neuron=0
         for (i = 0; i < 8; i = i + 1) bba_mem[i] = 32'd0;
     end
 endtask
 
-// Boot regs: weight_idx_sz=13, kernel_len=5, offset=2 (stride is per-config in S2).
+// Boot regs: weight_idx_sz=13 (kernel_len=5/offset=2 are per-config in S1[7:0]; stride in S2).
 task write_boot_regs;
     begin
         axi_write(FMI_CFG_BASE | 32'h5C, 32'd13);  // weight_idx_sz
-        axi_write(FMI_CFG_BASE | 32'h74, 32'd5);   // x_kernel_len
-        axi_write(FMI_CFG_BASE | 32'h84, 32'd2);   // x_kernel_offset (pad)
+        // x_kernel_len=5 / offset=2 are now per-config in S1[7:0] (=0x45) for both
+        // con2 (cfg_mem[13]) and con3 (cfg_mem[29]); x_kernel_step in S2[12:10]
     end
 endtask
 

@@ -606,9 +606,7 @@ module tb_acc_fmiSnnMC_processor;
         cfg_write(32'hFFFF_003C, 32'h0553_0100);
         // boot-only conv/sparse params (out-of-window offsets unchanged)
         cfg_write(32'hFFFF_005C, 32'd5);    // weight_idx_sz      = 5
-        cfg_write(32'hFFFF_0074, 32'd1);    // x_kernel_len       = 1
-        // x_kernel_step now per-config in S2[12:10] (stride=1)
-        cfg_write(32'hFFFF_0084, 32'd0);    // x_kernel_offset    = 0
+        // x_kernel_len/offset are now PER-CONFIG in S1[7:0]; x_kernel_step in S2[12:10]
 
         $display("=== tb_acc_fmiSnnMC_processor (FMI variant) ===");
 
@@ -1104,8 +1102,9 @@ module tb_acc_fmiSnnMC_processor;
 
         // S0: in_x_len=4 | out_x_len=4
         cfg_write(32'hFFFF_0030, 32'h0004_0004);
-        // S1: last_neuron_idx=7 | rows_per_neuron=12
-        cfg_write(32'hFFFF_0034, 32'h0007_000C);
+        // S1: last_neuron_idx=7 | rows(unused in conv) -> low byte = kernel geometry
+        //     kernel_len=3, offset=1 -> low byte (1<<5)|3 = 0x23
+        cfg_write(32'hFFFF_0034, 32'h0007_0023);
         // S2: total_timesteps=1
         cfg_write(32'hFFFF_0038, 32'h0202_0401);   // +stride=1[12:10]
         // M0: skip_neuron=1, np_mode=0, weights_per_word=1, bin_point=0,
@@ -1117,9 +1116,7 @@ module tb_acc_fmiSnnMC_processor;
         cfg_write(32'hFFFF_003C, 32'h2555_0041);
         // Boot regs (conv params):
         cfg_write(32'hFFFF_005C, 32'd4);   // weight_idx_sz = 4 (Cout*Cin*K=12 fits in 4)
-        cfg_write(32'hFFFF_0074, 32'd3);   // x_kernel_len = 3
-        // x_kernel_step now per-config in S2[12:10] (stride=1)
-        cfg_write(32'hFFFF_0084, 32'd1);   // x_kernel_offset = 1 (pad=1)
+        // x_kernel_len=3 / offset=1 now in S1[7:0] (=0x23); x_kernel_step in S2[12:10]
 
         @(negedge clk); start_new_block_i = 1'b1;
         @(negedge clk); start_new_block_i = 1'b0;
@@ -1205,13 +1202,11 @@ module tb_acc_fmiSnnMC_processor;
         cfg_write(32'hFFFF_0018, 32'd0);    // dcy_syn_base
         cfg_write(32'hFFFF_001C, 32'd0);    // dcy_mem_base
         cfg_write(32'hFFFF_0030, {16'd60, 16'd120});   // S0: out_x=60 | in_x=120
-        cfg_write(32'hFFFF_0034, {16'd1919, 16'd0});   // S1: last_neuron=1919 | rows(dont-care)
+        cfg_write(32'hFFFF_0034, {16'd1919, 16'h0045});   // S1: last_neuron=1919 | kernel=5,offset=2 (0x45)
         cfg_write(32'hFFFF_0038, 32'h2010_0801);       // S2: total_timesteps=1 | stride=2[12:10]
         cfg_write(32'hFFFF_003C, 32'h2555_0040);       // M0: conv, plain LIF, 32b, skip=0
         cfg_write(32'hFFFF_005C, 32'd12);   // weight_idx_sz (Cout*Cin*K=2560 < 2^12)
-        cfg_write(32'hFFFF_0074, 32'd5);    // x_kernel_len  = 5
-        // x_kernel_step now per-config in S2[12:10] (stride=2)
-        cfg_write(32'hFFFF_0084, 32'd2);    // x_kernel_offset = 2 (pad)
+        // x_kernel_len=5 / offset=2 now in S1[7:0] (=0x45); x_kernel_step in S2[12:10]
 
         @(negedge clk); start_new_block_i = 1'b1;
         @(negedge clk); start_new_block_i = 1'b0;
@@ -1272,13 +1267,11 @@ module tb_acc_fmiSnnMC_processor;
         // Bases / sizes / mode identical to T9B (config persists, but re-write
         // bases that other tests may have moved is unnecessary — all still 0).
         cfg_write(32'hFFFF_0030, {16'd60, 16'd120});
-        cfg_write(32'hFFFF_0034, {16'd1919, 16'd0});
+        cfg_write(32'hFFFF_0034, {16'd1919, 16'h0045});   // S1: kernel=5,offset=2 (0x45)
         cfg_write(32'hFFFF_0038, 32'h2010_0801);       // S2: total_timesteps=1 | stride=2[12:10]
         cfg_write(32'hFFFF_003C, 32'h2555_0040);
         cfg_write(32'hFFFF_005C, 32'd12);
-        cfg_write(32'hFFFF_0074, 32'd5);
-        // x_kernel_step now per-config in S2[12:10] (stride=2)
-        cfg_write(32'hFFFF_0084, 32'd2);
+        // x_kernel_len=5 / offset=2 now in S1[7:0] (=0x45); x_kernel_step in S2[12:10]
 
         @(negedge clk); start_new_block_i = 1'b1;
         @(negedge clk); start_new_block_i = 1'b0;
@@ -1364,12 +1357,11 @@ module tb_acc_fmiSnnMC_processor;
         cfg_write(32'hFFFF_0028, 32'd0);    // dcy_ada_base
         cfg_write(32'hFFFF_002C, 32'd0);    // scl_ada_base
         cfg_write(32'hFFFF_0030, {16'd120, 16'd120}); // S0: out_x=120 | in_x=120
-        cfg_write(32'hFFFF_0034, {16'd1919, 16'd0});  // S1: last_neuron=1919 | rows=0
+        cfg_write(32'hFFFF_0034, {16'd1919, 16'h0001});  // S1: last_neuron=1919 | kernel=1,offset=0 (0x01)
         cfg_write(32'hFFFF_0038, 32'h1002_0401);      // S2: tt=1 | stride=1 | cin=2 | cout=16
         cfg_write(32'hFFFF_003C, 32'hE555_0040);      // M0: conv, ws=5, has_ada=1, real_mac=1
         cfg_write(32'hFFFF_005C, 32'd6);    // weight_idx_sz (cout*cin*k=32 < 2^6)
-        cfg_write(32'hFFFF_0074, 32'd1);    // x_kernel_len   = 1
-        cfg_write(32'hFFFF_0084, 32'd0);    // x_kernel_offset = 0 (1x1, no pad)
+        // x_kernel_len=1 / offset=0 now in S1[7:0] (=0x01); x_kernel_step in S2[12:10]
         cfg_write(32'hFFFF_0098, 32'd14);   // mac_shift = K_MEM
 
         for (c1_t = 0; c1_t < T_C1; c1_t = c1_t + 1) begin
@@ -1431,12 +1423,11 @@ module tb_acc_fmiSnnMC_processor;
         cfg_write(32'hFFFF_0004, 32'd0);    // weight_base
         cfg_write(32'hFFFF_0008, 32'd0);    // syn_curr_base
         cfg_write(32'hFFFF_0030, {16'd1, 16'd30});    // S0: out_x=1 | in_x=30
-        cfg_write(32'hFFFF_0034, {16'd0, 16'd0});     // S1: last_neuron=0 | rows_per_neuron=0
+        cfg_write(32'hFFFF_0034, {16'd0, 16'h001E});  // S1: last_neuron=0 | kernel=30,offset=0 (0x1E)
         cfg_write(32'hFFFF_0038, 32'h0140_0401);      // S2: cout=1 | cin=64 | stride=1 | tt=1
         cfg_write(32'hFFFF_003C, 32'h2555_0041);      // M0: conv, 32b weights, skip_neuron=1
         cfg_write(32'hFFFF_005C, 32'd11);   // weight_idx_sz (cout*cin*K = 1*64*30 = 1920 < 2^11)
-        cfg_write(32'hFFFF_0074, 32'd30);   // x_kernel_len = 30 (full input width -> one output)
-        cfg_write(32'hFFFF_0084, 32'd0);    // x_kernel_offset = 0
+        // x_kernel_len=30 / offset=0 now in S1[7:0] (=0x1E); x_kernel_step in S2[12:10]
 
         c6_mism = 0;
         for (c6_t = 12; c6_t < 24; c6_t = c6_t + 1) begin   // spike5 fires from ~t=13
@@ -1495,12 +1486,11 @@ module tb_acc_fmiSnnMC_processor;
         cfg_write(32'hFFFF_0018, 32'd0);    // dcy_syn_base (=0 -> syn fresh)
         cfg_write(32'hFFFF_001C, 32'd0);    // dcy_mem_base (g6_dmem)
         cfg_write(32'hFFFF_0030, {16'd1, 16'd30});    // S0: out_x=1 | in_x=30
-        cfg_write(32'hFFFF_0034, {16'd0, 16'd0});     // S1: last_neuron=0 | rows=0
+        cfg_write(32'hFFFF_0034, {16'd0, 16'h001E});  // S1: last_neuron=0 | kernel=30,offset=0 (0x1E)
         cfg_write(32'hFFFF_0038, 32'h0140_0401);      // S2: cout=1 | cin=64 | stride=1 | tt=1
         cfg_write(32'hFFFF_003C, 32'h2555_0048);      // M0: conv, readout neuron (np_mode[1]), skip=0
         cfg_write(32'hFFFF_005C, 32'd11);   // weight_idx_sz
-        cfg_write(32'hFFFF_0074, 32'd30);   // x_kernel_len = 30 (full input width)
-        cfg_write(32'hFFFF_0084, 32'd0);    // x_kernel_offset = 0
+        // x_kernel_len=30 / offset=0 now in S1[7:0] (=0x1E); x_kernel_step in S2[12:10]
 
         c6_mism = 0;
         for (c6_t = 0; c6_t < T_C6; c6_t = c6_t + 1) begin

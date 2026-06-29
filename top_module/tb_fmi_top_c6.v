@@ -289,7 +289,7 @@ task load_config;
         cfg_mem[10] = 32'd0;           // 0x28 dcy_ada_base
         cfg_mem[11] = 32'd0;           // 0x2C scl_ada_base
         cfg_mem[12] = {16'd1,  16'd30};    // 0x30 S0: out_x=1 | in_x=30
-        cfg_mem[13] = {16'd0,  16'd0};     // 0x34 S1: last_neuron=0 | rows_per_neuron=0
+        cfg_mem[13] = {16'd0,  16'h001E};  // 0x34 S1: last_neuron=0 | kernel=30,offset=0 (0x1E)
         cfg_mem[14] = 32'h0140_0401;       // 0x38 S2: cout=1 | cin=64 | stride=1[12:10] | tt=1
         cfg_mem[15] = 32'h2555_0048;       // 0x3C M0: conv, readout neuron (np_mode[1]), skip=0
         for (i = 0; i < 8; i = i + 1) bba_mem[i] = 32'd0;
@@ -300,8 +300,7 @@ endtask
 task write_boot_regs;
     begin
         axi_write(FMI_CFG_BASE | 32'h5C, 32'd11);  // weight_idx_sz (cout*cin*k=1*64*30=1920 < 2^11)
-        axi_write(FMI_CFG_BASE | 32'h74, 32'd30);  // x_kernel_len   = 30 (full input width)
-        axi_write(FMI_CFG_BASE | 32'h84, 32'd0);   // x_kernel_offset = 0 (no pad)
+        // x_kernel_len=30 / offset=0 are now per-config in S1[7:0] (=0x1E) — see cfg_mem[13]
         // x_kernel_step (stride) is per-config in S2[12:10] = 1 (see cfg_mem[14])
     end
 endtask

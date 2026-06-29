@@ -287,7 +287,7 @@ task load_config;
         cfg_mem[10] = 32'd0;           // 0x28 dcy_ada_base
         cfg_mem[11] = 32'd0;           // 0x2C scl_ada_base
         cfg_mem[12] = {16'd120, 16'd120};  // 0x30 S0: out_x=120 | in_x=120
-        cfg_mem[13] = {16'd1919, 16'd0};   // 0x34 S1: last_neuron=1919 | rows_per_neuron=0
+        cfg_mem[13] = {16'd1919, 16'h0001};   // 0x34 S1: last_neuron=1919 | kernel=1,offset=0 (0x01)
         cfg_mem[14] = 32'h1002_0401;       // 0x38 S2: cout=16 | cin=2 | stride=1[12:10] | tt=1
         cfg_mem[15] = 32'hE555_0040;       // 0x3C M0: conv, adaptive-LIF (has_ada=1), real_mac=1
         for (i = 0; i < 8; i = i + 1) bba_mem[i] = 32'd0;
@@ -298,8 +298,7 @@ endtask
 task write_boot_regs;
     begin
         axi_write(FMI_CFG_BASE | 32'h5C, 32'd6);   // weight_idx_sz (cout*cin*k=32 < 2^6)
-        axi_write(FMI_CFG_BASE | 32'h74, 32'd1);   // x_kernel_len   = 1
-        axi_write(FMI_CFG_BASE | 32'h84, 32'd0);   // x_kernel_offset = 0 (1x1, no pad)
+        // x_kernel_len=1 / offset=0 are now per-config in S1[7:0] (=0x01) — see cfg_mem[13]
         axi_write(FMI_CFG_BASE | 32'h98, 32'd14);  // mac_shift = K_MEM (real-MAC product shift)
         // x_kernel_step (stride) is per-config in S2[12:10] — see cfg_mem[14]
     end
