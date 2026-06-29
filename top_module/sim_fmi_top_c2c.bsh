@@ -1,0 +1,35 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude   Created: 2026-06-29   Last modified: 2026-06-29
+#
+# Simulate the FMI top-level Stage C2c testbench: the FULL recurrent network
+# g3->g4->g5->g6 end-to-end on fmi_top (six dispatches/timestep through the
+# scheduler hardware loop, with intra-timestep producer->consumer buffer handoff).
+# Run from this directory (top_module/). NO -access wrc: this tb uses only AXI
+# (POOL_RD readback) + a tb-side pool write port + a tb-side pot_mem read port +
+# $readmemh — zero hierarchical .mem[] backdoor refs — so the optimiser stays on
+# (much faster long runs). Committed at T_C2C=16 (fast); bump to 249 for the full
+# network pass (verified bit-exact, 0 failures).
+xrun -sv -timescale 10ps/1ps -top tb_fmi_top_c2c \
+  tb_fmi_top_c2c.v \
+  fmi_top.v \
+  ../shared/shared_pool.v \
+  ../scheduler/scheduler.v \
+  ../scheduler/sch_table.v \
+  ../scheduler/sch_entry.v \
+  ../scheduler/sch_buffer_state.v \
+  ../scheduler/buffer_state_entry.v \
+  ../scheduler/acc_hw_buffer_tracker.v \
+  ../scheduler/prog_cache.v \
+  ../config_manager/config_manager.v \
+  ../fmiSnnAccMC/acc_fmiSnnMC_processor.v \
+  ../fmiSnnAccMC/spike_processing.v \
+  ../fmiSnnAccMC/act_index_generator.v \
+  ../fmiSnnAccMC/weight_generator.v \
+  ../fmiSnnAccMC/syn_curr_update.v \
+  ../fmiSnnAccMC/update_state_for_neuron.v \
+  ../fmiSnnAccMC/neuron_processing.v \
+  ../shared/dataline_cache_with_xy.v \
+  ../shared/slice_and_align.v \
+  ../shared/packer.v
