@@ -491,11 +491,11 @@ module tb_acc_snn_stress;
 
     task rand_common;                     // spikes, bias, thresh, pot init
         begin
-            // ALL inputs spike: with no gaps, act_data_idx tracks the grid index,
-            // so the connectivity golden is exact.  Gapped/sparse activations are
-            // probed separately (gap_probe) because they expose a weight-row
-            // mis-indexing in the DUT (see verif/FINDINGS.md F9 -- pending Simon).
-            for (i=0; i<nin;  i=i+1) spike_in[i] = 1'b1;
+            // Random GAPPED spike pattern (~75% spike): exercises mid-grid
+            // non-spikes, the case that surfaced F9 (gapped-activation weight-row
+            // mis-indexing). Now a scored hard check across the whole matrix since
+            // the full-mode FC weight-cache phase fix (commits 0e6521d/8e672ac).
+            for (i=0; i<nin;  i=i+1) spike_in[i] = ($urandom_range(0,3) != 0);
             for (i=0; i<nout; i=i+1) begin
                 bias[i]  = sgnext($urandom_range(0,255), 8);
                 thr[i]   = sgnext($urandom_range(0,255), 8);
@@ -504,14 +504,13 @@ module tb_acc_snn_stress;
         end
     endtask
 
-    // Directed probe (reported as a NOTE, not scored): a non-spike input in the
-    // MIDDLE of the grid.  Architecturally each spiking input's weight row =
-    // its grid index, so spikes at grid {0,1,3} must read rows {0,1,3}.  The DUT
-    // compacts to {0,1,2} (the silent input does not advance act_data_idx), so a
-    // full layer with sparse activations accumulates the wrong weight rows.
+    // Directed F9 regression guard (SCORED): a non-spike input in the MIDDLE of
+    // the grid.  Architecturally each spiking input's weight row = its grid index,
+    // so spikes at grid {0,1,3} must read rows {0,1,3} (syn 70,73,76,79), NOT the
+    // compacted {0,1,2} (60,63,66,69) the DUT produced before the full-mode FC
+    // weight-cache phase fix (commits 0e6521d / 8e672ac).
     integer pj;
     task gap_probe;
-        reg ok;
         begin
             cmode=0; cwszb=8; cwszc=3'b011; cskip=1; cnpmode=0;
             cinx=2; ciny=2; coutx=4; couty=1; nin=4; nout=4; crpn=1;
@@ -523,16 +522,8 @@ module tb_acc_snn_stress;
                 wfull[2*32+pj]=30+pj; wfull[3*32+pj]=40+pj;
             end
             compute_golden; configure; setup_mem; stall_en=0; launch;
-            ok = 1'b1;
             for (pj=0;pj<nout;pj=pj+1)
-                if (syn_sram[SYN_BASE+pj] !== exp_syn[pj]) ok = 1'b0;
-            if (ok)
-                $display("NOTE F9: gapped-activation weight indexing OK (grid-indexed).");
-            else
-                $display("NOTE F9: gapped activations mis-index weight rows -- spikes at grid {0,1,3} read rows {0,1,2}. syn got %0d %0d %0d %0d, architecturally-correct %0d %0d %0d %0d. Suspected DUT bug -> Simon.",
-                         $signed(syn_sram[SYN_BASE+0]), $signed(syn_sram[SYN_BASE+1]),
-                         $signed(syn_sram[SYN_BASE+2]), $signed(syn_sram[SYN_BASE+3]),
-                         exp_syn[0], exp_syn[1], exp_syn[2], exp_syn[3]);
+                check_eq($signed(syn_sram[SYN_BASE+pj]), exp_syn[pj], "F9 gap_probe syn[grid-index]");
         end
     endtask
 
@@ -636,7 +627,7 @@ module tb_acc_snn_stress;
             scn_conv(8, 3'b011, 3,3,1,1,1,1, 3,3,3,3, 0, 1, "C_subfire");
         end
 
-        // Gapped/sparse-activation indexing probe (NOTE, not scored).
+        // F9 regression guard: directed mid-grid gap, scored (must read grid rows).
         gap_probe;
 
         `VERIF_EPILOGUE("tb_acc_snn_stress")

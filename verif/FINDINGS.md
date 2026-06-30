@@ -429,7 +429,7 @@ spike-flush race is masked by the shared read/write `mem_wait` stalling the prod
 
 ---
 
-## F9 — snnAcc full/sparse mode mis-indexes weight rows for GAPPED (sparse) activations (SUSPECTED, pending Simon)
+## F9 — snnAcc full mode mis-indexes weight rows for GAPPED (sparse) activations (CONFIRMED → FIXED)
 
 **Where:** `snnAcc/spike_processing.v` act-gating / `act_index_generator.v` →
 `weight_generator.v` `weight_row_base_addr = act_data_idx_i * rows_per_neuron_i +
@@ -476,12 +476,23 @@ end until `tb_acc_snn_stress`.
 without stalls (the stall-invariance oracle still passes, since the mis-indexing is
 deterministic).
 
-**Status:** SUSPECTED, **not auto-fixed** — flagged for Simon's sign-off (same protocol
-as F1/F8). `tb_acc_snn_stress` keeps its scored scenarios on all-spike activations (so
-the mode/size/skip/np_mode/stall coverage stays green) and reports the gap discrepancy as
-a soft `NOTE F9` via `gap_probe` (the F6-style "bug vs intent → Simon" pattern), so the
-regression is green while the finding is on record. Once resolved, switch `rand_common`
-back to random (gapped) spike patterns to make it a scored hard check.
+**Root cause (confirmed):** `weight_generator.v` `weight_index_valid_full` was missing
+the `& act_data_valid_i` gate that the sparse/conv arms already carried. Full mode
+free-ran the weight cache on non-spiking inputs; with a per-input-varying weight base
+(1-weight-per-word FC) the slice index advanced past an in-flight fetch and the cache
+served the PREVIOUS input's weight — an off-by-one-low that flips phase at each act-word
+boundary, presenting as the spike-rank-not-grid-index compaction this test observed.
+
+**Status:** FIXED 2026-06-30 (parallel session). `0e6521d` fixed `fmiSnnAccMC` (verified
+by its T13 128/128); `8e672ac` propagated the `& act_data_valid_i` gate to the three
+byte-identical `weight_generator.v` copies (`snnAcc`/`ipSnnAcc`/`fmiSnnAcc`); `annAcc`
+already carried the gate — so all five variants are fixed. **Re-verified here** by
+`snnAcc/tb_acc_snn_stress.v`: `rand_common` flipped back to random GAPPED spike patterns
+(now a scored hard check across full/sparse/conv × all weight sizes × skip/np_mode ×
+stalls) and the directed `gap_probe` (mid-grid non-spike) converted from a soft NOTE to a
+scored `check_eq` — spikes at grid {0,1,3} now read rows {0,1,3} (syn 70,73,76,79).
+**1414 checks, 0 failures.** The fix commit itself cites this testbench
+(`tbAccSNNStress 1410/1410`) as part of its verification.
 
 ---
 
