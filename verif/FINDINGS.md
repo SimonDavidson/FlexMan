@@ -3,7 +3,7 @@
 Confirmed issues surfaced by the aggressive test suite (`verif/` library + per-module
 testbenches). Each entry: what, where, evidence, impact, status.
 
-Authors: Simon Davidson & Claude · Created 2026-06-07 · Last modified 2026-06-23
+Authors: Simon Davidson & Claude · Created 2026-06-07 · Last modified 2026-06-30
 
 ---
 
@@ -426,6 +426,62 @@ under a stalled writeback"); note a 32-bit acc-level test is **not** a reliable 
 discriminator (the 32-bit re-OR is idempotent with a frozen counter, and the narrow
 spike-flush race is masked by the shared read/write `mem_wait` stalling the producer) —
 `tb_packer_cadence` is the canonical, reliable F8 regression.
+
+---
+
+## F9 — snnAcc full/sparse mode mis-indexes weight rows for GAPPED (sparse) activations (SUSPECTED, pending Simon)
+
+**Where:** `snnAcc/spike_processing.v` act-gating / `act_index_generator.v` →
+`weight_generator.v` `weight_row_base_addr = act_data_idx_i * rows_per_neuron_i +
+weight_base`. Surfaced 2026-06-30 by the new `snnAcc/tb_acc_snn_stress.v` full-chip
+testbench (also applies to the `ipSnnAcc`/`annAcc`/`fmi*` variants, which share the
+spike-processing front-end — not yet re-checked there).
+
+**What:** When a non-spiking input sits in the MIDDLE of the input grid, the
+weight-row index `act_data_idx` presented to `weight_generator` does **not** skip the
+gap. Each spiking input is given a row equal to its **spike rank**, not its grid index.
+So a full-connectivity layer driven by a sparse spike vector (the normal SNN case)
+accumulates the **wrong weight rows**.
+
+**Evidence (directed `gap_probe` in `tb_acc_snn_stress.v`):** 2×2 input grid, input 2
+SILENT, inputs {0,1,3} spiking, distinct known weights `W[i][j]=10*(i+1)+j`, skip mode
+(syn = raw accumulation, no decay):
+```
+spikes at grid {0,1,3}  ->  architecturally-correct rows {0,1,3}
+                            syn = 70 73 76 79   (W[0]+W[1]+W[3])
+DUT reads compacted rows {0,1,2}
+                            syn = 60 63 66 69   (W[0]+W[1]+W[2])
+```
+A `weight_mem_rd_o` trace (compile `tb_acc_snn_stress.v` with `-define GAP_PROBE_DBG`)
+shows `act_data_idx = 0,1,2` / `weight_row_base = 8,9,10` for the three spikes —
+i.e. the silent input 2 did not advance the row index, and the grid-3 spike inherited
+row 2.
+
+**Why it's almost certainly a bug, not intent:** weights are STATIC and indexed by
+input-neuron (grid) position; the firing set is a RUNTIME property. A weight row cannot
+be addressed by dynamic spike rank. The architecture formula
+`weight_row_base = act_data_idx * rows_per_neuron + base` is correct **iff**
+`act_data_idx` is the grid index. (Likely also affects conv-mode projection, which uses
+`act_data_x/y`, and sparse-mode tuple rows, which use `act_data_idx` — both untested
+with gaps.)
+
+**Why untested before:** `tb_spike_processing` only drives **all-spike or no-spike**
+(its uniform-weight golden is mapping-independent and never gaps the stream with distinct
+weights); `tb_acc_snn_processor` only gaps the **last** input (Test 4, a termination
+regression). A non-spike in the middle with distinct weights was never exercised end to
+end until `tb_acc_snn_stress`.
+
+**Impact:** Correctness of every full/sparse layer fed a genuinely sparse spike vector
+(most SNN layers). Not a flow-control/alignment bug — it reproduces identically with and
+without stalls (the stall-invariance oracle still passes, since the mis-indexing is
+deterministic).
+
+**Status:** SUSPECTED, **not auto-fixed** — flagged for Simon's sign-off (same protocol
+as F1/F8). `tb_acc_snn_stress` keeps its scored scenarios on all-spike activations (so
+the mode/size/skip/np_mode/stall coverage stays green) and reports the gap discrepancy as
+a soft `NOTE F9` via `gap_probe` (the F6-style "bug vs intent → Simon" pattern), so the
+regression is green while the finding is on record. Once resolved, switch `rand_common`
+back to random (gapped) spike patterns to make it a scored hard check.
 
 ---
 

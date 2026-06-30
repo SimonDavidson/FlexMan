@@ -16,10 +16,18 @@
 // This stresses the integration (spike gating, weight sign-extension, RMW
 // accumulation, the finish handshake, back-pressure) across random spike
 // patterns, random (incl. negative) weights, random syn_curr initial values,
-// several grid sizes and weight widths.  Per-(i,j) weight ADDRESS routing is the
-// weight_generator's responsibility and is covered by its own unit test.
+// several grid sizes and ALL weight widths (1/2/4/8/16/32-bit).  Per-(i,j)
+// weight ADDRESS routing is the weight_generator's responsibility and is covered
+// by its own unit test.
 //
-// Plus a convolution-mode smoke test (runs to completion, writes syn_curr).
+// Plus REAL sparse-mode and convolution-mode trials, each checked against a
+// software golden built consistent-by-construction from the SAME idx/weight
+// arrays that fill weight memory (so only the DUT's routing/accumulation is under
+// test), and run under random back-pressure:
+//   * sparse: each input neuron's (index,weight) tuples accumulate into
+//     syn[index]; sweeps the index_sz x weight_sz tuple-unpack matrix.
+//   * conv:   each input projects through a 2-D kernel into syn[out_y*outx+out_x],
+//     with out-of-bounds projections skipped (border/corner coverage).
 // =============================================================================
 `timescale 1ns/1ps
 `include "../shared/constants.v"
@@ -127,6 +135,8 @@ module tb_spike_processing;
     reg signed [31:0] gw, init_j, exp_j;
     reg [31:0] wmask, spike_mask, wword;
     reg signed [31:0] syn_sram_init [0:63];   // init copy (RMW overwrites syn_sram)
+    reg signed [31:0] sp_exp [0:63];          // golden syn accumulator (sparse/conv)
+    reg signed [31:0] ckw   [0:63];           // conv kernel weights (golden, signed)
 
     // One full-mode trial: configure grid + weight width, set random spikes /
     // weight / init, run, check every output's accumulation against the golden.
@@ -164,9 +174,17 @@ module tb_spike_processing;
             `SRAM_CLEAR(act_sram) `SRAM_CLEAR(weight_sram) `SRAM_CLEAR(syn_sram)
             if (spikes_on)
                 for (sram_i=0; sram_i<256; sram_i=sram_i+1) act_sram[sram_i] = 32'hFFFFFFFF;
-            // uniform weight, packed per width across every weight word
-            wword = (wbits==16) ? {gw[15:0], gw[15:0]}
-                                : {gw[7:0], gw[7:0], gw[7:0], gw[7:0]};
+            // uniform weight, replicated at the element width across every
+            // weight word (so every slice the cache produces equals gw).
+            case (wbits)
+                1:  wword = {32{gw[0]}};
+                2:  wword = {16{gw[1:0]}};
+                4:  wword = {8{gw[3:0]}};
+                8:  wword = {4{gw[7:0]}};
+                16: wword = {2{gw[15:0]}};
+                32: wword = gw;
+                default: wword = {4{gw[7:0]}};
+            endcase
             for (sram_i=0; sram_i<256; sram_i=sram_i+1) weight_sram[sram_i] = wword;
             // random syn_curr init per output (kept for the golden)
             for (j=0;j<nout;j=j+1) begin
@@ -218,6 +236,147 @@ module tb_spike_processing;
         end
     endtask
 
+    // Pack a `wb`-bit value as element k of a contiguous bitstream starting at
+    // weight word `base` (mirrors the cache's element-t-at-bit-(wb*t) layout;
+    // wb divides 32 so no field crosses a word boundary).
+    task pack_stream;
+        input integer base, k, wb;
+        input [31:0]  val;
+        integer p, wd, bt;
+        begin
+            p = wb*k; wd = p/32; bt = p%32;
+            weight_sram[base+wd] = weight_sram[base+wd] | ((val & ((1<<wb)-1)) << bt);
+        end
+    endtask
+
+    // -------- Sparse-mode trial -----------------------------------------------
+    // Each input neuron i carries `scount` (index,weight) tuples packed into ONE
+    // 32-bit weight word (scount*tsz_b <= 32).  rows_per_neuron=1 -> input i's
+    // word lives at weight_base+i.  All inputs spike, so every tuple accumulates.
+    // Golden (built from the SAME idx/weight values that fill memory):
+    //   syn[idx] += signext(weight)   over every tuple of every input.
+    task run_sparse_trial;
+        input integer nin_x, nin_y, nout;
+        input [2:0]   isz_c, wsz_c, tsz_c;     // slice-size codes
+        input integer isz_b, wsz_b, tsz_b;     // element bit widths
+        input integer scount;
+        input         bp;
+        input [255:0] tag;
+        integer nin, ii, tt, oj, idv;
+        reg [31:0]    wgv, word;
+        reg signed [31:0] sgn_w;
+        begin
+            nin = nin_x*nin_y;
+            reset=1; repeat(2) @(posedge clk); #1; reset=0; @(posedge clk); #1;
+            weight_mode=2'b01;
+            in_x_len=nin_x; in_y_len=nin_y; out_x_len=nout; out_y_len=1;
+            x_kernel_len=1; y_kernel_len=1; x_kernel_offset=0; y_kernel_offset=0;
+            x_kernel_step=1; y_kernel_step=1;
+            index_sz=isz_c; tuple_sz=tsz_c; sparse_count=scount[`PIN_BITS-1:0];
+            weight_sz=wsz_c; bin_point_syn_curr=0;
+            weights_per_word=4; rows_per_neuron=1; weight_idx_sz=5'd4;
+            act_base_addr=0; weight_base_addr=0; syn_curr_base_addr=SYN_BASE;
+
+            `SRAM_CLEAR(act_sram) `SRAM_CLEAR(weight_sram) `SRAM_CLEAR(syn_sram)
+            for (sram_i=0; sram_i<256; sram_i=sram_i+1) act_sram[sram_i]=32'hFFFFFFFF;
+
+            for (oj=0; oj<nout; oj=oj+1) begin
+                init_j = $urandom_range(0,1000)-500;
+                syn_sram[SYN_BASE+oj] = init_j;
+                sp_exp[oj]            = init_j;
+            end
+
+            for (ii=0; ii<nin; ii=ii+1) begin
+                word = 32'b0;
+                for (tt=0; tt<scount; tt=tt+1) begin
+                    idv = $urandom_range(0, nout-1);
+                    wgv = $urandom_range(0, (1<<wsz_b)-1);
+                    // index in the top isz_b bits of the tuple field, weight next.
+                    word = word | ( ( (idv << (tsz_b-isz_b)) |
+                                      ((wgv & ((1<<wsz_b)-1)) << (tsz_b-isz_b-wsz_b)) )
+                                    << (tsz_b*tt) );
+                    sgn_w = $signed(wgv << (32-wsz_b)) >>> (32-wsz_b);
+                    sp_exp[idv] = sp_exp[idv] + sgn_w;
+                end
+                weight_sram[ii] = word;
+            end
+
+            target_acc=0; bp_en=bp;
+            `VT_PULSE(start_new_block)
+            `VT_WAIT_FINISH(spike_proc_finished, 12000)
+            repeat (8) @(posedge clk); #1; bp_en=0;
+
+            for (oj=0; oj<nout; oj=oj+1)
+                check_eq($signed(syn_sram[SYN_BASE+oj]), sp_exp[oj], {tag, " syn[idx]"});
+            check_eq($signed(syn_sram[SYN_BASE+nout]), 32'sd0, {tag, " bounds"});
+        end
+    endtask
+
+    // -------- Convolution-mode trial ------------------------------------------
+    // Each input at (ax,ay) projects through the kernel to
+    //   out_x = ax*kxs + kx - kxo,  out_y = ay*kys + ky - kyo,
+    // out-of-bounds projections skipped.  Kernel weights are one shared block at
+    // weight_base, element k=ky*kxl+kx at stream bit wsz_b*k.  Golden accumulates
+    // ckw[ky*kxl+kx] into syn[out_y*outx+out_x] for every in-bounds projection.
+    task run_conv_trial;
+        input integer nin_x, nin_y, outx, outy;
+        input integer kxl, kyl, kxs, kys, kxo, kyo;
+        input [2:0]   wsz_c;
+        input integer wsz_b;
+        input         bp;
+        input [255:0] tag;
+        integer nout, ax, ay, kx, ky, kk, ox, oy;
+        reg [31:0] kraw;
+        begin
+            nout = outx*outy;
+            reset=1; repeat(2) @(posedge clk); #1; reset=0; @(posedge clk); #1;
+            weight_mode=2'b10;
+            in_x_len=nin_x; in_y_len=nin_y; out_x_len=outx; out_y_len=outy;
+            x_kernel_len=kxl; y_kernel_len=kyl; x_kernel_step=kxs; y_kernel_step=kys;
+            x_kernel_offset=kxo; y_kernel_offset=kyo;
+            index_sz=0; tuple_sz=0; sparse_count=0;
+            weight_sz=wsz_c; bin_point_syn_curr=0;
+            weights_per_word=4; rows_per_neuron=1; weight_idx_sz=5'd4;
+            act_base_addr=0; weight_base_addr=0; syn_curr_base_addr=SYN_BASE;
+
+            `SRAM_CLEAR(act_sram) `SRAM_CLEAR(weight_sram) `SRAM_CLEAR(syn_sram)
+            for (sram_i=0; sram_i<256; sram_i=sram_i+1) act_sram[sram_i]=32'hFFFFFFFF;
+
+            for (kk=0; kk<nout; kk=kk+1) begin
+                init_j = $urandom_range(0,1000)-500;
+                syn_sram[SYN_BASE+kk] = init_j;
+                sp_exp[kk]            = init_j;
+            end
+
+            // kernel weights: element k=ky*kxl+kx at stream bit wsz_b*k
+            for (kk=0; kk<kxl*kyl; kk=kk+1) begin
+                kraw    = $urandom_range(0, (1<<wsz_b)-1);
+                ckw[kk] = $signed(kraw << (32-wsz_b)) >>> (32-wsz_b);
+                pack_stream(0, kk, wsz_b, kraw);
+            end
+
+            // golden: project every input through the kernel, skip OOB
+            for (ay=0; ay<nin_y; ay=ay+1)
+              for (ax=0; ax<nin_x; ax=ax+1)
+                for (ky=0; ky<kyl; ky=ky+1)
+                  for (kx=0; kx<kxl; kx=kx+1) begin
+                     ox = ax*kxs + kx - kxo;
+                     oy = ay*kys + ky - kyo;
+                     if (ox>=0 && ox<outx && oy>=0 && oy<outy)
+                        sp_exp[oy*outx+ox] = sp_exp[oy*outx+ox] + ckw[ky*kxl+kx];
+                  end
+
+            target_acc=0; bp_en=bp;
+            `VT_PULSE(start_new_block)
+            `VT_WAIT_FINISH(spike_proc_finished, 20000)
+            repeat (8) @(posedge clk); #1; bp_en=0;
+
+            for (kk=0; kk<nout; kk=kk+1)
+                check_eq($signed(syn_sram[SYN_BASE+kk]), sp_exp[kk], {tag, " syn"});
+            check_eq($signed(syn_sram[SYN_BASE+nout]), 32'sd0, {tag, " bounds"});
+        end
+    endtask
+
     integer trial;
     initial begin
         verif_errors=0; verif_checks=0;
@@ -239,6 +398,34 @@ module tb_spike_processing;
         // 2x2 -> 2x2, 16-bit weights (2 per word)
         for (trial=0; trial<20; trial=trial+1)
             run_trial(2,2, 2,2, 2,2, 3'b100, 16, 1'b1, (trial%4==3), "T16b");
+
+        // 1/2/4/32-bit weights (uniform-weight identity holds for every width)
+        for (trial=0; trial<12; trial=trial+1)
+            run_trial(2,2, 2,2, 8,1, 3'b000, 1,  1'b1, (trial%4==3), "T1b");
+        for (trial=0; trial<12; trial=trial+1)
+            run_trial(2,2, 2,2, 8,1, 3'b001, 2,  1'b1, (trial%4==3), "T2b");
+        for (trial=0; trial<12; trial=trial+1)
+            run_trial(2,2, 2,2, 8,1, 3'b010, 4,  1'b1, (trial%4==3), "T4b");
+        for (trial=0; trial<12; trial=trial+1)
+            run_trial(2,2, 2,2, 1,1, 3'b101, 32, 1'b1, (trial%4==3), "T32b");
+
+        // Sparse mode: sweep the index_sz x weight_sz tuple-unpack matrix.
+        for (trial=0; trial<10; trial=trial+1)
+            run_sparse_trial(2,2, 4, 3'b010,3'b010,3'b011, 4,4,8,  4, (trial%3==2), "SP_i4w4");
+        for (trial=0; trial<10; trial=trial+1)
+            run_sparse_trial(2,2, 4, 3'b011,3'b011,3'b100, 8,8,16, 2, (trial%3==2), "SP_i8w8");
+        for (trial=0; trial<10; trial=trial+1)
+            run_sparse_trial(2,2, 4, 3'b001,3'b001,3'b010, 2,2,4,  8, (trial%3==2), "SP_i2w2");
+        for (trial=0; trial<10; trial=trial+1)
+            run_sparse_trial(2,2, 8, 3'b010,3'b011,3'b100, 4,8,16, 2, (trial%3==2), "SP_i4w8");
+
+        // Conv mode: 1x1 identity, 3x3 (step1,offset1 -> border OOB), strided.
+        for (trial=0; trial<8; trial=trial+1)
+            run_conv_trial(3,3, 3,3, 1,1,1,1,0,0, 3'b011,8, (trial%2==1), "CV_1x1");
+        for (trial=0; trial<8; trial=trial+1)
+            run_conv_trial(3,3, 3,3, 3,3,1,1,1,1, 3'b011,8, (trial%2==1), "CV_3x3");
+        for (trial=0; trial<6; trial=trial+1)
+            run_conv_trial(4,1, 2,1, 3,1,2,1,1,0, 3'b011,8, (trial%2==1), "CV_strd2");
 
         // F6 probe: with ALL-ZERO activations, full mode still accumulates
         // (the spike value has no gating effect here). Reported as a NOTE
