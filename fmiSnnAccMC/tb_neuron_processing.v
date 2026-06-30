@@ -5,7 +5,7 @@
 //
 // Authors      : Simon Davidson & Claude
 // Created      : 2026-06-08
-// Last modified: 2026-06-29
+// Last modified: 2026-06-30
 //
 // FIRST aggressive unit test for fmiSnnAcc/neuron_processing.  Drives whole
 // layers of neurons through the neuron loop and checks every memory write-back
@@ -362,7 +362,7 @@ module tb_neuron_processing;
         // Plain: small/medium/large bin_point with both signs of in_syn.
         run_block(16, 1'b0, 1'b0, 1'b0,  1, "BP1 plain binpt=1");
         run_block(20, 1'b0, 1'b0, 1'b0,  4, "BP2 plain binpt=4");
-        run_block(33, 1'b0, 1'b0, 1'b0,  7, "BP3 plain binpt=7 (FMI target)");
+        run_block(33, 1'b0, 1'b0, 1'b0,  7, "BP3 plain binpt=7 (representative bp>0 shift)");
         run_block(20, 1'b0, 1'b0, 1'b1,  7, "BP4 plain binpt=7 + bp");
         run_block(16, 1'b0, 1'b1, 1'b0,  7, "BP5 plain binpt=7 clear_pot");
         // Adaptive with non-zero shift: ada_corr stays at neuron scale (no shift).
