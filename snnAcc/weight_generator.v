@@ -339,8 +339,13 @@ always @ (posedge clk)
 
 assign running_weight_pass_o = doing_weight_pass_r;
 
+// Gate the full-mode cache REQUEST on act_data_valid_i, like sparse/conv. Without it,
+// full mode free-ran the weight cache on non-spiking inputs; with a per-input-varying
+// base (1-weight-per-word FC) the index advanced past an in-flight fetch and the cache
+// served the previous input's weight (off-by-one-low, phase flips at each act-word
+// boundary). Fixed in fmiSnnAccMC first (verified tb T13 128/128); propagated 2026-06-30.
 assign weight_index_valid_full   = is_fullConn   & running_i & doing_weight_pass_r
-                                 & ~weight_pass_done_r;
+                                 & ~weight_pass_done_r & act_data_valid_i;
 assign weight_index_valid_conv   = is_convolution & running_i & doing_weight_pass_r
                                  & ~weight_pass_done_r & act_data_valid_i & ~oob_skip;
 assign weight_index_valid_sparse = is_sparseConn & running_i & doing_weight_pass_r
