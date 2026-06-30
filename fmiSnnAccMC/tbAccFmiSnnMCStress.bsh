@@ -1,0 +1,17 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors      : Simon Davidson & Claude
+# Created      : 2026-06-30
+# Last modified: 2026-06-30
+#
+# Focused F9 (gapped-activation weight indexing) confirmation for fmiSnnAccMC:
+# full-chip acc_fmiSnnMC_processor with sp_skip_neuron=1, single channel + legacy
+# 1-bit spike activations, all weight sizes x full/sparse x per-port stalls,
+# connectivity golden + stall-invariance on syn_curr.
+xrun -sv -timescale 1ns/1ps -access wrc -top tb_acc_fmiSnnMC_stress \
+  acc_fmiSnnMC_processor.v spike_processing.v act_index_generator.v \
+  weight_generator.v syn_curr_update.v update_state_for_neuron.v \
+  neuron_processing.v ../shared/dataline_cache_with_xy.v ../shared/slice_and_align.v \
+  ../shared/packer.v ../shared/sram_bram.v tb_acc_fmiSnnMC_stress.v \
+  ${COV_ARGS:-}

@@ -494,6 +494,15 @@ scored `check_eq` — spikes at grid {0,1,3} now read rows {0,1,3} (syn 70,73,76
 **1414 checks, 0 failures.** The fix commit itself cites this testbench
 (`tbAccSNNStress 1410/1410`) as part of its verification.
 
+**Per-variant end-to-end confirmation (2026-06-30):** focused F9 stress TBs ported
+to all four other variants (full-chip top, `sp_skip_neuron=1`, gapped activations +
+all weight sizes + full/sparse(/conv) + per-port stalls, connectivity golden +
+stall-invariance + a directed mid-grid-gap `gap_probe`). All green:
+`ipSnnAcc/tb_acc_ipsnn_stress` 340/0 (8-bit MAC), `annAcc/tb_acc_ann_stress` 340/0
+(8-bit MAC), `fmiSnnAcc/tb_acc_fmiSnn_stress` 280/0 (1-bit spike, 1-D),
+`fmiSnnAccMC/tb_acc_fmiSnnMC_stress` 220/0 (1-chan legacy spike). So the gate fix
+is confirmed end-to-end in every variant, not just snnAcc.
+
 ---
 
 ## Notes (annAcc neuron_processing test, not bugs)
