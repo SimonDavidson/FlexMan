@@ -180,11 +180,15 @@ assign is_convolution = (weight_mode_i == 2'b10)? 1'b1 : 1'b0;
 // shared across all inputs (base independent of the input index). In full/sparse
 // mode the base is the input's flat index act_data_idx_i, width SP_ACT_DATA_IDX_SZ
 // (sized per app; default 5 spans only 32 inputs).
-// NOTE: full mode is otherwise BROKEN for 1-cycle-per-input layers -- its per-input
-// weight base plus the 1-cycle weight-cache latency mistime the fetch (off-by-one
-// weights when each weight is its own word). Latent across all SNN variants (shared
-// weight_generator + shared weight cache); deferred. con6's 1920->1 FC readout uses
-// CONV mode with a full-width kernel instead.
+// NOTE (was BROKEN, FIXED 2026-06-30 in this MC copy): for 1-weight-per-word FC the
+// per-input weight base changes every input, and the shared cache fetches in a 2-cycle
+// request->data cadence. Full mode used to free-run the cache REQUEST ungated, so the
+// index advanced past an in-flight read and the cache served the PREVIOUS input's weight
+// on the wrong request/data phase (off-by-one-low; phase flipped at each act-word
+// boundary). Fix: gate weight_index_valid_full on act_data_valid_i (below), exactly like
+// sparse/conv, so the only cache reads issued are for a HELD spiking input -> always a
+// matched fetch. con6's 1920->1 FC readout still uses CONV mode (full-width kernel); this
+// re-enables native full mode. Other SNN variants keep the latent bug (MC-only prototype).
 assign weight_row_base_addr = is_convolution ? weight_base_addr_i
                                              : (act_data_idx_i * rows_per_neuron_i
                                                               + weight_base_addr_i);
@@ -425,8 +429,12 @@ always @ (posedge clk)
 
 assign running_weight_pass_o = doing_weight_pass_r;
 
+// act_data_valid_i gate (2026-06-30): only request a weight while a real spiking input
+// is held at the head. Without it, full mode free-ran the cache on non-spiking inputs and
+// the per-input base desynced from the 2-cycle cache fetch -> off-by-one weight. See the
+// weight_row_base_addr note above and tb T13.
 assign weight_index_valid_full   = is_fullConn   & running_i & doing_weight_pass_r
-                                 & ~weight_pass_done_r;
+                                 & ~weight_pass_done_r & act_data_valid_i;
 assign weight_index_valid_conv   = is_convolution & running_i & doing_weight_pass_r
                                  & ~weight_pass_done_r & act_data_valid_i & ~oob_skip;
 assign weight_index_valid_sparse = is_sparseConn & running_i & doing_weight_pass_r

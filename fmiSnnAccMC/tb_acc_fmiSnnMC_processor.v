@@ -457,6 +457,15 @@ module tb_acc_fmiSnnMC_processor;
     reg [31:0] c6_pot6_all   [0:T_C6-1];      // LI readout pot6
     integer c6_t, c6_j, c6_mism;
 
+    // T13 (native full-mode FC single-spike sweep) — full-mode weight-cache
+    // lag bug repro/regression: weight_mode=00, weights_per_word=1 (miss per
+    // input). 128 crosses 4 act-word (32-input) boundaries, enough to exercise
+    // every request/data phase. NOTE: native full-mode FC inputs are capped at
+    // 256 here by X_INPUT_SZ=8 (the input x-coordinate); N>256 fails with got=0
+    // (inputs >=256 alias/drop) — a SEPARATE width limit, not the phase bug.
+    localparam integer FT_N = 128;
+    integer ft_k, ft_i, ft_fail, ft_word, ft_bit, ft_trace_lo, ft_trace_hi;
+
     task cfg_write;
         input [31:0] addr;
         input [31:0] data;
@@ -516,6 +525,36 @@ module tb_acc_fmiSnnMC_processor;
         end else begin
             if (spike_proc_finished_o) spike_proc_finished_latched <= 1'b1;
             if (acc_finished_o)        acc_finished_latched        <= 1'b1;
+        end
+    end
+
+    // ----------------------------------------------------------------
+    // T13 full-mode weight-fetch trace (default-off). When ft_trace_en is
+    // set (for ONE swept spike position) it prints the weight-generator /
+    // cache state every cycle of the weight pass, to expose the exact
+    // mistiming between act_data_idx, the per-input weight base, and the
+    // 1-cycle-latency cache fetch. Hierarchical reads (allowed by -access wrc).
+    // ----------------------------------------------------------------
+    reg ft_trace_en;
+    initial ft_trace_en = 1'b0;
+    always @(posedge clk) begin
+        if (ft_trace_en &&
+            (u_dut.u_spike_processing.weight_gen0.doing_weight_pass_r ||
+             u_dut.u_spike_processing.weight_gen0.weight_value_valid_o)) begin
+            $display("[%0t] FT k=%0d idx=%0d base=%0d memaddr=%0d memdata=0x%08h | cache vld=%b caddr=%0d cbase=%0d | wv=0x%08h vvld=%b vtkn=%b memrd=%b ivld=%b",
+                $time, ft_k,
+                u_dut.u_spike_processing.weight_gen0.act_data_idx_i,
+                u_dut.u_spike_processing.weight_gen0.weight_row_base_addr,
+                u_dut.u_spike_processing.weight_gen0.weight_mem_addr_o,
+                u_dut.u_spike_processing.weight_gen0.weight_mem_data_i,
+                u_dut.u_spike_processing.weight_gen0.weight_cache.cache_valid_r,
+                u_dut.u_spike_processing.weight_gen0.weight_cache.cache_addr_r,
+                u_dut.u_spike_processing.weight_gen0.weight_cache.cache_base_addr_r,
+                u_dut.u_spike_processing.weight_gen0.weight_value_o,
+                u_dut.u_spike_processing.weight_gen0.weight_value_valid_o,
+                u_dut.u_spike_processing.weight_gen0.weight_value_taken_i,
+                u_dut.u_spike_processing.weight_gen0.weight_mem_rd_o,
+                u_dut.u_spike_processing.weight_gen0.weight_index_valid_o);
         end
     end
 
@@ -1513,6 +1552,93 @@ module tb_acc_fmiSnnMC_processor;
             $display("  FAIL T12 con6 readout pot6: %0d mismatch(es)", c6_mism);
             errors = errors + 1;
         end
+
+        // ============================================================
+        // Test 13: NATIVE FULL-MODE FC single-spike sweep (bug repro).
+        //   weight_mode=00, in_x=FT_N, out_x=1, rows_per_neuron=1,
+        //   weights_per_word=1 -> 32-bit weights, ONE word per input, so a
+        //   cache MISS per input: the trigger for the deferred full-mode
+        //   weight-cache-lag bug. weight[i] = i+1, so a single spike at input
+        //   k must give syn_curr[0] = k+1; an off-by-one weight fetch shows as
+        //   got = k (or anything != k+1). skip_neuron=1 -> syn_curr holds the
+        //   raw SP weighted sum (no neuron-stage decay). Sweeping the single
+        //   spike across all k characterises whether the failure is a uniform
+        //   1-cycle lag or cache-state-dependent (memory: 664 failed, 903 ok).
+        // ============================================================
+        $display("Test 13: native full-mode FC single-spike sweep (full-mode weight-cache bug repro), N=%0d", FT_N);
+        wait_limit = 2000000;
+
+        // Distinct, nonzero weights: weight_mem[i] = i+1.
+        for (ft_i = 0; ft_i < FT_N; ft_i = ft_i + 1)
+            u_weight_mem.mem[ft_i] = ft_i + 1;
+
+        cfg_write(32'hFFFF_0000, 32'd0);                  // act_base
+        cfg_write(32'hFFFF_0004, 32'd0);                  // weight_base
+        cfg_write(32'hFFFF_0008, 32'd0);                  // syn_curr_base
+        cfg_write(32'hFFFF_0030, (32'd1 << 16) | FT_N);   // S0: out_x=1 | in_x=FT_N
+        cfg_write(32'hFFFF_0034, {16'd0, 16'd1});         // S1: last_neuron_idx=0 | rows_per_neuron=1
+        cfg_write(32'hFFFF_0038, 32'h0101_0401);          // S2: tt=1 | stride=1 (full mode ignores stride)
+        cfg_write(32'hFFFF_003C, 32'h0555_0041);          // M0: FULL, 32b weights, wpw=1, skip_neuron=1
+        cfg_write(32'hFFFF_005C, 32'd11);                 // weight_idx_sz
+
+        // Trace a small window of k (cycle-by-cycle) to expose the mistiming.
+        ft_trace_lo = 1;     // lo>hi => trace nothing (set e.g. 30..31 to dump)
+        ft_trace_hi = 0;
+        ft_fail     = 0;
+
+        for (ft_k = 0; ft_k < FT_N; ft_k = ft_k + 1) begin
+            for (ft_i = 0; ft_i < (FT_N + 31) / 32; ft_i = ft_i + 1)
+                u_act_mem.mem[ft_i] = 32'd0;
+            u_syn_curr_mem.mem[0] = 32'd0;
+            ft_word = ft_k >> 5;
+            ft_bit  = ft_k & 32'h1F;
+            u_act_mem.mem[ft_word] = (32'd1 << ft_bit);   // single spike at input ft_k
+
+            ft_trace_en = (ft_k >= ft_trace_lo) && (ft_k <= ft_trace_hi);
+            @(negedge clk); start_new_block_i = 1'b1;
+            @(negedge clk); start_new_block_i = 1'b0;
+            wait_pipeline(timed_out);
+            ft_trace_en = 1'b0;
+
+            if (timed_out) begin
+                $display("  T13 k=%0d: pipeline timeout", ft_k);
+                ft_fail = ft_fail + 1;
+            end else if (u_syn_curr_mem.mem[0] !== (ft_k + 1)) begin
+                $display("  T13 k=%0d MISMATCH got=%0d (0x%08h) exp=%0d",
+                         ft_k, u_syn_curr_mem.mem[0], u_syn_curr_mem.mem[0], ft_k + 1);
+                ft_fail = ft_fail + 1;
+            end
+        end
+
+        if (ft_fail == 0)
+            $display("  OK  T13 full-mode single-spike sweep: %0d/%0d positions correct", FT_N, FT_N);
+        else begin
+            $display("  FAIL T13 full-mode single-spike sweep: %0d/%0d positions WRONG", ft_fail, FT_N);
+            errors = errors + 1;
+        end
+
+        // ------------------------------------------------------------
+        // T13b: DENSE full-mode pass -- ALL FT_N inputs spiking at once.
+        //   Exercises the adjacent-spike handshake (back-to-back held
+        //   inputs, each a cache miss with weights_per_word=1), not just
+        //   isolated spikes. Expect syn_curr[0] = sum_{i=0}^{N-1}(i+1)
+        //   = N*(N+1)/2.
+        // ------------------------------------------------------------
+        $display("Test 13b: dense full-mode pass (all %0d inputs spiking)", FT_N);
+        for (ft_i = 0; ft_i < (FT_N + 31) / 32; ft_i = ft_i + 1)
+            u_act_mem.mem[ft_i] = 32'hFFFF_FFFF;        // every input spikes
+        u_syn_curr_mem.mem[0] = 32'd0;
+        @(negedge clk); start_new_block_i = 1'b1;
+        @(negedge clk); start_new_block_i = 1'b0;
+        wait_pipeline(timed_out);
+        if (timed_out) begin
+            $display("  T13b: pipeline timeout"); errors = errors + 1;
+        end else if (u_syn_curr_mem.mem[0] !== (FT_N * (FT_N + 1)) / 2) begin
+            $display("  FAIL T13b dense full-mode sum: got=%0d (0x%08h) exp=%0d",
+                     u_syn_curr_mem.mem[0], u_syn_curr_mem.mem[0], (FT_N * (FT_N + 1)) / 2);
+            errors = errors + 1;
+        end else
+            $display("  OK  T13b dense full-mode sum: %0d", u_syn_curr_mem.mem[0]);
 
         $display("=== tb_acc_fmiSnnMC_processor: %0d failure(s) ===", errors);
         if (errors == 0) $display("PASS"); else $display("FAIL");
