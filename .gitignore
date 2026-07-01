@@ -16,6 +16,7 @@
 vivado/
 vivado_fmi/
 vivado_fmi_relaxed/
+vivado_fmi_zu7ev/
 .Xil/
 
 # Documentation
