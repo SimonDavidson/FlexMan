@@ -8,7 +8,9 @@ module stream_generator #(
     parameter IN_DATA_BITS      = 32,
     parameter SLICE_SIZE_SZ     = `POT_OUT_SZ_SZ,   /* 3 */
     parameter SLICE_DATA_IDX_SZ = 5,
-    parameter OUT_DATA_BITS     = 32
+    parameter OUT_DATA_BITS     = 32,
+    /* FPGA-Fmax: registered cache read-return (default-OFF = original) */
+    parameter REG_RETURN        = 0
 )(
     input  wire                              clk,
     input  wire                              reset,
@@ -88,7 +90,8 @@ dataline_cache_with_xy #(
     .IDX_ADDR_BITS     (IDX_BITS),
     .SLICE_DATA_IDX_SZ (SLICE_DATA_IDX_SZ),
     .SLICE_SIZE_SZ     (SLICE_SIZE_SZ),
-    .OUT_DATA_BITS     (OUT_DATA_BITS)
+    .OUT_DATA_BITS     (OUT_DATA_BITS),
+    .REG_RETURN        (REG_RETURN)
 ) u_cache (
     .clk                 (clk),
     .reset               (reset),

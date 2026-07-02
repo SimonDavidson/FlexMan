@@ -12,7 +12,9 @@ module hadamard_unit #(
     parameter TGT_ACC_SZ           = `TGT_ACC_SZ,
     parameter SCH_ENTRY_SZ         = `SCH_ENTRY_SZ,
     parameter PIN_BITS             = `PIN_BITS,
-    parameter NUM_ELEM_SZ          = 16
+    parameter NUM_ELEM_SZ          = 16,
+    /* FPGA-Fmax: registered stream-cache read-returns (default-OFF = original) */
+    parameter REG_RETURN           = 0
 )(
     input  wire                    clk,
     input  wire                    reset,
@@ -136,7 +138,8 @@ stream_generator #(
     .IN_DATA_BITS      (DATA_BITS),
     .SLICE_SIZE_SZ     (ACT_SZ),
     .SLICE_DATA_IDX_SZ (5),
-    .OUT_DATA_BITS     (DATA_BITS)
+    .OUT_DATA_BITS     (DATA_BITS),
+    .REG_RETURN        (REG_RETURN)
 ) u_sg_a (
     .clk          (clk),
     .reset        (reset),
@@ -170,7 +173,8 @@ stream_generator #(
     .IN_DATA_BITS      (DATA_BITS),
     .SLICE_SIZE_SZ     (ACT_SZ),
     .SLICE_DATA_IDX_SZ (5),
-    .OUT_DATA_BITS     (DATA_BITS)
+    .OUT_DATA_BITS     (DATA_BITS),
+    .REG_RETURN        (REG_RETURN)
 ) u_sg_b (
     .clk          (clk),
     .reset        (reset),
@@ -203,7 +207,8 @@ stream_generator #(
     .IN_DATA_BITS      (DATA_BITS),
     .SLICE_SIZE_SZ     (ACT_SZ),
     .SLICE_DATA_IDX_SZ (5),
-    .OUT_DATA_BITS     (DATA_BITS)
+    .OUT_DATA_BITS     (DATA_BITS),
+    .REG_RETURN        (REG_RETURN)
 ) u_sg_z (
     .clk          (clk),
     .reset        (reset),
@@ -236,7 +241,8 @@ stream_generator #(
     .IN_DATA_BITS      (DATA_BITS),
     .SLICE_SIZE_SZ     (ACT_SZ),
     .SLICE_DATA_IDX_SZ (5),
-    .OUT_DATA_BITS     (DATA_BITS)
+    .OUT_DATA_BITS     (DATA_BITS),
+    .REG_RETURN        (REG_RETURN)
 ) u_sg_r (
     .clk          (clk),
     .reset        (reset),

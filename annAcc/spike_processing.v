@@ -43,7 +43,12 @@ module ann_spike_processing # (parameter NUM_TIMESTEPS      = 32,
 			   parameter BIAS_CURR_SLICE_SZ = 3,
 			   parameter BIAS_CURR_SLICE_BITS= 8,
 			   parameter SPARSE_IDX_SZ      = 16,
-		           parameter MEM_ADDR_BITS      = `ADDR_SIZE)(
+		           parameter MEM_ADDR_BITS      = `ADDR_SIZE,
+                           // FPGA-Fmax pipeline stages (default-OFF = original):
+                           // registered cache read-returns (act + weight caches)
+                           // and registered weight-row-base product. §Fmax
+                           parameter REG_RETURN         = 0,
+                           parameter REG_WROW_BASE      = 0)(
     input  wire                    clk,
     input  wire                    reset,
 
@@ -292,7 +297,8 @@ dataline_cache_with_xy #(
     .IDX_ADDR_BITS(ACT_IDX_SZ),
     .SLICE_DATA_IDX_SZ(ACT_DATA_IDX_SZ),
     .SLICE_SIZE_SZ(ACT_SLICE_SZ),
-    .OUT_DATA_BITS(ACT_BITS))
+    .OUT_DATA_BITS(ACT_BITS),
+    .REG_RETURN(REG_RETURN))
 
     act_cache (
     .clk(clk),
@@ -375,7 +381,9 @@ weight_generator #(
    .WEIGHT_IDX_SZ(WEIGHT_IDX_SZ),
    .WEIGHT_SLICE_SZ(WEIGHT_SLICE_SZ),
    .WEIGHT_DATA_IDX_SZ(WEIGHT_DATA_IDX_SZ),
-   .MEM_ADDR_BITS(MEM_ADDR_BITS))
+   .MEM_ADDR_BITS(MEM_ADDR_BITS),
+   .REG_RETURN(REG_RETURN),
+   .REG_WROW_BASE(REG_WROW_BASE))
    weight_gen0
    (
     .clk(clk),

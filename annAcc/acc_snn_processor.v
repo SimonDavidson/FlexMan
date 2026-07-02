@@ -66,7 +66,15 @@ module ann_processor # (
     parameter NP_POT_SLICE_SZ         = 3,
     parameter NP_POT_SLICE_BITS       = 32,
     parameter NP_POT_DECAY_BITS       = 32,
-    parameter MEM_ADDR_BITS           = `ADDR_SIZE
+    parameter MEM_ADDR_BITS           = `ADDR_SIZE,
+
+    //----------------------------------------------------------------
+    // FPGA-Fmax pipeline stages — both default-OFF (0 = original
+    // behaviour, bit-identical). See shared/dataline_cache_with_xy.v
+    // (REG_RETURN) and weight_generator.v (REG_WROW_BASE).
+    //----------------------------------------------------------------
+    parameter REG_RETURN              = 0,
+    parameter REG_WROW_BASE           = 0
 )(
     input  wire clk,
     input  wire reset,
@@ -586,7 +594,9 @@ module ann_processor # (
         .BIAS_CURR_DATA_IDX_SZ(SP_BIAS_CURR_DATA_IDX_SZ),
         .BIAS_CURR_SLICE_SZ   (SP_BIAS_CURR_SLICE_SZ),
         .BIAS_CURR_SLICE_BITS (SP_BIAS_CURR_SLICE_BITS),
-        .MEM_ADDR_BITS        (MEM_ADDR_BITS)
+        .MEM_ADDR_BITS        (MEM_ADDR_BITS),
+        .REG_RETURN           (REG_RETURN),
+        .REG_WROW_BASE        (REG_WROW_BASE)
     ) u_spike_processing (
         .clk                    (clk),
         .reset                  (reset),
@@ -673,7 +683,8 @@ module ann_processor # (
         .POT_SLICE_SZ         (NP_POT_SLICE_SZ),
         .POT_SLICE_BITS       (NP_POT_SLICE_BITS),
         .POT_DECAY_BITS       (NP_POT_DECAY_BITS),
-        .MEM_ADDR_BITS        (MEM_ADDR_BITS)
+        .MEM_ADDR_BITS        (MEM_ADDR_BITS),
+        .REG_RETURN           (REG_RETURN)
     ) u_neuron_processing (
         .clk                    (clk),
         .reset                  (reset),

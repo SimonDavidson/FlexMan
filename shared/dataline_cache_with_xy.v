@@ -17,7 +17,14 @@ module dataline_cache_with_xy #(
     parameter IDX_ADDR_BITS     = 10,
     parameter SLICE_DATA_IDX_SZ = 5,
     parameter SLICE_SIZE_SZ     = 3,
-    parameter OUT_DATA_BITS     = 32)
+    parameter OUT_DATA_BITS     = 32,
+    // REG_RETURN=1 serves slices ONLY from the registered line (cache_data_r):
+    // the memory read-return is landed in the register first and served the
+    // following cycle, instead of being forwarded combinationally through
+    // slice_and_align in its arrival cycle. Breaks the mem-DOUT -> consumer ->
+    // next-request critical path (FPGA Fmax); costs +1 cycle per word fetch.
+    // Default 0 = original combinational-forward behaviour, bit-identical.
+    parameter REG_RETURN        = 0)
 (
     input wire                          clk,
     input wire                          reset,
@@ -195,10 +202,17 @@ always @* begin
    slice_idx = sys_addr_i & ({LACTB{1'b1}} >> slice_sz_i);
 end
 
-// Take the data dirctly from the memory bus if a request was accepted last
-// cycle. If not, take the cached data:
-assign slice_in = (mem_new_data_valid_r)? mem_data_i :
+// Take the data directly from the memory bus if a request was accepted last
+// cycle. If not, take the cached data. Under REG_RETURN the memory return is
+// never forwarded combinationally: it lands in cache_data_r at the end of its
+// arrival cycle and the slice is served from the register a cycle later (the
+// arrival cycle produces no slice_data_valid_o, see below).
+generate if (REG_RETURN) begin : g_slice_in_reg
+    assign slice_in = cache_data_r;
+end else begin : g_slice_in_fwd
+    assign slice_in = (mem_new_data_valid_r)? mem_data_i :
 	                            cache_data_r;
+end endgenerate
 
 /* Output multiplexer (slice-and-align) */
 slice_and_align #(
@@ -217,7 +231,22 @@ slice_and_align #(
 
 assign mem_addr_o           = shifted_index + base_addr_i;
 
-assign slice_data_valid_o   = sys_req_i & (cache_hit | mem_new_data_valid_r);
+// REG_RETURN: only a registered-line hit serves data (the return cycle itself
+// loads the register; the slice is served the following cycle).
+//
+// The ~mem_new_data_valid_r term is LOAD-BEARING: on a fetch-accept the cache
+// updates cache_addr_r that cycle but cache_valid_r stays set from the
+// PREVIOUS word, so during the return cycle cache_hit is spuriously true with
+// cache_data_r still holding the old word. The combinational-forward path
+// masks that window by muxing mem_data_i over the stale line; with the
+// forward removed the window must be suppressed instead, or every consumer is
+// served the previous word's data one element early (surfaced as a clean
+// one-element shift in every NP output stream, 2026-07-02).
+generate if (REG_RETURN) begin : g_valid_reg
+    assign slice_data_valid_o = sys_req_i & cache_hit & ~mem_new_data_valid_r;
+end else begin : g_valid_fwd
+    assign slice_data_valid_o = sys_req_i & (cache_hit | mem_new_data_valid_r);
+end endgenerate
 // slice_data_idx_o is the WHOLE index of the returned element (the consumer
 // needs the input-neuron number to address the weight row). slice_idx (the
 // within-word part) is used only internally by slice_and_align. (Was = slice_idx,

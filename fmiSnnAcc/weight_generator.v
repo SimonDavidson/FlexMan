@@ -24,7 +24,15 @@ module weight_generator
 			   parameter WEIGHT_IDX_SZ      = 5, // 2^5 =  32-bit
                            parameter WEIGHT_SLICE_SZ    = 3, // 2^3 =   8-bit
                            parameter WEIGHT_DATA_IDX_SZ = 5, // 2^5 =  32-bit
-		           parameter MEM_ADDR_BITS      = `ADDR_SIZE)
+		           parameter MEM_ADDR_BITS      = `ADDR_SIZE,
+                           // FPGA-Fmax pipeline stages, both default-OFF
+                           // (0 = original behaviour, bit-identical):
+                           //  REG_RETURN     registered weight-cache read-return
+                           //  REG_WROW_BASE  registered act_idx*rows_per_neuron
+                           //                 weight-row base (requests gated one
+                           //                 cycle while the product settles)
+                           parameter REG_RETURN         = 0,
+                           parameter REG_WROW_BASE      = 0)
    (
     input  wire                    clk,
     input  wire                    reset,
@@ -161,9 +169,32 @@ assign is_convolution = (weight_mode_i == 2'b10)? 1'b1 : 1'b0;
 // Calculate base address for synaptic row.
 // In conv mode the kernel weights are shared across all input neurons,
 // so the base address does not depend on act_data_idx_i.
-assign weight_row_base_addr = is_convolution ? weight_base_addr_i
-                                             : (act_data_idx_i * rows_per_neuron_i
-                                                              + weight_base_addr_i);
+//
+// REG_WROW_BASE=1 registers the act_idx*rows_per_neuron product (a DSP
+// multiply that otherwise sits combinationally in front of the weight-cache
+// hit compare and memory address — an FPGA critical path). Requests are gated
+// by wrow_base_settled for the one cycle after act_data_idx_i moves to a new
+// input neuron. weight_base_addr_i / rows_per_neuron_i are per-task static and
+// settle during dispatch, long before the first request of a pass.
+wire wrow_base_settled;
+generate if (REG_WROW_BASE) begin : g_wrow_reg
+    reg [`ADDR_SIZE-1:0] wrow_base_r;
+    reg [ACT_IDX_SZ-1:0] wrow_idx_r;
+    always @ (posedge clk)
+       begin
+          wrow_base_r <= act_data_idx_i * rows_per_neuron_i + weight_base_addr_i;
+          wrow_idx_r  <= act_data_idx_i;
+       end
+    assign weight_row_base_addr = is_convolution ? weight_base_addr_i
+                                                 : wrow_base_r;
+    assign wrow_base_settled    = is_convolution
+                                | (wrow_idx_r == act_data_idx_i);
+end else begin : g_wrow_comb
+    assign weight_row_base_addr = is_convolution ? weight_base_addr_i
+                                                 : (act_data_idx_i * rows_per_neuron_i
+                                                                  + weight_base_addr_i);
+    assign wrow_base_settled    = 1'b1;
+end endgenerate
 
 // Cache slice size: in sparse mode fetch tuple-sized slices,
 // in full/conv mode fetch weight-sized slices.
@@ -345,11 +376,14 @@ assign running_weight_pass_o = doing_weight_pass_r;
 // served the previous input's weight (off-by-one-low, phase flips at each act-word
 // boundary). Fixed in fmiSnnAccMC first (verified tb T13 128/128); propagated 2026-06-30.
 assign weight_index_valid_full   = is_fullConn   & running_i & doing_weight_pass_r
-                                 & ~weight_pass_done_r & act_data_valid_i;
+                                 & ~weight_pass_done_r & act_data_valid_i
+                                 & wrow_base_settled;
 assign weight_index_valid_conv   = is_convolution & running_i & doing_weight_pass_r
-                                 & ~weight_pass_done_r & act_data_valid_i & ~oob_skip;
+                                 & ~weight_pass_done_r & act_data_valid_i & ~oob_skip
+                                 & wrow_base_settled;
 assign weight_index_valid_sparse = is_sparseConn & running_i & doing_weight_pass_r
-                                 & ~weight_pass_done_r & act_data_valid_i;
+                                 & ~weight_pass_done_r & act_data_valid_i
+                                 & wrow_base_settled;
 
 assign weight_index_x_full     = out_x_index_r;
 assign weight_index_y_full     = out_y_index_r;
@@ -411,7 +445,8 @@ dataline_cache_with_xy #(
     .IDX_ADDR_BITS(WEIGHT_IDX_SZ),
     .SLICE_DATA_IDX_SZ(WEIGHT_DATA_IDX_SZ),
     .SLICE_SIZE_SZ(WEIGHT_SLICE_SZ),
-    .OUT_DATA_BITS(WEIGHT_BITS))
+    .OUT_DATA_BITS(WEIGHT_BITS),
+    .REG_RETURN(REG_RETURN))
 
     weight_cache (
     .clk(clk),

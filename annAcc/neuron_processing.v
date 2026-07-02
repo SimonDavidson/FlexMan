@@ -25,7 +25,10 @@ module ann_neuron_processing # (
     parameter POT_SLICE_SZ          = 3,
     parameter POT_SLICE_BITS        = 32,
     parameter POT_DECAY_BITS        = 32,
-    parameter MEM_ADDR_BITS         = `ADDR_SIZE
+    parameter MEM_ADDR_BITS         = `ADDR_SIZE,
+    // FPGA-Fmax: registered cache read-returns (syn_curr + LUT caches).
+    // Default-OFF = original combinational-forward behaviour.
+    parameter REG_RETURN            = 0
 )(
     input  wire                    clk,
     input  wire                    reset,
@@ -175,7 +178,8 @@ dataline_cache_with_xy #(
     .IDX_ADDR_BITS     (SYN_CURR_IDX_SZ),
     .SLICE_DATA_IDX_SZ (SYN_CURR_DATA_IDX_SZ),
     .SLICE_SIZE_SZ     (SYN_CURR_SLICE_SZ),
-    .OUT_DATA_BITS     (SYN_CURR_SLICE_BITS))
+    .OUT_DATA_BITS     (SYN_CURR_SLICE_BITS),
+    .REG_RETURN        (REG_RETURN))
 syn_curr_cache (
     .clk               (clk),
     .reset             (reset),
@@ -243,7 +247,8 @@ dataline_cache_with_xy #(
     .IDX_ADDR_BITS     (LUT_IDX_SZ),
     .SLICE_DATA_IDX_SZ (LUT_DATA_IDX_SZ),
     .SLICE_SIZE_SZ     (LUT_SLICE_SZ),
-    .OUT_DATA_BITS     (LUT_SLICE_BITS))
+    .OUT_DATA_BITS     (LUT_SLICE_BITS),
+    .REG_RETURN        (REG_RETURN))
 lut_cache (
     .clk               (clk),
     .reset             (reset),

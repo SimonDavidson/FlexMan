@@ -1,0 +1,9 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Author: Simon Davidson & Claude
+# Created: 2026-07-02
+# Last modified: 2026-07-02
+# ARB_FAST equivalence: scan vs log-depth shared_pool arbiter in lockstep.
+xrun -sv -timescale 1ns/1ps -access wrc -top tb_shared_pool_equiv \
+  shared_pool.v tb_shared_pool_equiv.v
