@@ -248,7 +248,9 @@ dataline_cache_with_xy #(
     .SLICE_DATA_IDX_SZ (LUT_DATA_IDX_SZ),
     .SLICE_SIZE_SZ     (LUT_SLICE_SZ),
     .OUT_DATA_BITS     (LUT_SLICE_BITS),
-    .REG_RETURN        (REG_RETURN))
+    // LUT lookups are data-dependent (random access), so next-line prefetch
+    // (mode 2) buys nothing — clamp to registered-serve (mode 1).
+    .REG_RETURN        ((REG_RETURN == 2) ? 1 : REG_RETURN))
 lut_cache (
     .clk               (clk),
     .reset             (reset),
