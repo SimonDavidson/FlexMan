@@ -13,6 +13,17 @@
 module scheduler
    #(parameter TGT_COUNT_SZ        = 4,
      parameter CFG_ID_SZ           = 7,
+     // RELAX_LOOP_BARRIER=1 removes the all_tasks_drained gate from NXT and
+     // LOOPEND (default 0 = the completion barriers, bit-identical behaviour).
+     // With the gate removed, loop iterations overlap: the front-end fetches
+     // and the table dispatches the next iteration's tasks (still strictly
+     // in-order) while this iteration's tasks are in flight. Data ordering is
+     // then enforced entirely by the buffer machinery (claim-at-dispatch,
+     // consume-at-completion, colour); the HOST must sequence its windowed
+     // I/O off buffer state — rearm inputs when the input buffer is FREE,
+     // read outputs when the output buffer goes FULL — instead of treating
+     // the (now early) nxt_*_pulse_o as completion barriers.
+     parameter RELAX_LOOP_BARRIER  = 0,
      parameter NUM_BUFFERS         = 16,
      parameter COL_BUFF_ID_SZ      = 16,
      parameter NUM_SCH_ENTRIES     = 4,
@@ -505,21 +516,27 @@ end
 // inst_consumed: each instruction type's readiness condition.
 // TASK/FILL word 1 fires when a scheduler table slot is free; word 2 consumed
 // by inst_consumed_w2 which also fires load_new_entry.
+// NXT/LOOPEND barrier: the completion drain by default; RELAX_LOOP_BARRIER
+// lifts it (see the parameter comment — host I/O then sequences off buffer
+// state, and the in-order table + claim/consume protocol carries the data
+// ordering across the loop boundary).
+wire loop_barrier_ok = RELAX_LOOP_BARRIER ? 1'b1 : all_tasks_drained;
+
 assign inst_consumed = inst_valid_for_decode & ~test_stall_pipe & (
                           ((inst_is_task | (inst_is_fill & ~fill_in_flight_r)) & table_slot_free)
                         |  inst_is_jump
                         | (inst_is_check  & check_result_ready)
                         |  inst_is_loop
-                        | (inst_is_loopend & all_tasks_drained)
-                        | (inst_is_nxt    & all_tasks_drained)
+                        | (inst_is_loopend & loop_barrier_ok)
+                        | (inst_is_nxt    & loop_barrier_ok)
                        )
                      | inst_consumed_w2;
 
 // load_new_entry fires when word 2 of a two-word instruction is latched:
 assign load_new_entry = inst_consumed_w2;
 
-assign nxt_input_pulse_o  = inst_valid_for_decode & inst_is_nxt & inst_word[4] & all_tasks_drained & ~test_stall_pipe;
-assign nxt_output_pulse_o = inst_valid_for_decode & inst_is_nxt & inst_word[5] & all_tasks_drained & ~test_stall_pipe;
+assign nxt_input_pulse_o  = inst_valid_for_decode & inst_is_nxt & inst_word[4] & loop_barrier_ok & ~test_stall_pipe;
+assign nxt_output_pulse_o = inst_valid_for_decode & inst_is_nxt & inst_word[5] & loop_barrier_ok & ~test_stall_pipe;
 
 assign fill_value_o      = fill_value_r;
 assign fill_block_size_o = fill_block_size_r;
