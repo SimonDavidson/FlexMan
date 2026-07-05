@@ -14,7 +14,9 @@ module hadamard_unit #(
     parameter PIN_BITS             = `PIN_BITS,
     parameter NUM_ELEM_SZ          = 16,
     /* FPGA-Fmax: registered stream-cache read-returns (default-OFF = original) */
-    parameter REG_RETURN           = 0
+    parameter REG_RETURN           = 0,
+    /* FPGA-Fmax: pipeline hu_compute's heavy states (default-OFF = original) */
+    parameter FMAX_PIPE            = 0
 )(
     input  wire                    clk,
     input  wire                    reset,
@@ -302,7 +304,8 @@ hu_compute #(
     .DATA_BITS  (DATA_BITS),
     .ACT_SZ     (ACT_SZ),
     .BINPT_SZ   (5),
-    .PIN_BITS   (PIN_BITS)
+    .PIN_BITS   (PIN_BITS),
+    .FMAX_PIPE  (FMAX_PIPE)
 ) u_compute (
     .clk            (clk),
     .reset          (reset),

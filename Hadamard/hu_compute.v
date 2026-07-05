@@ -17,7 +17,14 @@ module hu_compute #(
     parameter DATA_BITS   = 32,
     parameter ACT_SZ      = `POT_OUT_SZ_SZ,   /* 3 */
     parameter BINPT_SZ    = 5,
-    parameter PIN_BITS    = `PIN_BITS          /* 10 - element index width */
+    parameter PIN_BITS    = `PIN_BITS,         /* 10 - element index width */
+    /* FMAX_PIPE=1 splits each heavy single-cycle state in two, registering
+     * the intermediate (partial product / shifted addends / rounded shift):
+     * the ST_MUL chunk-multiply-shift-accumulate cone is the FPGA's binding
+     * path once the pool/cache families are cut (~26-30 LUT levels). Costs
+     * 1 extra cycle per split state per element on a unit that is <0.5%
+     * busy. Default 0 = original single-cycle states, bit-identical. */
+    parameter FMAX_PIPE   = 0
 )(
     input  wire                  clk,
     input  wire                  reset,
@@ -68,6 +75,10 @@ localparam ST_MUL        = 3'd1;  /* iterative multiply cycles             */
 localparam ST_ACCUM      = 3'd2;  /* add B and R_prev                      */
 localparam ST_TRUNCATE   = 3'd3;  /* align to BinPoint_R, clamp            */
 localparam ST_WAIT_PAK   = 3'd4;  /* hold result until packer ready        */
+/* FMAX_PIPE second halves of the split states (unused when FMAX_PIPE=0)   */
+localparam ST_MUL_ADD    = 3'd5;  /* accumulate the registered partial     */
+localparam ST_ACCUM_ADD  = 3'd6;  /* accumulate the registered addends     */
+localparam ST_TRUNC_CLAMP= 3'd7;  /* clamp the registered rounded shift    */
 
 reg [2:0] state;
 
@@ -141,6 +152,11 @@ reg signed [WIDE-1:0] r_prev_latch; /* R_prev at internal precision        */
 /* Multiply accumulator: 48 + 32 + 4 bits of headroom */
 localparam ACC_BITS = WIDE + DATA_BITS + 4;  /* 84 bits                    */
 reg signed [ACC_BITS-1:0] accumulator;
+
+/* FMAX_PIPE intermediate registers (idle when FMAX_PIPE=0) */
+reg signed [ACC_BITS-1:0] partial_r;        /* ST_MUL      -> ST_MUL_ADD    */
+reg signed [ACC_BITS-1:0] b_sh_r, rp_sh_r;  /* ST_ACCUM    -> ST_ACCUM_ADD  */
+reg signed [ACC_BITS-1:0] shifted_r;        /* ST_TRUNCATE -> ST_TRUNC_CLAMP*/
 
 /* Current 8-bit chunk of Z being processed.
  * F4/F5 fix (2026-06-07): take LSB-first bytes of the RIGHT-aligned integer
@@ -235,12 +251,37 @@ always @(posedge clk) begin
         ST_MUL: begin
             /* amb was pre-computed in ST_IDLE; no update needed on cycle 0 */
 
-            /* Add the (correctly shifted) partial product. After all
-             * chunks, accumulator = z_val * amb at binary point (bp_z+HALF). */
-            accumulator <= accumulator + partial;
+            if (FMAX_PIPE) begin
+                /* Split: register the shifted partial product this cycle,
+                 * accumulate it in ST_MUL_ADD. mul_count stays put so the
+                 * registered value corresponds to this chunk.              */
+                partial_r <= partial;
+                state     <= ST_MUL_ADD;
+            end else begin
+                /* Add the (correctly shifted) partial product. After all
+                 * chunks, accumulator = z_val * amb at binary point (bp_z+HALF). */
+                accumulator <= accumulator + partial;
+
+                if (mul_count == mul_total - 1'b1) begin
+                    /* All chunks done: prepare B and R_prev for ACCUM */
+                    b_latch     <= b_aligned;
+                    r_prev_latch <= ($signed({{(WIDE-DATA_BITS){r_prev_r[DATA_BITS-1]}},
+                                              r_prev_r})
+                                     >>> right_shift_for_sz(esz_r_r))
+                                    << (WIDE/2 - bp_r_r);
+                    mul_count   <= 3'd0;
+                    state       <= ST_ACCUM;
+                end else begin
+                    mul_count <= mul_count + 1'b1;
+                end
+            end
+        end
+
+        /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+        ST_MUL_ADD: begin  /* FMAX_PIPE only: accumulate the registered chunk */
+            accumulator <= accumulator + partial_r;
 
             if (mul_count == mul_total - 1'b1) begin
-                /* All chunks done: prepare B and R_prev for ACCUM */
                 b_latch     <= b_aligned;
                 r_prev_latch <= ($signed({{(WIDE-DATA_BITS){r_prev_r[DATA_BITS-1]}},
                                           r_prev_r})
@@ -250,6 +291,7 @@ always @(posedge clk) begin
                 state       <= ST_ACCUM;
             end else begin
                 mul_count <= mul_count + 1'b1;
+                state     <= ST_MUL;
             end
         end
 
@@ -260,12 +302,28 @@ always @(posedge clk) begin
              * point. b_latch/r_prev_latch are at HALF, so shift by bp_z_r
              * (was << HALF, which left the multiply term 24 bits too low and
              * truncated it away).                                          */
-            accumulator <= accumulator
-                         + ($signed({{(ACC_BITS-WIDE){b_latch[WIDE-1]}}, b_latch})
-                            << bp_z_r)
-                         + (mode_r ? ($signed({{(ACC_BITS-WIDE){r_prev_latch[WIDE-1]}},
-                                               r_prev_latch}) << bp_z_r)
-                                   : {ACC_BITS{1'b0}});
+            if (FMAX_PIPE) begin
+                /* Split: register the shifted addends, add in ST_ACCUM_ADD */
+                b_sh_r  <= $signed({{(ACC_BITS-WIDE){b_latch[WIDE-1]}}, b_latch})
+                           << bp_z_r;
+                rp_sh_r <= mode_r ? ($signed({{(ACC_BITS-WIDE){r_prev_latch[WIDE-1]}},
+                                              r_prev_latch}) << bp_z_r)
+                                  : {ACC_BITS{1'b0}};
+                state   <= ST_ACCUM_ADD;
+            end else begin
+                accumulator <= accumulator
+                             + ($signed({{(ACC_BITS-WIDE){b_latch[WIDE-1]}}, b_latch})
+                                << bp_z_r)
+                             + (mode_r ? ($signed({{(ACC_BITS-WIDE){r_prev_latch[WIDE-1]}},
+                                                   r_prev_latch}) << bp_z_r)
+                                       : {ACC_BITS{1'b0}});
+                state <= ST_TRUNCATE;
+            end
+        end
+
+        /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+        ST_ACCUM_ADD: begin  /* FMAX_PIPE only */
+            accumulator <= accumulator + b_sh_r + rp_sh_r;
             state <= ST_TRUNCATE;
         end
 
@@ -294,7 +352,47 @@ always @(posedge clk) begin
                     shifted    = accumulator <<< (-out_shift);
                 end
 
-                /* Element range limits (signed, element bits wide)        */
+                if (FMAX_PIPE) begin
+                    /* Split: register the rounded shift, clamp next cycle */
+                    shifted_r <= shifted;
+                    state     <= ST_TRUNC_CLAMP;
+                end else begin
+                    /* Element range limits (signed, element bits wide)    */
+                    case (esz_r_r)
+                        3'd0: begin max_val = 32'sh00000000; min_val = 32'shffffffff; end /* 1-bit signed: 0/-1 */
+                        3'd1: begin max_val = 32'sh00000001; min_val = 32'shfffffffe; end /* 2-bit: 1/-2 */
+                        3'd2: begin max_val = 32'sh00000007; min_val = 32'shfffffff8; end /* 4-bit: 7/-8 */
+                        3'd3: begin max_val = 32'sh0000007f; min_val = 32'hffffff80; end  /* 8-bit */
+                        3'd4: begin max_val = 32'sh00007fff; min_val = 32'hffff8000; end  /* 16-bit */
+                        default: begin max_val = 32'sh7fffffff; min_val = 32'h80000000; end /* 32-bit */
+                    endcase
+
+                    if ($signed(shifted[DATA_BITS-1:0]) > max_val) begin
+                        clamped  = max_val;
+                        over_r_o <= 1'b1;
+                    end else if ($signed(shifted[DATA_BITS-1:0]) < min_val) begin
+                        clamped  = min_val;
+                        under_r_o <= 1'b1;
+                    end else begin
+                        clamped = shifted[DATA_BITS-1:0];
+                    end
+
+                    /* Left-align result for packer: shift value to MSBs */
+                    result_r       <= clamped << right_shift_for_sz(esz_r_r);
+                    result_index_r <= index_r;
+                    result_last_r  <= last_r;
+                    state          <= ST_WAIT_PAK;
+                end
+            end
+        end
+
+        /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+        ST_TRUNC_CLAMP: begin  /* FMAX_PIPE only: clamp the registered shift */
+            begin : clamp_block
+                reg signed [DATA_BITS-1:0] clamped;
+                reg signed [DATA_BITS-1:0] max_val;
+                reg signed [DATA_BITS-1:0] min_val;
+
                 case (esz_r_r)
                     3'd0: begin max_val = 32'sh00000000; min_val = 32'shffffffff; end /* 1-bit signed: 0/-1 */
                     3'd1: begin max_val = 32'sh00000001; min_val = 32'shfffffffe; end /* 2-bit: 1/-2 */
@@ -304,17 +402,16 @@ always @(posedge clk) begin
                     default: begin max_val = 32'sh7fffffff; min_val = 32'h80000000; end /* 32-bit */
                 endcase
 
-                if ($signed(shifted[DATA_BITS-1:0]) > max_val) begin
+                if ($signed(shifted_r[DATA_BITS-1:0]) > max_val) begin
                     clamped  = max_val;
                     over_r_o <= 1'b1;
-                end else if ($signed(shifted[DATA_BITS-1:0]) < min_val) begin
+                end else if ($signed(shifted_r[DATA_BITS-1:0]) < min_val) begin
                     clamped  = min_val;
                     under_r_o <= 1'b1;
                 end else begin
-                    clamped = shifted[DATA_BITS-1:0];
+                    clamped = shifted_r[DATA_BITS-1:0];
                 end
 
-                /* Left-align result for packer: shift value to MSBs */
                 result_r       <= clamped << right_shift_for_sz(esz_r_r);
                 result_index_r <= index_r;
                 result_last_r  <= last_r;
