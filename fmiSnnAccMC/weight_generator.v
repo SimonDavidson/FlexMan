@@ -26,7 +26,12 @@ module weight_generator
                            parameter WEIGHT_DATA_IDX_SZ = 5, // 2^5 =  32-bit
                            parameter CIN_SZ             = 7, // MC: input-channel width
                            parameter COUT_SZ            = 7, // MC: output-channel width
-		           parameter MEM_ADDR_BITS      = `ADDR_SIZE)
+		           parameter MEM_ADDR_BITS      = `ADDR_SIZE,
+                           // FPGA-Fmax (default-OFF = bit-identical original path):
+                           // REG_MC_INDEX=1 replaces the per-cycle weight_index_mc_conv
+                           // 3-DSP multiply chain with a lockstep index accumulator
+                           // (see the REG_MC_INDEX block after the MC index formula).
+                           parameter REG_MC_INDEX       = 0)
    (
     input  wire                    clk,
     input  wire                    reset,
@@ -327,6 +332,59 @@ assign weight_index_mc_conv =
       + kernel_y_count_r * x_kernel_len_i
       + kernel_x_count_r;
 
+// ---- REG_MC_INDEX accumulator (FPGA-Fmax) ----------------------------------
+// Same value as weight_index_mc_conv, but WITHOUT the 3 per-cycle DSP multiplies.
+//   index = cin*(Ky*Kx)  +  [ cout*(Cin*Ky*Kx) + ky*Kx + kx ]
+//  - mc_within_acc_r tracks the bracketed within-input part as a lockstep
+//    accumulator: +1 each kernel step (kx / ky wraps are contiguous), +mc_cout_incr
+//    when cout advances, reset to 0 per input neuron (the reset the counters use).
+//  - mc_cin_base_r = cin*(Ky*Kx): the per-input channel base, constant while an
+//    input neuron is processed, so ONE registered multiply, settle-gated one cycle
+//    when act_data_cin_i changes (cf. jabra REG_WROW_BASE).
+// Static config products settle once per pass, off the per-cycle path. Default-off:
+// the registers still toggle but weight_index_o keeps the multiply formula (pruned
+// in synthesis), so behaviour is bit-identical.
+wire [WEIGHT_IDX_SZ-1:0] mc_kykx      = y_kernel_len_i * x_kernel_len_i;
+wire [WEIGHT_IDX_SZ-1:0] mc_cinkykx   = cin_len_i * mc_kykx;
+wire [WEIGHT_IDX_SZ-1:0] mc_cout_incr = mc_cinkykx - mc_kykx + 1'b1;
+
+reg  [WEIGHT_IDX_SZ-1:0] mc_within_acc_r;
+reg  [WEIGHT_IDX_SZ-1:0] mc_cin_base_r;
+reg           [CIN_SZ-1:0] mc_cin_prev_r;
+
+wire [WEIGHT_IDX_SZ-1:0] mc_within_acc_nxt =
+        (next_kernel_pos & kernel_x_at_end & kernel_y_at_end) ? (mc_within_acc_r + mc_cout_incr) :
+        (next_kernel_pos)                                     ? (mc_within_acc_r + 1'b1)          :
+                                                                 mc_within_acc_r;
+
+// within-input accumulator: mirrors the kx/ky/cout counter reset + advance exactly.
+always @ (posedge clk)
+   if (reset | ~running_i)
+      mc_within_acc_r <= {WEIGHT_IDX_SZ{1'b0}};
+   else if (is_convolution & finished_for_this_ip_neuron)
+      mc_within_acc_r <= {WEIGHT_IDX_SZ{1'b0}};
+   else
+      mc_within_acc_r <= mc_within_acc_nxt;
+
+// per-input channel base + change detector (free-running).
+always @ (posedge clk)
+   if (reset | ~running_i)
+      begin
+         mc_cin_base_r <= {WEIGHT_IDX_SZ{1'b0}};
+         mc_cin_prev_r <= {CIN_SZ{1'b0}};
+      end
+   else
+      begin
+         mc_cin_base_r <= act_data_cin_i * mc_kykx;
+         mc_cin_prev_r <= act_data_cin_i;
+      end
+
+wire [WEIGHT_IDX_SZ-1:0] weight_index_mc_acc = mc_cin_base_r + mc_within_acc_r;
+// Gate the first conv request one cycle after the input channel changes, while
+// mc_cin_base_r catches up. Always settled when the accumulator is disabled.
+wire mc_index_settled = (REG_MC_INDEX == 0) | ~is_convolution
+                      | (mc_cin_prev_r == act_data_cin_i);
+
 ///////////////////////////////////////////////////////////
 //
 // Mode-conditional next-step signal for the output element
@@ -436,7 +494,8 @@ assign running_weight_pass_o = doing_weight_pass_r;
 assign weight_index_valid_full   = is_fullConn   & running_i & doing_weight_pass_r
                                  & ~weight_pass_done_r & act_data_valid_i;
 assign weight_index_valid_conv   = is_convolution & running_i & doing_weight_pass_r
-                                 & ~weight_pass_done_r & act_data_valid_i & ~oob_skip;
+                                 & ~weight_pass_done_r & act_data_valid_i & ~oob_skip
+                                 & mc_index_settled;
 assign weight_index_valid_sparse = is_sparseConn & running_i & doing_weight_pass_r
                                  & ~weight_pass_done_r & act_data_valid_i;
 
@@ -455,7 +514,8 @@ assign weight_index_valid_o    = is_convolution ? weight_index_valid_conv :
                                                   weight_index_valid_full;
 // MC: conv mode uses the explicit (cout, cin, ky, kx) formula. Full/sparse keep
 // the flat per-pass counter as before.
-assign weight_index_o          = is_convolution ? weight_index_mc_conv :
+assign weight_index_o          = is_convolution ? (REG_MC_INDEX ? weight_index_mc_acc
+                                                                 : weight_index_mc_conv) :
                                                   out_elem_count_r;
 assign weight_index_cout_o     = cout_count_r;
 assign weight_index_x_o        = is_convolution ? weight_index_x_conv :
