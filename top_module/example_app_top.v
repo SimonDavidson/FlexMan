@@ -6,7 +6,7 @@
 // =============================================================================
 // example_app_top.v — WORKED EXAMPLE of the FlexMan per-instance bus-sizing
 // discipline. Derived from flexman.v so it elaborates as a COMPLETE system.
-// Authors: Simon Davidson & Claude   Created/Last modified: 2026-06-22
+// Authors: Simon Davidson & Claude   Created: 2026-06-22   Last modified: 2026-07-10
 //
 // The point: the TOP LEVEL is the single place each accelerator instance's
 // data/address/index buses are sized for ITS largest layer, via parameter
@@ -295,20 +295,28 @@ module example_app_top #(
 // ─── Derived constants ────────────────────────────────────────────────────────
 localparam MODE_SZ       = 2;
 localparam SLOT_SHORT_SZ = MODE_SZ + BUFF_INDX_SZ;                            // 6
-localparam SLOT_LONG_SZ  = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ;            // 9
+localparam SLOT_LONG_SZ  = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ;            // 10 (TGT_COUNT_SZ=4)
 // Entry layout: 3 short + 3 long + colour + acc_id + cfg_id
 localparam ENTRY_DATA_SZ = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ
-                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;                      // 56 (CFG_ID_SZ=7)
+                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;                      // 59 (CFG_ID_SZ=7)
 localparam LONG_BASE     = 3 * SLOT_SHORT_SZ;                                 // 18
-// Field offsets within buffer_info_o (matches scheduler internals):
+// Field offsets within buffer_info_o (matches scheduler internals). Positions
+// MOVE with TGT_COUNT_SZ (via SLOT_LONG_SZ) — the values below are for the
+// default TGT_COUNT_SZ=4. NEVER hardcode a slice from this table (hardcoded
+// TGT_COUNT_SZ=3 offsets hid in cm_buffer_info + the TB TRACE hooks, fixed
+// 2026-07-10):
 //   Short slot 0: mode=[1:0],   id=[5:2]
-//   Long  slot 0: mode=[19:18], id=[23:20], ntgt=[26:24]   (BASE=18)
-//   Long  slot 1: mode=[28:27], id=[32:29], ntgt=[35:33]   (BASE=27)
-//   Long  slot 2: mode=[37:36], id=[41:38], ntgt=[44:42]   (BASE=36)
-//   colour=[45], acc_id=[48:46], cfg_id=[55:49] (7-bit)
-localparam E_COLOUR    = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ;                    // 45
-localparam E_ACC_START = E_COLOUR + 1;                                         // 46
-localparam E_CFG_START = E_ACC_START + TGT_ACC_SZ;                            // 49
+//   Long  slot 0: mode=[19:18], id=[23:20], ntgt=[27:24]   (BASE=18)
+//   Long  slot 1: mode=[29:28], id=[33:30], ntgt=[37:34]   (BASE=28)
+//   Long  slot 2: mode=[39:38], id=[43:40], ntgt=[47:44]   (BASE=38)
+//   colour=[48], acc_id=[51:49], cfg_id=[58:52] (7-bit)
+localparam E_COLOUR    = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ;                    // 48
+localparam E_ACC_START = E_COLOUR + 1;                                         // 49
+localparam E_CFG_START = E_ACC_START + TGT_ACC_SZ;                            // 52
+// Long-slot buffer-id offsets (cm_buffer_info below) — derived, not hardcoded:
+localparam LS0_ID_START = LONG_BASE                  + MODE_SZ;               // 20
+localparam LS1_ID_START = LONG_BASE + 1*SLOT_LONG_SZ + MODE_SZ;               // 30
+localparam LS2_ID_START = LONG_BASE + 2*SLOT_LONG_SZ + MODE_SZ;               // 40
 
 // fill_unit is the last accelerator slot; TASK's 2-bit acc_id field can only
 // reach 0-3, so FILL_ACC_ID=4 is unreachable by normal TASK instructions.
@@ -537,17 +545,17 @@ assign ann_np_src3  = bba_r2[3][`PIN_BITS-1:0];
 
 // ─── Buffer info extraction for config_manager ────────────────────────────────
 // config_manager (BUFF_INDEX_SZ=BUFF_INDX_SZ=4):
-//   buffer_info_i[3:0]   = src1 id  (long  slot 0 id: sch_buffer_info[23:20])
-//   buffer_info_i[7:4]   = src2 id  (long  slot 1 id: sch_buffer_info[32:29])
-//   buffer_info_i[11:8]  = src3 id  (long  slot 2 id: sch_buffer_info[41:38])
-//   buffer_info_i[15:12] = tgt  id  (short slot 0 id: sch_buffer_info[5:2])
+//   buffer_info_i[3:0]   = src1 id  (long  slot 0 id @ LS0_ID_START)
+//   buffer_info_i[7:4]   = src2 id  (long  slot 1 id @ LS1_ID_START)
+//   buffer_info_i[11:8]  = src3 id  (long  slot 2 id @ LS2_ID_START)
+//   buffer_info_i[15:12] = tgt  id  (short slot 0 id @ MODE_SZ)
 //   buffer_info_i[31:16] = 16'b0
 wire [`SCH_ENTRY_SZ-1:0] cm_buffer_info;
 assign cm_buffer_info = {16'b0,
-                          sch_buffer_info[5:2],    // tgt:  short slot 0 id
-                          sch_buffer_info[41:38],   // src3: long  slot 2 id
-                          sch_buffer_info[32:29],   // src2: long  slot 1 id
-                          sch_buffer_info[23:20]};  // src1: long  slot 0 id
+                          sch_buffer_info[MODE_SZ +: BUFF_INDX_SZ],       // tgt:  short slot 0 id
+                          sch_buffer_info[LS2_ID_START +: BUFF_INDX_SZ],  // src3: long  slot 2 id
+                          sch_buffer_info[LS1_ID_START +: BUFF_INDX_SZ],  // src2: long  slot 1 id
+                          sch_buffer_info[LS0_ID_START +: BUFF_INDX_SZ]}; // src1: long  slot 0 id
 
 wire [CFG_ID_SZ-1:0] cm_config_id = sch_buffer_info[E_CFG_START +: CFG_ID_SZ];
 

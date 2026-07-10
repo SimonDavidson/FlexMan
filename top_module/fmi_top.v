@@ -5,7 +5,7 @@
 
 // =============================================================================
 // fmi_top.v — dedicated top level for the FMI application.
-// Authors: Simon Davidson & Claude   Created: 2026-06-23   Last modified: 2026-06-23
+// Authors: Simon Davidson & Claude   Created: 2026-06-23   Last modified: 2026-07-10
 //
 // Wires ONE multi-channel recurrent SNN accelerator (acc_fmiSnnMC_processor,
 // 1920 neurons, <=64 channels, 120->60 conv downsampling) into the proven
@@ -205,13 +205,19 @@ module fmi_top #(
 // ─── Derived constants ────────────────────────────────────────────────────────
 localparam MODE_SZ       = 2;
 localparam SLOT_SHORT_SZ = MODE_SZ + BUFF_INDX_SZ;                            // 6
-localparam SLOT_LONG_SZ  = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ;            // 9
+localparam SLOT_LONG_SZ  = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ;            // 10 (TGT_COUNT_SZ=4)
 localparam ENTRY_DATA_SZ = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ
-                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;                      // 56 (CFG_ID_SZ=7)
+                           + 1 + TGT_ACC_SZ + CFG_ID_SZ;                      // 59 (CFG_ID_SZ=7)
 localparam LONG_BASE     = 3 * SLOT_SHORT_SZ;                                 // 18
-localparam E_COLOUR    = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ;                    // 45
-localparam E_ACC_START = E_COLOUR + 1;                                         // 46
-localparam E_CFG_START = E_ACC_START + TGT_ACC_SZ;                            // 49
+// Entry-field offsets MOVE with TGT_COUNT_SZ (via SLOT_LONG_SZ) — derived,
+// never hardcoded (TGT_COUNT_SZ=3 offsets hid in cm_buffer_info, fixed 2026-07-10).
+localparam E_COLOUR    = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ;                    // 48
+localparam E_ACC_START = E_COLOUR + 1;                                         // 49
+localparam E_CFG_START = E_ACC_START + TGT_ACC_SZ;                            // 52
+// Long-slot buffer-id offsets (cm_buffer_info below):
+localparam LS0_ID_START = LONG_BASE                  + MODE_SZ;               // 20
+localparam LS1_ID_START = LONG_BASE + 1*SLOT_LONG_SZ + MODE_SZ;               // 30
+localparam LS2_ID_START = LONG_BASE + 2*SLOT_LONG_SZ + MODE_SZ;               // 40
 
 // fill_unit occupies the last accelerator slot; a TASK's acc_id field can only
 // reach the compute accelerators, so FILL_ACC_ID is unreachable by normal TASKs.
@@ -315,16 +321,16 @@ assign fmi_np_src2 = bba_r0[2][`PIN_BITS-1:0];
 assign fmi_np_src3 = bba_r0[3][`PIN_BITS-1:0];
 
 // ─── Buffer info extraction for config_manager ────────────────────────────────
-//   buffer_info_i[3:0]   = src1 id  (long  slot 0 id: sch_buffer_info[23:20])
-//   buffer_info_i[7:4]   = src2 id  (long  slot 1 id: sch_buffer_info[32:29])
-//   buffer_info_i[11:8]  = src3 id  (long  slot 2 id: sch_buffer_info[41:38])
-//   buffer_info_i[15:12] = tgt  id  (short slot 0 id: sch_buffer_info[5:2])
+//   buffer_info_i[3:0]   = src1 id  (long  slot 0 id @ LS0_ID_START)
+//   buffer_info_i[7:4]   = src2 id  (long  slot 1 id @ LS1_ID_START)
+//   buffer_info_i[11:8]  = src3 id  (long  slot 2 id @ LS2_ID_START)
+//   buffer_info_i[15:12] = tgt  id  (short slot 0 id @ MODE_SZ)
 wire [`SCH_ENTRY_SZ-1:0] cm_buffer_info;
 assign cm_buffer_info = {16'b0,
-                          sch_buffer_info[5:2],     // tgt:  short slot 0 id
-                          sch_buffer_info[41:38],   // src3: long  slot 2 id
-                          sch_buffer_info[32:29],   // src2: long  slot 1 id
-                          sch_buffer_info[23:20]};  // src1: long  slot 0 id
+                          sch_buffer_info[MODE_SZ +: BUFF_INDX_SZ],       // tgt:  short slot 0 id
+                          sch_buffer_info[LS2_ID_START +: BUFF_INDX_SZ],  // src3: long  slot 2 id
+                          sch_buffer_info[LS1_ID_START +: BUFF_INDX_SZ],  // src2: long  slot 1 id
+                          sch_buffer_info[LS0_ID_START +: BUFF_INDX_SZ]}; // src1: long  slot 0 id
 
 wire [CFG_ID_SZ-1:0] cm_config_id = sch_buffer_info[E_CFG_START +: CFG_ID_SZ];
 

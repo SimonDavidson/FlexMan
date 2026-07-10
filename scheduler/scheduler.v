@@ -41,7 +41,7 @@ module scheduler
      parameter TGT_ACC_SZ          = 3,
      // Derived entry layout sizes:
      parameter SLOT_SHORT_SZ       = MODE_SZ + BUFF_INDX_SZ,          // 6
-     parameter SLOT_LONG_SZ        = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ, // 9
+     parameter SLOT_LONG_SZ        = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ, // 10 (default TGT_COUNT_SZ=4)
      parameter ENTRY_DATA_SZ       = 3*SLOT_SHORT_SZ + 3*SLOT_LONG_SZ
                                      + 1           // colour
                                      + TGT_ACC_SZ  // acc_id
@@ -110,12 +110,12 @@ wire [TGT_COUNT_SZ-1:0] mark_full_cnt = sys_data_i[BUFF_INDX_SZ +: TGT_COUNT_SZ]
 // ------------------------------------------------------------
 // Entry data field offsets (lsb first, matching sch_entry):
 //   Slots 0-2: [mode(2), id(4)] × 3  =  3 × 6 = 18 bits
-//   Slots 3-5: [mode(2), id(4), ntgt(3)] × 3 = 3 × 9 = 27 bits
-//   colour(1), acc_id(2), cfg_id(5)
+//   Slots 3-5: [mode(2), id(4), ntgt(TGT_COUNT_SZ)] × 3 = 3 × 10 = 30 bits (default TGT_COUNT_SZ=4)
+//   colour(1), acc_id(TGT_ACC_SZ=3), cfg_id(CFG_ID_SZ=7)
 localparam LONG_BASE   = 3 * SLOT_SHORT_SZ;           // 18
-localparam E_COLOUR    = LONG_BASE + 3 * SLOT_LONG_SZ; // 45
-localparam E_ACC_START = E_COLOUR + 1;                 // 46
-localparam E_CFG_START = E_ACC_START + TGT_ACC_SZ;    // 49 (TGT_ACC_SZ=3)
+localparam E_COLOUR    = LONG_BASE + 3 * SLOT_LONG_SZ; // 48 (default TGT_COUNT_SZ=4)
+localparam E_ACC_START = E_COLOUR + 1;                 // 49
+localparam E_CFG_START = E_ACC_START + TGT_ACC_SZ;    // 52 (TGT_ACC_SZ=3)
 
 // Instruction opcodes:
 localparam INST_TASK    = 3'b000;
