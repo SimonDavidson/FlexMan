@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
+// Authors: Simon Davidson & Claude   Last modified: 2026-07-21
 `timescale 10ps/1ps
 `include "../shared/constants.v"
 
@@ -386,25 +387,33 @@ wire [`PIN_BITS-1:0] ann_np_tgt,   ann_np_src1,  ann_np_src2,  ann_np_src3;
 reg [LOG2_WPC-1:0] cfg_cnt_0, cfg_cnt_1, cfg_cnt_2, cfg_cnt_3;
 
 always @(posedge clk or posedge reset) begin
-    if (reset || (sch_start_new_block && sch_target_acc == 3'd0))
+    if (reset)
+        cfg_cnt_0 <= 2'b00;
+    else if (sch_start_new_block && sch_target_acc == 3'd0)
         cfg_cnt_0 <= 2'b00;
     else if (cm_config_wr[0])
         cfg_cnt_0 <= cfg_cnt_0 + 1'b1;
 end
 always @(posedge clk or posedge reset) begin
-    if (reset || (sch_start_new_block && sch_target_acc == 3'd1))
+    if (reset)
+        cfg_cnt_1 <= 2'b00;
+    else if (sch_start_new_block && sch_target_acc == 3'd1)
         cfg_cnt_1 <= 2'b00;
     else if (cm_config_wr[1])
         cfg_cnt_1 <= cfg_cnt_1 + 1'b1;
 end
 always @(posedge clk or posedge reset) begin
-    if (reset || (sch_start_new_block && sch_target_acc == 3'd2))
+    if (reset)
+        cfg_cnt_2 <= 2'b00;
+    else if (sch_start_new_block && sch_target_acc == 3'd2)
         cfg_cnt_2 <= 2'b00;
     else if (cm_config_wr[2])
         cfg_cnt_2 <= cfg_cnt_2 + 1'b1;
 end
 always @(posedge clk or posedge reset) begin
-    if (reset || (sch_start_new_block && sch_target_acc == 3'd3))
+    if (reset)
+        cfg_cnt_3 <= 2'b00;
+    else if (sch_start_new_block && sch_target_acc == 3'd3)
         cfg_cnt_3 <= 2'b00;
     else if (cm_config_wr[3])
         cfg_cnt_3 <= cfg_cnt_3 + 1'b1;
@@ -459,7 +468,9 @@ reg [31:0] bba_r2 [0:3];
 reg [31:0] bba_r3 [0:3];
 
 always @(posedge clk or posedge reset) begin
-    if (reset || (sch_start_new_block && sch_target_acc == 3'd0))
+    if (reset)
+        bba_cnt_0 <= 2'b00;
+    else if (sch_start_new_block && sch_target_acc == 3'd0)
         bba_cnt_0 <= 2'b00;
     else if (cm_buff_base_wr[0])
         bba_cnt_0 <= bba_cnt_0 + 1'b1;
@@ -470,7 +481,9 @@ always @(posedge clk) begin
 end
 
 always @(posedge clk or posedge reset) begin
-    if (reset || (sch_start_new_block && sch_target_acc == 3'd1))
+    if (reset)
+        bba_cnt_1 <= 2'b00;
+    else if (sch_start_new_block && sch_target_acc == 3'd1)
         bba_cnt_1 <= 2'b00;
     else if (cm_buff_base_wr[1])
         bba_cnt_1 <= bba_cnt_1 + 1'b1;
@@ -481,7 +494,9 @@ always @(posedge clk) begin
 end
 
 always @(posedge clk or posedge reset) begin
-    if (reset || (sch_start_new_block && sch_target_acc == 3'd2))
+    if (reset)
+        bba_cnt_2 <= 2'b00;
+    else if (sch_start_new_block && sch_target_acc == 3'd2)
         bba_cnt_2 <= 2'b00;
     else if (cm_buff_base_wr[2])
         bba_cnt_2 <= bba_cnt_2 + 1'b1;
@@ -492,7 +507,9 @@ always @(posedge clk) begin
 end
 
 always @(posedge clk or posedge reset) begin
-    if (reset || (sch_start_new_block && sch_target_acc == 3'd3))
+    if (reset)
+        bba_cnt_3 <= 2'b00;
+    else if (sch_start_new_block && sch_target_acc == 3'd3)
         bba_cnt_3 <= 2'b00;
     else if (cm_buff_base_wr[3])
         bba_cnt_3 <= bba_cnt_3 + 1'b1;

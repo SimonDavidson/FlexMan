@@ -5,7 +5,7 @@
 
 // =============================================================================
 // fmi_top.v — dedicated top level for the FMI application.
-// Authors: Simon Davidson & Claude   Created: 2026-06-23   Last modified: 2026-07-10
+// Authors: Simon Davidson & Claude   Created: 2026-06-23   Last modified: 2026-07-21
 //
 // Wires ONE multi-channel recurrent SNN accelerator (acc_fmiSnnMC_processor,
 // 1920 neurons, <=64 channels, 120->60 conv downsampling) into the proven
@@ -276,7 +276,9 @@ wire [`PIN_BITS-1:0] fmi_np_tgt,  fmi_np_src1, fmi_np_src2, fmi_np_src3;
 // ─── Config write counter (one per computation accelerator = acc 0) ──────────
 reg [LOG2_WPC-1:0] cfg_cnt_0;
 always @(posedge clk or posedge reset) begin
-    if (reset || (sch_start_new_block && sch_target_acc == 3'd0))
+    if (reset)
+        cfg_cnt_0 <= {LOG2_WPC{1'b0}};
+    else if (sch_start_new_block && sch_target_acc == 3'd0)
         cfg_cnt_0 <= {LOG2_WPC{1'b0}};
     else if (cm_config_wr[0])
         cfg_cnt_0 <= cfg_cnt_0 + 1'b1;
@@ -301,7 +303,9 @@ reg [BBA_CNT_SZ-1:0] bba_cnt_0;
 reg [31:0] bba_r0 [0:3];
 
 always @(posedge clk or posedge reset) begin
-    if (reset || (sch_start_new_block && sch_target_acc == 3'd0))
+    if (reset)
+        bba_cnt_0 <= 2'b00;
+    else if (sch_start_new_block && sch_target_acc == 3'd0)
         bba_cnt_0 <= 2'b00;
     else if (cm_buff_base_wr[0])
         bba_cnt_0 <= bba_cnt_0 + 1'b1;
