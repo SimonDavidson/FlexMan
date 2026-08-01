@@ -47,9 +47,9 @@ set src_files [list \
     $root_dir/snnAcc/weight_generator.v \
     $root_dir/snnAcc/syn_curr_update.v \
     $root_dir/snnAcc/update_state_for_neuron.v \
-    $root_dir/snnAcc/dataline_cache_with_xy.v \
-    $root_dir/snnAcc/slice_and_align.v \
-    $root_dir/snnAcc/packer.v \
+    $root_dir/shared/dataline_cache_with_xy.v \
+    $root_dir/shared/slice_and_align.v \
+    $root_dir/shared/packer.v \
     $root_dir/annAcc/acc_snn_processor.v \
     $root_dir/annAcc/spike_processing.v \
     $root_dir/annAcc/neuron_processing.v \
