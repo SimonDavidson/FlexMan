@@ -39,7 +39,12 @@ module sch_table  #(parameter SCH_ENTRY_SZ        = 52,
 
               // Dispatch:
               output wire                      dispatch_to_acc_o,
-              output wire [SCH_ENTRY_SZ-1:0]   entry_data_o
+              output wire [SCH_ENTRY_SZ-1:0]   entry_data_o,
+
+              // Debug observability (KV260 bring-up).  Purely additive: tops
+              // that don't need it may leave these unconnected.
+              output wire [NUM_SCH_ENTRIES-1:0] dbg_entry_valid_o,
+              output wire [NUM_SCH_ENTRIES-1:0] dbg_ready_to_go_o
              );
 
 wire [SCH_ENTRY_SZ-1:0] entry_data_r [0:NUM_SCH_ENTRIES-1];
@@ -128,6 +133,10 @@ assign dispatch_to_acc_o     = launching;
 
 assign entry_valid_r[NUM_SCH_ENTRIES]   = 1'b0;
 assign shift_out_valid[NUM_SCH_ENTRIES] = 1'b0;
+
+// Debug taps (no functional effect):
+assign dbg_entry_valid_o = entry_valid_r[NUM_SCH_ENTRIES-1:0];
+assign dbg_ready_to_go_o = ready_to_go;
 
 // Instantiate scheduler entries:
 sch_entry #(.SCH_ENTRY_SZ(SCH_ENTRY_SZ), .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATORS),

@@ -85,7 +85,14 @@ module scheduler
 
      // Back-pressure from config_manager — see sch_table.v. Tie to 1'b0
      // in tops that don't instantiate a config_manager.
-     input  wire                          cm_busy_i
+     input  wire                          cm_busy_i,
+
+     // ── Debug observability (KV260 first-silicon bring-up) ───────────────
+     // Everything the host needs to say WHY instruction consumption stopped.
+     // Purely additive and combinational off existing state: tops that don't
+     // want it may leave these unconnected.
+     output wire [31:0]                   dbg_frontend_o,
+     output wire [31:0]                   dbg_inst_word_o
     );
 
 // ------------------------------------------------------------
@@ -155,6 +162,8 @@ wire [NUM_HW_ACCELERATORS-1:0]  acc_available;
 wire load_new_entry;
 wire table_slot_free;
 wire table_empty;
+wire [NUM_SCH_ENTRIES-1:0] dbg_entry_valid;
+wire [NUM_SCH_ENTRIES-1:0] dbg_ready_to_go;
 
 // Fully drained = nothing waiting to dispatch (table_empty) AND nothing still
 // executing on any accelerator (~|acc_busy_i).  table_empty alone is only a
@@ -632,6 +641,8 @@ sch_table #(
    .entry_data_o(entry_data_to_be_launched),
    .table_slot_free_o(table_slot_free),
    .table_empty_o(table_empty),
+   .dbg_entry_valid_o(dbg_entry_valid),
+   .dbg_ready_to_go_o(dbg_ready_to_go),
    .acc_busy_i(~acc_available),
    .buffers_full_i(buff_full),
    .buffers_free_i(buff_free),
@@ -697,5 +708,46 @@ assign sys_data_o =
 assign prog_mem_wr_o      = sch_prog_wr;
 assign prog_mem_wr_addr_o = (sys_addr_i & ~SCH_PROG_MEM_MASK) >> 2;
 assign prog_mem_wr_data_o = sys_data_i;
+
+// ------------------------------------------------------------
+// Debug bundle (KV260 bring-up).  Read-only taps on existing state — no
+// functional effect.  Together with prog_counter_r (status reg 0) and the
+// buffer state (status regs 2/3/4) these say exactly WHY the front-end
+// stopped consuming instructions:
+//   table_empty=1                    -> nothing queued: the FETCH side stalled
+//                                       (check fill_in_flight / slot_free / stopping)
+//   table_empty=0, ready_to_go[0]=0  -> head entry blocked: compare acc_avail
+//                                       against the entry's acc, and the buffer
+//                                       free/full regs against its slots
+//   slot_free=0                      -> table full: dispatch is the blockage
+// NUM_HW_ACCELERATORS is assumed <= 8 for the acc_avail field; the table
+// fields are pinned to 4 bits so the concat is always exactly 32 wide
+// regardless of NUM_SCH_ENTRIES.
+wire [3:0] dbg_ev4 = dbg_entry_valid;
+wire [3:0] dbg_rg4 = dbg_ready_to_go;
+
+assign dbg_frontend_o = {
+    {(8-NUM_HW_ACCELERATORS){1'b0}}, acc_available,   // [31:24]
+    all_tasks_drained,                                // [23]
+    start_new_task,                                   // [22]
+    cm_busy_i,                                        // [21]
+    dispatch_in_flight_r,                             // [20]
+    prog_paused_r,                                    // [19]
+    prog_stopping_r,                                  // [18]
+    prog_running_r,                                   // [17]
+    inst_consumed,                                    // [16]
+    inst_valid,                                       // [15]
+    word_ready_r,                                     // [14]
+    inst_word_valid_r,                                // [13]
+    pending_is_fill_r,                                // [12]
+    task_w2_pending_r,                                // [11]
+    fill_in_flight_r,                                 // [10]
+    table_empty,                                      // [9]
+    table_slot_free,                                  // [8]
+    dbg_rg4,                                          // [7:4]
+    dbg_ev4                                           // [3:0]
+};
+
+assign dbg_inst_word_o = inst_word;
 
 endmodule
