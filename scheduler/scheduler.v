@@ -109,6 +109,32 @@ wire sch_prog_wr = sys_req_i
 
 wire do_start    = sch_ctrl_wr & (sys_addr_i[24:20] == 5'd1);
 wire do_continue = sch_ctrl_wr & (sys_addr_i[24:20] == 5'd2);
+
+// SOFT_RESET (ctrl reg 6) — clear all scheduler state WITHOUT touching memory.
+//
+// Why this exists: after a program STOPs there is no way to run it again. A
+// fresh LOAD_PC+START does re-fetch and re-create the table entry, but the
+// entry can never become ready, because its target buffers are still FULL from
+// the previous run and a TARGET slot requires the buffer FREE. So the only
+// recovery was a full logic reset plus reloading every image — including the
+// 348k-word weight store — once per utterance.
+//
+// This clears the buffer state, the task table and the fetch/decode front end,
+// leaving program/config/weight memories intact. Restart then becomes
+// SOFT_RESET -> MARK_FULL -> LOAD_PC -> START, with the images loaded once per
+// session.
+//
+// HOST RESPONSIBILITY: only issue this when no accelerator is busy (after STOP,
+// or PAUSE until status reg 1 reads acc_busy==0). Clearing the trackers while a
+// task is in flight would let its later completion update buffers using slot
+// information that no longer exists. It is deliberately NOT gated on idle in
+// hardware, because recovering a WEDGED machine is the main use and a wedged
+// machine must still be clearable.
+//
+// Everything below is inert unless this register is written, so tops that never
+// use it are bit-identical.
+wire do_soft_reset = sch_ctrl_wr & (sys_addr_i[24:20] == 5'd6);
+wire sch_clr       = reset | do_soft_reset;
 // MARK_BUFF_FULL (reg 5): data[BUFF_INDX_SZ-1:0]=buf_id, data[BUFF_INDX_SZ+:TGT_COUNT_SZ]=usage
 wire do_mark_full       = sch_ctrl_wr & (sys_addr_i[24:20] == 5'd5);
 wire [BUFF_INDX_SZ-1:0] mark_full_id  = sys_data_i[BUFF_INDX_SZ-1:0];
@@ -182,7 +208,7 @@ wire [NUM_SCH_ENTRIES-1:0] dbg_ready_to_go;
 reg                  dispatch_in_flight_r;
 reg [TGT_ACC_SZ-1:0] dispatch_tgt_r;
 always @ (posedge clk)
-   if (reset) begin
+   if (sch_clr) begin
       dispatch_in_flight_r <= 1'b0;
       dispatch_tgt_r       <= {TGT_ACC_SZ{1'b0}};
    end
@@ -344,11 +370,10 @@ assign inst_word_valid_nxt = (do_start | do_continue) ? 1'b0
 
 always @ (posedge clk)
 begin
-   if (reset)
+   if (sch_clr)
    begin
       prog_running_r    <= 1'b0;
       prog_counter_r    <= 'b0;
-      prog_start_addr_r <= 'b0;
       prog_paused_r     <= 1'b0;
       prog_stopping_r   <= 1'b0;
       inst_word_valid_r <= 1'b0;
@@ -364,11 +389,15 @@ begin
       if (word_ready_r & ~inst_consumed)
          held_inst_word_r <= prog_mem_data_i;
       // AXI control register writes
-      if (sch_ctrl_wr && sys_addr_i[24:20] == 5'd0)
-         prog_start_addr_r <= sys_data_i[PROG_ADDR_BITS-1:0];   // LOAD_PC
       if (sch_ctrl_wr && sys_addr_i[24:20] == 5'd3) prog_paused_r <= 1'b1;  // PAUSE
       if (sch_ctrl_wr && sys_addr_i[24:20] == 5'd4) prog_paused_r <= 1'b0;  // UNPAUSE
    end
+   // LOAD_PC target survives SOFT_RESET (hard reset only) so the host may issue
+   // LOAD_PC and SOFT_RESET in either order.
+   if (reset)
+      prog_start_addr_r <= 'b0;
+   else if (sch_ctrl_wr && sys_addr_i[24:20] == 5'd0)
+      prog_start_addr_r <= sys_data_i[PROG_ADDR_BITS-1:0];      // LOAD_PC
 end
 
 assign inst_word = inst_word_valid_r ? held_inst_word_r : prog_mem_data_i;
@@ -386,7 +415,7 @@ assign inst_consumed_w2  = task_w2_arrived & ~test_stall_pipe;
 
 always @ (posedge clk)
 begin
-   if (reset)
+   if (sch_clr)
    begin
       task_w2_pending_r <= 1'b0;
       pending_is_fill_r <= 1'b0;
@@ -438,7 +467,7 @@ end
 wire fill_launched = start_new_task & (to_launch_acc_hw_id == FILL_ACC_ID);
 always @ (posedge clk)
 begin
-   if (reset)
+   if (sch_clr)
       fill_in_flight_r <= 1'b0;
    else if (load_new_entry & pending_is_fill_r)
       fill_in_flight_r <= 1'b1;
@@ -455,7 +484,7 @@ assign inst_valid_for_decode = inst_valid & ~task_w2_pending_r;
 integer li;
 always @(posedge clk)
 begin
-   if (reset)
+   if (sch_clr)
    begin
       for (li = 0; li < NUM_LOOPS; li = li + 1)
       begin
@@ -485,7 +514,7 @@ assign prog_mem_req_o  = keep_fetching & (~inst_valid | ~inst_word_valid_nxt);
 
 always @ (posedge clk)
 begin
-   if (reset)
+   if (sch_clr)
       word_ready_r <= 1'b0;
    else if (prog_mem_req_o & ~prog_mem_wait_i)
       word_ready_r <= 1'b1;
@@ -633,7 +662,7 @@ sch_table #(
    .TGT_COUNT_SZ(TGT_COUNT_SZ)
 ) sch_table0 (
    .clk(clk),
-   .reset(reset),
+   .reset(sch_clr),
    .load_new_entry_i(load_new_entry),
    .delete_entry_i(1'b0),
    .entry_data_i(new_entry_data),
@@ -665,7 +694,7 @@ sch_buffer_state #(
    .MODE_SZ(MODE_SZ)
 ) sch_buff_state0 (
    .clk(clk),
-   .reset(reset),
+   .reset(sch_clr),
    .acc_busy_i(acc_busy_i),
    .acc_finished_i(acc_finished_i),
    .acc_result_i(acc_result_i),

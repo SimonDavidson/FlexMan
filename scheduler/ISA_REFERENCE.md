@@ -404,11 +404,12 @@ Canonical addresses (bits `[19:0]` = 0):
 | Reg ID `[24:20]` | Canonical address | Name | Action |
 |------------------|-------------------|------|--------|
 | `5'b00000` | `0xE000_0000` | LOAD_PC | Set program start address; write value is a word index |
-| `5'b00001` | `0xE010_0000` | START | Begin execution at the loaded address; resets all buffer and accelerator state |
+| `5'b00001` | `0xE010_0000` | START | Begin execution at the loaded address. Flushes the fetch/decode front end **only** — buffer, table and accelerator state are NOT cleared (see SOFT_RESET) |
 | `5'b00010` | `0xE020_0000` | CONTINUE | Resume after a finish-on-success halt |
 | `5'b00011` | `0xE030_0000` | PAUSE | Halt instruction fetch; in-flight tasks complete normally |
 | `5'b00100` | `0xE040_0000` | UNPAUSE | Resume after PAUSE |
 | `5'b00101` | `0xE050_0000` | MARK_BUFF_FULL | Mark a buffer as pre-filled (see below) |
+| `5'b00110` | `0xE060_0000` | SOFT_RESET | Clear buffer state, the task table and the front end — **not** memory. Makes the design re-runnable without a logic reset or an image reload |
 
 **MARK_BUFF_FULL data word:**
 
@@ -512,9 +513,24 @@ and dispatched. The values are pushed into the accelerator at dispatch time.
    drains. Use it at the end of each timestep in a temporal SNN to ensure all layers have
    completed before advancing the input window.
 
-8. **STOP and restart.** After STOP, the host writes START (with a new LOAD_PC if needed) to
-   begin a new program. START resets all buffer and accelerator state; any data in buffers
-   from the previous run is no longer tracked.
+8. **STOP and restart.** After STOP, the host issues SOFT_RESET, then re-seeds any
+   host-filled buffers with MARK_BUFF_FULL, then LOAD_PC + START.
+
+   **START ALONE IS NOT ENOUGH, and this document previously said otherwise.** START
+   flushes the fetch/decode front end but leaves buffer, table and accelerator state
+   intact. So a bare re-START does re-fetch and re-create the task entry — the PC visibly
+   moves — but that entry can never become ready, because its target buffers are still
+   FULL from the previous run and a TARGET slot requires the buffer FREE. The machine sits
+   with one valid-but-never-ready entry and makes no progress. (Observed on silicon during
+   the KV260 bring-up, then reproduced off-board; the incorrect claim here is part of why
+   it was surprising.)
+
+   SOFT_RESET clears buffer state, the task table, the loop counters and the front end
+   while leaving program, config and weight memories untouched — so a long campaign loads
+   its images once per session rather than once per run. Issue it only when no accelerator
+   is busy (after STOP, or PAUSE until `acc_busy == 0`); clearing the trackers mid-task
+   would let a later completion update buffers using slot state that no longer exists.
+   A wedged machine reports `acc_busy == 0`, so using it for recovery is safe.
 
 9. **Hardware loops.** Use LOOP / LOOPEND to repeat a block of instructions without the
    overhead of a JUMP. A LOOP with `Count = N` causes the body to execute `N + 1` times in
