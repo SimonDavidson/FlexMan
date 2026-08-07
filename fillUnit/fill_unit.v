@@ -273,7 +273,19 @@ always @(posedge clk) begin
 end
 
 // ─── Write strobe and bus drivers ─────────────────────────────────────────────
-wire do_write = (state_r == ST_FILLING) & ~selected_wait;
+// The request is HELD until the target accepts it; it must NOT be withdrawn when
+// the target asserts wait. Gating it with ~selected_wait made every write output
+// depend combinationally on that same memory's wait input, so any memory that
+// derives wait from the request (as an arbitrated or shared memory naturally
+// does) closes a zero-delay loop: wr -> wait -> selected_wait -> do_write -> wr.
+//
+// Withdrawing was never needed. ST_FILLING already gates the ADVANCE on
+// !selected_wait above, so curr_addr_r and cnt_r only move when the write is
+// actually accepted; holding the strobe simply re-presents the same address and
+// data until it is. Behaviour is unchanged wherever *_wait_i is tied low, which
+// is every current top-level, so this is a no-op for existing builds and only
+// takes effect once a memory can genuinely stall.
+wire do_write = (state_r == ST_FILLING);
 
 // All address and data outputs are shared (same value regardless of selection)
 wire [ADDR_SIZE-1:0] wr_addr = curr_addr_r;
