@@ -116,6 +116,31 @@ wire                  fu_bba_mem_rd_o;
 wire [31:0]           fu_bba_mem_addr_o;
 wire [31:0]           fu_bba_mem_data_i;
 
+// ── bba read stall ───────────────────────────────────────────────────────────
+// fill_unit asserts fu_bba_rd_o and enters ST_BBA_WAIT on the same edge, then
+// samples fu_bba_data_i in that state. A registered BRAM only presents data the
+// cycle AFTER the address is applied, so sampling immediately latches the
+// PREVIOUS fill's base address -- correct only when one buffer is refilled back
+// to back, which is why the corruption looks intermittent rather than total.
+// Holding the read one extra cycle fixes it at the interface:
+//
+//   wait = rd & ~rd_d   -> high on rd's FIRST cycle only, low thereafter.
+//
+// fill_unit already has fu_bba_mem_wait_i for exactly this and honours it by
+// sitting in ST_BBA_WAIT with rd still asserted; this wrapper previously tied it
+// to 1'b0, defeating a mechanism designed in from the start. Loop-free because
+// fu_bba_rd_o is a REGISTER inside fill_unit, so the request never depends
+// combinationally on the wait.
+//
+// Cost: one flop and one extra cycle per FILL (a handful against ~172k cycles a
+// frame). Verified in the Bosch deployment: 299/299 frames bit-exact.
+reg  fu_bba_rd_d;
+always @(posedge clk)
+    if (reset) fu_bba_rd_d <= 1'b0;
+    else       fu_bba_rd_d <= fu_bba_mem_rd_o;
+wire fu_bba_wait = fu_bba_mem_rd_o & ~fu_bba_rd_d;
+
+
 // BBA TDP port A mux: cfg_mgr read and write share one physical port
 wire [BBA_ABITS-1:0] bba_port_a_addr =
     bba_mem_wr_o ? bba_mem_wr_addr_o[BBA_ABITS-1:0]
@@ -298,7 +323,7 @@ flexman #(
 
     // BBA memory — fill_unit port
     .fu_bba_mem_rd_o            (fu_bba_mem_rd_o),
-    .fu_bba_mem_wait_i          (1'b0),
+    .fu_bba_mem_wait_i          (fu_bba_wait),
     .fu_bba_mem_addr_o          (fu_bba_mem_addr_o),
     .fu_bba_mem_data_i          (fu_bba_mem_data_i),
 
