@@ -663,29 +663,45 @@ initial begin
     end
 
     // ══════════════════════════════════════════════════════════════════════
-    // T6: BACK-TO-BACK FILL HAND-OFF — ★ DEFAULT-OFF, KNOWN-FAILING ★
+    // T6: FILL CONSTANT DECODED AS AN INSTRUCTION — ★ DEFAULT-OFF, KNOWN-FAILING
     //
-    //   Enable with +define+RUN_T6. This is NOT a wrapper issue: the identical
-    //   program fails the SAME way on the `flexman` CORE under tb_flexman with
-    //   its behavioural sram_models (verified 2026-08-08, 73 pool writes in both
-    //   cases). It is recorded here because writing T5 uncovered it.
+    //   Enable with +define+RUN_T6. NOT a wrapper issue: the same program fails
+    //   identically on the `flexman` CORE under tb_flexman with its behavioural
+    //   sram_models.
     //
-    //   Program: FILL(buf 0, base 0, 4 words, 0x11111111)
-    //            FILL(buf 1, base 64, 4 words, 0x22222222)
-    //            STOP
-    //   Expected: 8 pool writes, pool[0..3]=0x11111111, pool[64..67]=0x22222222.
-    //   Observed: 73+ pool writes. Only ONE bba read is issued (for buffer 0);
-    //            fill #1's data is written twice, then a RUNAWAY zero-fill walks
-    //            forward from logical word 4 and is still going when the test
-    //            window closes. Fill #2 never reads its own base address.
+    //   A FILL is two words: word 1 (the descriptor) and word 2 (the 32-bit fill
+    //   constant). If that CONSTANT has 3'b001 in its low bits — INST_JUMP —
+    //   execution is corrupted: a single 4-word FILL issues 23 pool writes and the
+    //   program re-runs. Measured 2026-08-08 by sweeping the constant:
     //
-    //   scheduler.v:258-262 documents the suspected mechanism: fill_block_size_r
-    //   and fill_value_r are SINGLE registers overwritten by the next FILL's
-    //   word 1, while buff_id travels with the scheduler table entry — so a
-    //   launch delayed by a busy fill_unit can dispatch with mismatched fields.
+    //     constant     low 3 bits  opcode        result
+    //     0x00000000   000         TASK          PASS
+    //     0x00000001   001         JUMP          FAIL  (4 writes, truncated)
+    //     0x11111111   001         JUMP          FAIL  (23 writes, runaway)
+    //     0x00000002   010         STOP          PASS
+    //     0x22222222   010         STOP          PASS
+    //     0x00000005   101         FILL          PASS
+    //     0xAAAAAAAA   010         STOP          PASS
+    //     0xBBBBBBBB   011         CHECK         PASS
+    //     0xDEADBEEF   111         LOOPEND       PASS
     //
-    //   Until that is fixed, treat back-to-back FILL instructions as unsupported
-    //   and separate them (as T5 does, with two program runs).
+    //   JUMP is the ONLY opcode whose term in `inst_consumed` carries no side
+    //   condition (scheduler.v:565) — TASK/FILL need a free table slot, CHECK
+    //   needs a result, NXT/LOOPEND need the barrier, STOP is handled elsewhere.
+    //   So it is the only one that can fire on a word that is not an instruction.
+    //   `inst_valid_for_decode` does gate decode with ~task_w2_pending_r
+    //   (scheduler.v:479), so the leak is a timing window around that flag, not a
+    //   missing gate — pinning the exact cycle is scheduler work, not TB work.
+    //
+    //   WHY NOTHING EVER HIT THIS: every deployed program fills with 0x00000000.
+    //   Checked 2026-08-08 across flexman_program, the deployment programs
+    //   and a deployment program — 80 FILLs, every constant zero. Back-to-back FILLs are
+    //   common in all of them (one deployment program has 6 consecutive pairs at pc0..pc10) and work
+    //   fine; an earlier draft of this test wrongly blamed the back-to-back
+    //   sequence, when a SINGLE fill with a 001-tailed constant is enough.
+    //
+    //   Impact: any non-zero fill constant is unsafe unless its low 3 bits are
+    //   checked. That is a real constraint on the ISA/assembler today.
     // ══════════════════════════════════════════════════════════════════════
 `ifdef RUN_T6
     reset = 1'b1;
@@ -696,31 +712,24 @@ initial begin
     test_num = 6;
 
     dut.u_bba_mem.mem[0] = 32'd0;
-    dut.u_bba_mem.mem[1] = 32'd64;
     axi_write(32'hC000_0000, 32'h0200_0000);
-    axi_write(32'hC000_0004, 32'h0200_0000);
 
+    // ONE fill. The only thing wrong with it is the constant's low 3 bits.
     dut.u_prog_mem.mem[0] = fill_w1(4'd0, 1'b0, 4'd1, 19'd4);
-    dut.u_prog_mem.mem[1] = 32'h1111_1111;
-    dut.u_prog_mem.mem[2] = fill_w1(4'd1, 1'b0, 4'd1, 19'd4);
-    dut.u_prog_mem.mem[3] = 32'h2222_2222;
-    dut.u_prog_mem.mem[4] = STOP_INST;
+    dut.u_prog_mem.mem[1] = 32'h1111_1111;   // low bits 001 == INST_JUMP
+    dut.u_prog_mem.mem[2] = STOP_INST;
 
     axi_write(32'hE000_0000, 32'd0);
     axi_write(32'hE010_0000, 32'd0);
-    repeat(200) @(posedge clk);
+    repeat(400) @(posedge clk);
 
-    if (fill_wr_count == 8            &&
-        pool_rd( 0) == 32'h11111111 && pool_rd( 3) == 32'h11111111 &&
-        pool_rd(64) == 32'h22222222 && pool_rd(67) == 32'h22222222) begin
-        $display("[T6] PASS  back-to-back FILL hand-off is fixed — remove the RUN_T6 gate");
+    if (fill_wr_count == 4 &&
+        pool_rd(0) == 32'h11111111 && pool_rd(3) == 32'h11111111) begin
+        $display("[T6] PASS  fill constant with a JUMP tail is handled — remove the RUN_T6 gate");
     end else begin
-        $display("[T6] FAIL (EXPECTED, pre-existing core defect — also fails on tb_flexman)");
-        $display("           writes=%0d (exp 8)", fill_wr_count);
-        $display("           pool[0..3]   = %08h %08h %08h %08h",
-                 pool_rd(0), pool_rd(1), pool_rd(2), pool_rd(3));
-        $display("           pool[64..67] = %08h %08h %08h %08h",
-                 pool_rd(64), pool_rd(65), pool_rd(66), pool_rd(67));
+        $display("[T6] FAIL (EXPECTED — fill constant 0x11111111 decoded as JUMP; also fails on the core)");
+        $display("           writes=%0d (exp 4)  pool[0..3]=%08h %08h %08h %08h",
+                 fill_wr_count, pool_rd(0), pool_rd(1), pool_rd(2), pool_rd(3));
     end
 `endif
 
