@@ -1,0 +1,48 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude   Created: 2026-08-08   Last modified: 2026-08-08
+#
+# Simulate tb_fmi_top_wrap — the FIRST testbench to drive fmi_top_fpga_wrap, the
+# module Vivado actually synthesises. tb_fmi_top.v drives the `fmi_top` CORE with
+# COMBINATIONAL prog/cfg/bba arrays; this drives the wrapper, where cfg and bba
+# are registered bram_sdp. Reproduces the same T9A/T9B goldens.
+#
+# Source list = elab_fmi_top_fpga_wrap.bsh's, plus the testbench. Keep in sync.
+#
+# -access wrc is REQUIRED: the TB backdoor-writes dut.u_<name>.mem and the dout
+# registers. MUST be run from top_module/ — the golden vectors are read through
+# ../../fmi/mem_files/... relative paths.
+set -uo pipefail
+
+xrun -sv -timescale 10ps/1ps -access wrc -top tb_fmi_top_wrap ${XDEFS:-} \
+  tb_fmi_top_wrap.v \
+  fmi_top_fpga_wrap.v \
+  fmi_top.v \
+  ../shared/shared_pool.v \
+  ../shared/bram_sp.v \
+  ../shared/bram_sdp.v \
+  ../shared/bram_dist.v \
+  ../scheduler/scheduler.v \
+  ../scheduler/sch_table.v \
+  ../scheduler/sch_entry.v \
+  ../scheduler/sch_buffer_state.v \
+  ../scheduler/buffer_state_entry.v \
+  ../scheduler/acc_hw_buffer_tracker.v \
+  ../scheduler/prog_cache.v \
+  ../config_manager/config_manager.v \
+  ../fmiSnnAccMC/acc_fmiSnnMC_processor.v \
+  ../fmiSnnAccMC/spike_processing.v \
+  ../fmiSnnAccMC/act_index_generator.v \
+  ../fmiSnnAccMC/weight_generator.v \
+  ../fmiSnnAccMC/syn_curr_update.v \
+  ../fmiSnnAccMC/update_state_for_neuron.v \
+  ../fmiSnnAccMC/neuron_processing.v \
+  ../shared/dataline_cache_with_xy.v \
+  ../shared/slice_and_align.v \
+  ../shared/packer.v \
+  2>&1 | tee sim_fmi_top_wrap.log
+
+echo "---- verdict ----"
+grep -E "^(\[VERDICT\]|\[T9[AB]\]|\[T_LD\]|  (OK|FAIL|acc) )" sim_fmi_top_wrap.log || echo "(no result lines -- check sim_fmi_top_wrap.log)"
+grep -q "^\[VERDICT\] PASS" sim_fmi_top_wrap.log
