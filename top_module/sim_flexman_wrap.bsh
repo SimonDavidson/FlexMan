@@ -1,0 +1,63 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude   Created: 2026-08-08   Last modified: 2026-08-08
+#
+# Simulate tb_flexman_wrap — the FIRST testbench to drive flexman_fpga_wrap, the
+# module Vivado actually synthesises. tb_flexman.v drives the `flexman` CORE with
+# behavioural arrays whose reads are combinational; this drives the wrapper, where
+# all 19 memories are real shared/bram_*.v primitives with registered reads.
+#
+# Source list = elab_fpga_wrap.bsh's, plus the testbench. Keep the two in sync:
+# if a module is added to the wrapper, it must be added to BOTH.
+#
+# -access wrc is REQUIRED: the TB backdoor-writes dut.u_<name>.mem and the dout
+# registers, which needs write access into the DUT hierarchy.
+#
+# Run from this directory (top_module/).
+#   bash sim_flexman_wrap.bsh              # normal run
+#   XDEFS="-define WRAP_DBG" bash sim_flexman_wrap.bsh   # scheduler/fill tracing
+set -uo pipefail
+
+xrun -sv -timescale 10ps/1ps -access wrc -top tb_flexman_wrap ${XDEFS:-} \
+  tb_flexman_wrap.v \
+  flexman_fpga_wrap.v \
+  flexman.v \
+  ../shared/shared_pool.v \
+  ../shared/bram_sp.v \
+  ../shared/bram_sdp.v \
+  ../shared/bram_tdp.v \
+  ../shared/bram_dist.v \
+  ../scheduler/scheduler.v \
+  ../scheduler/sch_table.v \
+  ../scheduler/sch_entry.v \
+  ../scheduler/sch_buffer_state.v \
+  ../scheduler/buffer_state_entry.v \
+  ../scheduler/acc_hw_buffer_tracker.v \
+  ../scheduler/prog_cache.v \
+  ../config_manager/config_manager.v \
+  ../snnAcc/acc_snn_processor.v \
+  ../snnAcc/spike_processing.v \
+  ../snnAcc/neuron_processing.v \
+  ../snnAcc/act_index_generator.v \
+  ../snnAcc/weight_generator.v \
+  ../snnAcc/syn_curr_update.v \
+  ../snnAcc/update_state_for_neuron.v \
+  ../shared/dataline_cache_with_xy.v \
+  ../shared/slice_and_align.v \
+  ../shared/packer.v \
+  ../annAcc/acc_snn_processor.v \
+  ../annAcc/spike_processing.v \
+  ../annAcc/neuron_processing.v \
+  ../annAcc/syn_curr_update.v \
+  ../annAcc/update_state_for_neuron.v \
+  ../Hadamard/hadamard_unit.v \
+  ../Hadamard/hu_compute.v \
+  ../Hadamard/hu_config_regs.v \
+  ../Hadamard/stream_generator.v \
+  ../fillUnit/fill_unit.v \
+  2>&1 | tee sim_flexman_wrap.log
+
+echo "---- verdict ----"
+grep -E "^\[(T[0-9]+|VERDICT)\]" sim_flexman_wrap.log || echo "(no result lines -- check sim_flexman_wrap.log)"
+grep -q "^\[VERDICT\] PASS" sim_flexman_wrap.log

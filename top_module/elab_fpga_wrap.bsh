@@ -4,6 +4,7 @@
 xrun -sv -elaborate -timescale 10ps/1ps -top flexman_fpga_wrap \
   flexman_fpga_wrap.v \
   flexman.v \
+  ../shared/shared_pool.v \
   ../shared/bram_sp.v \
   ../shared/bram_sdp.v \
   ../shared/bram_tdp.v \
