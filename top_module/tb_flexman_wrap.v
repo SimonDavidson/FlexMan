@@ -725,8 +725,19 @@ initial begin
 `endif
 
     // ══════════════════════════════════════════════════════════════════════
-    if (errors == 0) $display("[VERDICT] PASS  flexman_fpga_wrap: T1 T2 T3 T4 T5 all passed");
-    else             $display("[VERDICT] FAIL  %0d test(s) failed", errors);
+    // T6 is EXCLUDED from the verdict on purpose: it is a known-failing probe for
+    // a pre-existing CORE defect, not a wrapper regression, so it must not gate
+    // this TB. Say so out loud when it ran, rather than printing a bare PASS
+    // underneath a visible [T6] FAIL.
+    if (errors == 0) begin
+`ifdef RUN_T6
+        $display("[VERDICT] PASS  flexman_fpga_wrap: T1 T2 T3 T4 T5 passed (T6 excluded — known-failing core defect, see its comment)");
+`else
+        $display("[VERDICT] PASS  flexman_fpga_wrap: T1 T2 T3 T4 T5 all passed");
+`endif
+    end else begin
+        $display("[VERDICT] FAIL  %0d test(s) failed", errors);
+    end
     #20 $finish;
 end
 
