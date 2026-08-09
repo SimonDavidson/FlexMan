@@ -663,68 +663,30 @@ initial begin
     end
 
     // ══════════════════════════════════════════════════════════════════════
-    // T6: FILL CONSTANT DECODED AS AN INSTRUCTION — ★ DEFAULT-OFF, KNOWN-FAILING
+    // T6 / T7: A FILL CONSTANT MUST NOT BE EXECUTED AS AN INSTRUCTION
     //
-    //   Enable with +define+RUN_T6. NOT a wrapper issue: the same program fails
-    //   identically on the `flexman` CORE under tb_flexman with its behavioural
-    //   sram_models.
+    //   A FILL is two words: the descriptor, then a free 32-bit constant. Before
+    //   the fix that constant was decoded as an instruction on the cycle it was
+    //   consumed as word 2, and acted upon — because the inst_is_* flags are a
+    //   raw combinational decode of inst_word, and several consumers keyed off
+    //   inst_consumed (which deliberately ORs in inst_consumed_w2 outside the
+    //   inst_valid_for_decode gate, so the PC can advance past word 2).
     //
-    //   A FILL is two words: word 1 (the descriptor) and word 2 (the 32-bit fill
-    //   constant). If that CONSTANT has 3'b001 in its low bits — INST_JUMP —
-    //   execution is corrupted: a single 4-word FILL issues 23 pool writes and the
-    //   program re-runs. Measured 2026-08-08 by sweeping the constant:
+    //   Fixed by gating the decode at source (scheduler.v, commit fb8ec9c).
+    //   These two tests are the regression: both FAIL on the pre-fix RTL.
     //
-    //     constant     low 3 bits  opcode        result
-    //     0x00000000   000         TASK          PASS
-    //     0x00000001   001         JUMP          FAIL  (4 writes, truncated)
-    //     0x11111111   001         JUMP          FAIL  (23 writes, runaway)
-    //     0x00000002   010         STOP          PASS
-    //     0x22222222   010         STOP          PASS
-    //     0x00000005   101         FILL          PASS
-    //     0xAAAAAAAA   010         STOP          PASS
-    //     0xBBBBBBBB   011         CHECK         PASS
-    //     0xDEADBEEF   111         LOOPEND       PASS
+    //   T6  constant 0x11111111, low bits 001 = JUMP
+    //       was: do_jump asserted, prog_counter <= inst_word[12:3], pc 1 -> 546;
+    //       a single 4-word FILL issued 23 pool writes and the program re-ran.
+    //   T7  constant 0x000002BE, low bits 110 = LOOP, id [5:3]=7, max [31:6]=10
+    //       was: loop_counter_r[7] <= 10 and loop_restart_r[7] <= 2, silently —
+    //       fill DATA corrupting loop state, with no visible symptom until a
+    //       later LOOPEND used the counter.
     //
-    //   MECHANISM (traced cycle-by-cycle 2026-08-09, scheduler.v):
-    //     inst_consumed = (inst_valid_for_decode & ... decode terms ...)
-    //                   | inst_consumed_w2;          <- OUTSIDE the decode gate
-    //   That OR is deliberate and necessary: goto_nxt = inst_consumed is what
-    //   advances the PC past a two-word instruction's SECOND word. But do_jump is
-    //   also keyed off inst_consumed, and the decoder (always @(inst_word)) is
-    //   combinational and ungated. So on the cycle the FILL CONSTANT is consumed
-    //   as word 2, the constant is simultaneously decoded, and:
-    //       inst_is_jump=1, inst_consumed=1  =>  do_jump=1
-    //       prog_counter <= jump_target = inst_word[PROG_ADDR_BITS+2:3]
-    //   Observed: constant 0x11111111 -> pc jumps 1 -> 546 (= 0x11111111[12:3]).
-    //   inst_valid_for_decode IS correctly 0 on that cycle; do_jump just does not
-    //   consult it.
-    //
-    //   CHECK and LOOPEND tails are LATENT, NOT SAFE: do_jump has the same
-    //   ungated inst_consumed for both. They only passed the sweep because their
-    //   extra conditions (check_success, loopend_active) happened to be false.
-    //   STOP/NXT do not misfire because their effects ARE gated by
-    //   inst_valid_for_decode (scheduler.v:479, 576-577).
-    //
-    //   TASK word 2 is structurally immune: its low 2 bits are hardwired 2'b00,
-    //   so it can only ever decode as TASK(000) or NXT(100), never JUMP.
-    //   FILL word 2 is a free 32-bit constant and is fully exposed.
-    //
-    //   A one-line candidate fix (gate do_jump with inst_valid_for_decode) makes
-    //   this test pass with no regression across flexman/fmi/deployment(4 modes)/
-    //   the deployment trees. Kept out of tree pending review; see
-    //   FlexMan/scheduler_jump_gate.candidate.v.
-    //
-    //   WHY NOTHING EVER HIT THIS: every deployed program fills with 0x00000000.
-    //   Checked 2026-08-08 across flexman_program, the deployment programs
-    //   and a deployment program — 80 FILLs, every constant zero. Back-to-back FILLs are
-    //   common in all of them (one deployment program has 6 consecutive pairs at pc0..pc10) and work
-    //   fine; an earlier draft of this test wrongly blamed the back-to-back
-    //   sequence, when a SINGLE fill with a 001-tailed constant is enough.
-    //
-    //   Impact: any non-zero fill constant is unsafe unless its low 3 bits are
-    //   checked. That is a real constraint on the ISA/assembler today.
+    //   Not wrapper-specific: both reproduce on the `flexman` core too. Nothing
+    //   ever hit them in practice because every deployed program fills with
+    //   0x00000000. Back-to-back FILLs were never the trigger.
     // ══════════════════════════════════════════════════════════════════════
-`ifdef RUN_T6
     reset = 1'b1;
     fill_wr_count = 0;
     clear_all_mems;
@@ -735,7 +697,7 @@ initial begin
     dut.u_bba_mem.mem[0] = 32'd0;
     axi_write(32'hC000_0000, 32'h0200_0000);
 
-    // ONE fill. The only thing wrong with it is the constant's low 3 bits.
+    // ONE fill. The only thing unusual about it is the constant's low 3 bits.
     dut.u_prog_mem.mem[0] = fill_w1(4'd0, 1'b0, 4'd1, 19'd4);
     dut.u_prog_mem.mem[1] = 32'h1111_1111;   // low bits 001 == INST_JUMP
     dut.u_prog_mem.mem[2] = STOP_INST;
@@ -746,25 +708,57 @@ initial begin
 
     if (fill_wr_count == 4 &&
         pool_rd(0) == 32'h11111111 && pool_rd(3) == 32'h11111111) begin
-        $display("[T6] PASS  fill constant with a JUMP tail is handled — remove the RUN_T6 gate");
+        $display("[T6] PASS  JUMP-tailed fill constant not executed (%0d writes)", fill_wr_count);
     end else begin
-        $display("[T6] FAIL (EXPECTED — fill constant 0x11111111 decoded as JUMP; also fails on the core)");
+        $display("[T6] FAIL  fill constant 0x11111111 executed as JUMP");
         $display("           writes=%0d (exp 4)  pool[0..3]=%08h %08h %08h %08h",
                  fill_wr_count, pool_rd(0), pool_rd(1), pool_rd(2), pool_rd(3));
+        errors = errors + 1;
+        $display("[VERDICT] FAIL"); #20 $finish;
     end
-`endif
+
+    // ── T7: LOOP-tailed constant must not touch the loop state ──────────────
+    reset = 1'b1;
+    fill_wr_count = 0;
+    clear_all_mems;
+    repeat(4) @(posedge clk); #1;
+    reset = 1'b0;
+    test_num = 7;
+
+    dut.u_bba_mem.mem[0] = 32'd0;
+    axi_write(32'hC000_0000, 32'h0200_0000);
+
+    dut.u_prog_mem.mem[0] = fill_w1(4'd0, 1'b0, 4'd1, 19'd4);
+    dut.u_prog_mem.mem[1] = 32'h0000_02BE;   // low bits 110 == INST_LOOP, id=7, max=10
+    dut.u_prog_mem.mem[2] = STOP_INST;
+
+    axi_write(32'hE000_0000, 32'd0);
+    axi_write(32'hE010_0000, 32'd0);
+    repeat(400) @(posedge clk);
+
+    begin : t7
+        integer li; integer dirty;
+        dirty = 0;
+        for (li = 0; li < 8; li = li + 1)
+            if (dut.u_flexman.u_scheduler.loop_counter_r[li] !== 0 ||
+                dut.u_flexman.u_scheduler.loop_restart_r[li] !== 0) dirty = dirty + 1;
+        if (fill_wr_count == 4 && dirty == 0 &&
+            pool_rd(0) == 32'h000002BE && pool_rd(3) == 32'h000002BE) begin
+            $display("[T7] PASS  LOOP-tailed fill constant left loop state untouched");
+        end else begin
+            $display("[T7] FAIL  fill constant 0x000002BE corrupted loop state");
+            $display("           writes=%0d (exp 4)  dirty loop regs=%0d  counter[7]=%0d restart[7]=%0d",
+                     fill_wr_count, dirty,
+                     dut.u_flexman.u_scheduler.loop_counter_r[7],
+                     dut.u_flexman.u_scheduler.loop_restart_r[7]);
+            errors = errors + 1;
+            $display("[VERDICT] FAIL"); #20 $finish;
+        end
+    end
 
     // ══════════════════════════════════════════════════════════════════════
-    // T6 is EXCLUDED from the verdict on purpose: it is a known-failing probe for
-    // a pre-existing CORE defect, not a wrapper regression, so it must not gate
-    // this TB. Say so out loud when it ran, rather than printing a bare PASS
-    // underneath a visible [T6] FAIL.
     if (errors == 0) begin
-`ifdef RUN_T6
-        $display("[VERDICT] PASS  flexman_fpga_wrap: T1 T2 T3 T4 T5 passed (T6 excluded — known-failing core defect, see its comment)");
-`else
-        $display("[VERDICT] PASS  flexman_fpga_wrap: T1 T2 T3 T4 T5 all passed");
-`endif
+        $display("[VERDICT] PASS  flexman_fpga_wrap: T1 T2 T3 T4 T5 T6 T7 all passed");
     end else begin
         $display("[VERDICT] FAIL  %0d test(s) failed", errors);
     end
