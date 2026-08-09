@@ -527,7 +527,19 @@ assign inst_valid = word_ready_r | inst_word_valid_r;
 // ------------------------------------------------------------
 // Instruction decode (on inst_word, gated by inst_valid_for_decode)
 
-always @ (inst_word)
+// CANDIDATE FIX v2 (under test) — qualify the decode AT THE SOURCE.
+// These flags are a raw combinational decode of inst_word, which is ALSO the
+// second word of a two-word instruction (a FILL's 32-bit constant) on the cycle
+// that word is consumed. inst_valid_for_decode already knows this
+// (& ~task_w2_pending_r), but several CONSUMERS bypassed it and keyed off
+// inst_consumed instead -- and inst_consumed deliberately ORs in
+// inst_consumed_w2 outside that gate so the PC can advance past word 2.
+// Measured consequences on the unfixed RTL:
+//   constant 0x11111111 (tail 001 JUMP) -> do_jump, pc 1 -> 546 = word[12:3]
+//   constant 0x000002BE (tail 110 LOOP) -> loop_counter_r[7]=10, restart[7]=2
+// Zeroing the flags unless the word is a real instruction fixes every consumer
+// at once, including any added later, rather than patching each use site.
+always @ (*)
 begin
    inst_is_task    = 1'b0;
    inst_is_jump    = 1'b0;
@@ -538,6 +550,7 @@ begin
    inst_is_loop    = 1'b0;
    inst_is_loopend = 1'b0;
    inst_unknown    = 1'b0;
+   if (inst_valid_for_decode)
    case (inst_word[2:0])
       INST_TASK:    inst_is_task    = 1'b1;
       INST_JUMP:    inst_is_jump    = 1'b1;
