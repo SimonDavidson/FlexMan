@@ -685,13 +685,34 @@ initial begin
     //     0xBBBBBBBB   011         CHECK         PASS
     //     0xDEADBEEF   111         LOOPEND       PASS
     //
-    //   JUMP is the ONLY opcode whose term in `inst_consumed` carries no side
-    //   condition (scheduler.v:565) — TASK/FILL need a free table slot, CHECK
-    //   needs a result, NXT/LOOPEND need the barrier, STOP is handled elsewhere.
-    //   So it is the only one that can fire on a word that is not an instruction.
-    //   `inst_valid_for_decode` does gate decode with ~task_w2_pending_r
-    //   (scheduler.v:479), so the leak is a timing window around that flag, not a
-    //   missing gate — pinning the exact cycle is scheduler work, not TB work.
+    //   MECHANISM (traced cycle-by-cycle 2026-08-09, scheduler.v):
+    //     inst_consumed = (inst_valid_for_decode & ... decode terms ...)
+    //                   | inst_consumed_w2;          <- OUTSIDE the decode gate
+    //   That OR is deliberate and necessary: goto_nxt = inst_consumed is what
+    //   advances the PC past a two-word instruction's SECOND word. But do_jump is
+    //   also keyed off inst_consumed, and the decoder (always @(inst_word)) is
+    //   combinational and ungated. So on the cycle the FILL CONSTANT is consumed
+    //   as word 2, the constant is simultaneously decoded, and:
+    //       inst_is_jump=1, inst_consumed=1  =>  do_jump=1
+    //       prog_counter <= jump_target = inst_word[PROG_ADDR_BITS+2:3]
+    //   Observed: constant 0x11111111 -> pc jumps 1 -> 546 (= 0x11111111[12:3]).
+    //   inst_valid_for_decode IS correctly 0 on that cycle; do_jump just does not
+    //   consult it.
+    //
+    //   CHECK and LOOPEND tails are LATENT, NOT SAFE: do_jump has the same
+    //   ungated inst_consumed for both. They only passed the sweep because their
+    //   extra conditions (check_success, loopend_active) happened to be false.
+    //   STOP/NXT do not misfire because their effects ARE gated by
+    //   inst_valid_for_decode (scheduler.v:479, 576-577).
+    //
+    //   TASK word 2 is structurally immune: its low 2 bits are hardwired 2'b00,
+    //   so it can only ever decode as TASK(000) or NXT(100), never JUMP.
+    //   FILL word 2 is a free 32-bit constant and is fully exposed.
+    //
+    //   A one-line candidate fix (gate do_jump with inst_valid_for_decode) makes
+    //   this test pass with no regression across flexman/fmi/deployment(4 modes)/
+    //   the deployment trees. Kept out of tree pending review; see
+    //   FlexMan/scheduler_jump_gate.candidate.v.
     //
     //   WHY NOTHING EVER HIT THIS: every deployed program fills with 0x00000000.
     //   Checked 2026-08-08 across flexman_program, the deployment programs
