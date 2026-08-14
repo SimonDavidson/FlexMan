@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
+// Authors: Simon Davidson & Claude | Last modified: 2026-08-14
 `timescale 10ps/1ps
 
 // Single-port synchronous BRAM.  Read-first mode: output reflects the old
@@ -16,7 +17,11 @@ module bram_sp #(
     input  wire [DATA_W-1:0]        din,
     output reg  [DATA_W-1:0]        dout
 );
+`ifdef ALTERA
+    (* ramstyle = "M10K" *) reg [DATA_W-1:0] mem [0:DEPTH-1];
+`else
     (* ram_style = "block" *) reg [DATA_W-1:0] mem [0:DEPTH-1];
+`endif
 
     always @(posedge clk) begin
         dout <= mem[addr];          // read-first: capture before write

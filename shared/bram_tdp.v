@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
+// Authors: Simon Davidson & Claude | Last modified: 2026-08-14
 `timescale 10ps/1ps
 
 // True dual-port synchronous BRAM.  Ports A and B are fully independent
@@ -24,7 +25,11 @@ module bram_tdp #(
     input  wire [DATA_W-1:0]        dinb,
     output reg  [DATA_W-1:0]        doutb
 );
+`ifdef ALTERA
+    (* ramstyle = "M10K" *) reg [DATA_W-1:0] mem [0:DEPTH-1];
+`else
     (* ram_style = "block" *) reg [DATA_W-1:0] mem [0:DEPTH-1];
+`endif
 
     always @(posedge clk) begin
         if (ena) begin
