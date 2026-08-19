@@ -1,0 +1,17 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude | Created 2026-08-19 | Last modified 2026-08-19
+#
+# tb_config_manager at the REAL deployed config width (WORDS_PER_CONFIG=16, as
+# instantiated by flexman.v, fmi_top.v, example_app_top.v and a deployment top),
+# with the default latency-agnostic config engine and a COMBINATIONAL cfg
+# memory model.
+#
+# This is the build the config-push latency check actually bites on: at the
+# tb's default WPC=4 the untouched 4-send BBA engine sets the latency, so the
+# config engine's stride is invisible. Expects 34 cycles (was 49 before the
+# read of word w+1 was overlapped with the accelerator write of word w).
+xrun -sv -timescale 10ps/1ps -access wrc -top tb_config_manager \
+  -define WPC16 \
+  config_manager.v tb_config_manager.v

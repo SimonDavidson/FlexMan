@@ -1,0 +1,17 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude | Created 2026-08-19 | Last modified 2026-08-19
+#
+# tb_config_manager with CFG_MEM_SYNC=1 and WORDS_PER_CONFIG=16 — the opt-in
+# fully-pipelined config engine, paired with a 1-cycle REGISTERED cfg memory
+# model (which is what every real build actually instantiates: shared/bram_sdp.v
+# on FPGA, a deployment SRAM model on the ASIC).
+#
+# Expects 19 cycles of config push, versus 34 in the default latency-agnostic
+# mode and 49 before either. Also covers the holding buffer under both memory
+# back-pressure (T5) and accelerator back-pressure (T6), which is where a
+# pipelined reader would otherwise drop the word already in flight.
+xrun -sv -timescale 10ps/1ps -access wrc -top tb_config_manager \
+  -define CFG_SYNC -define WPC16 \
+  config_manager.v tb_config_manager.v

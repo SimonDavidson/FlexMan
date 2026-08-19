@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
+// Authors: Simon Davidson & Claude | Created: 2026-05-11 | Last modified: 2026-08-19
 `timescale 10ps/1ps
 `include "../shared/constants.v"
 
@@ -20,6 +21,18 @@
 //   T5  Memory back-pressure: wait_i pre-asserted on first read
 //   T6  Accelerator back-pressure: cm_config_wait_i held on first write
 //
+// Build modes (all three are standing regressions — see the .bsh files):
+//   (none)                     WPC=4,  CFG_MEM_SYNC=0, COMBINATIONAL cfg mem
+//   -define WPC16              WPC=16, CFG_MEM_SYNC=0, COMBINATIONAL cfg mem
+//   -define CFG_SYNC -define WPC16
+//                              WPC=16, CFG_MEM_SYNC=1, REGISTERED cfg mem
+// T1 additionally asserts the config-push latency (start_new_block_i ->
+// cm_config_finished_o), which is the dead time in front of every compute
+// task. At WPC=16 that is 34 cycles in the default mode and 19 with
+// CFG_MEM_SYNC=1, versus 49 before the config engine was pipelined. At the
+// default WPC=4 the untouched 4-send BBA engine sets the latency (13) in
+// every mode, which is why WPC16 exists.
+//
 // Test data encoding
 //   cfg word n of config C  →  32'hC0nn_0000 | (C<<8) | n
 //   BBA entry for buffer B  →  32'hB000_0000 | B
@@ -29,7 +42,15 @@ module tb_config_manager;
 
 // ─── TB constants ─────────────────────────────────────────────────────────────
 localparam CONFIG_MEM_SZ    = 32;
+// -define WPC16 builds at the real deployed width (flexman.v / a deployment top
+// both instantiate WORDS_PER_CONFIG=16); the default 4 keeps the original
+// vectors. The config-push latency check below only bites at 16, where the
+// config engine — not the untouched 4-send BBA engine — sets the latency.
+`ifdef WPC16
+localparam WORDS_PER_CONFIG = 16;
+`else
 localparam WORDS_PER_CONFIG = 4;
+`endif
 localparam NUM_BUFFERS      = 32;
 localparam BUFF_INDEX_SZ    = 5;
 localparam NUM_ACC          = 2;
@@ -104,7 +125,12 @@ config_manager #(
     .DATAWORD_SZ              (DATAWORD_SZ),
     .ADDR_SZ                  (ADDR_SZ),
     .SCH_ENTRY_SZ             (SCH_ENTRY_SZ),
-    .NUM_SOURCES              (NUM_SOURCES)
+    .NUM_SOURCES              (NUM_SOURCES),
+`ifdef CFG_SYNC
+    .CFG_MEM_SYNC             (1)
+`else
+    .CFG_MEM_SYNC             (0)
+`endif
 ) dut (
     .clk                  (clk),
     .reset                (reset),
@@ -155,8 +181,25 @@ always @(posedge clk) begin
         bba_mem_arr[bba_mem_wr_addr_o[4:0]] <= bba_mem_wr_data_o;
 end
 
-// Combinational reads: data is always valid (zero wait by default)
+// Memory read models.
+//
+// Default: COMBINATIONAL — data is valid the same cycle the address is driven.
+// This is the harder case for the config engine, and the one the ~15 top-level
+// testbenches across FlexMan/jabra/Bosch use, so CFG_MEM_SYNC=0 must handle it.
+//
+// -define CFG_SYNC: a 1-cycle REGISTERED read, matching what every real build
+// actually instantiates (shared/bram_sdp.v, a deployment SRAM model), paired with
+// CFG_MEM_SYNC=1 above.  Gated on cfg_mem_rd_o, like the SYNCMEM_FAB model in
+// a downstream deployment TB, so it also proves the engine never samples a
+// cycle where it failed to issue a read.
+//
+// bba is combinational in BOTH modes: the BBA engine is untouched, and on
+// silicon the BBA store is a flop regfile read 0-cycle by fill_unit.
+`ifdef CFG_SYNC
+always @(posedge clk) if (cfg_mem_rd_o) cfg_mem_data_i <= cfg_mem_arr[cfg_mem_addr_o[4:0]];
+`else
 always @(*) cfg_mem_data_i = cfg_mem_arr[cfg_mem_addr_o[4:0]];
+`endif
 always @(*) bba_mem_data_i = bba_mem_arr[bba_mem_addr_o[4:0]];
 
 // ─── Accelerator receive capture ──────────────────────────────────────────────
@@ -311,6 +354,48 @@ task load_tables;
     end
 endtask
 
+// ─── Config-push latency measurement ──────────────────────────────────────────
+// Cycles from the start_new_block_i pulse to cm_config_finished_o — which is
+// exactly the dead time in front of every compute task, since the accelerator
+// only starts on that pulse (flexman.v: acc_start_new_block = cm_config_finished_o).
+// One always-block so `cyc` is never read across a race.
+integer cyc, trig_cyc, meas_lat;
+initial begin cyc = 0; trig_cyc = 0; meas_lat = -1; end
+always @(posedge clk) if (!reset) begin
+    cyc = cyc + 1;
+    if (start_new_block_i)    trig_cyc = cyc;
+    if (cm_config_finished_o) meas_lat = cyc - trig_cyc;
+end
+
+// Expected latency: whichever engine finishes last.  The config engine writes
+// word w at T+3+STRIDE*w and raises done the next cycle; the (untouched) BBA
+// engine writes send w at T+3+3w.  STRIDE is the whole point of CFG_MEM_SYNC:
+// 3 before this was pipelined, 2 latency-agnostic, 1 with a synchronous memory.
+`ifdef CFG_SYNC
+localparam CFG_STRIDE = 1;
+`else
+localparam CFG_STRIDE = 2;
+`endif
+localparam EXP_LAT_CFG = 4 + CFG_STRIDE * (WORDS_PER_CONFIG - 1);
+localparam EXP_LAT_BBA = 4 + 3 * (NUM_BBA_SENDS - 1);
+localparam EXP_LAT     = (EXP_LAT_CFG > EXP_LAT_BBA) ? EXP_LAT_CFG : EXP_LAT_BBA;
+
+task check_latency;
+    input [8*8-1:0] tag;
+    begin
+        // wait_done returns on the same edge that PRODUCES the pulse; the
+        // counter block samples it on the NEXT edge. Line them up.
+        @(posedge clk); #1;
+        if (meas_lat !== EXP_LAT) begin
+            $display("FAIL %0s: config-push latency %0d cyc (exp %0d) — WPC=%0d STRIDE=%0d",
+                     tag, meas_lat, EXP_LAT, WORDS_PER_CONFIG, CFG_STRIDE);
+            fail_count = fail_count + 1;
+        end else
+            $display("PASS %0s: config-push latency %0d cyc (WPC=%0d, %0d cyc/word)",
+                     tag, meas_lat, WORDS_PER_CONFIG, CFG_STRIDE);
+    end
+endtask
+
 // One-cycle start pulse to the DUT
 task trigger;
     input [TGT_ACC_ID_SZ-1:0]  acc;
@@ -355,10 +440,11 @@ initial begin
     clear_cap;
     trigger(1'b0, 5'd0, 5'd5, 5'd3, 5'd7, 5'd1);
     wait_done;
+    check_latency("T1");
 
     // cfg: words of config 0 in order
-    if (acc0_cfg_cnt !== 4)
-        begin $display("FAIL T1: acc0 cfg_cnt=%0d (exp 4)", acc0_cfg_cnt); fail_count=fail_count+1; end
+    if (acc0_cfg_cnt !== WORDS_PER_CONFIG)
+        begin $display("FAIL T1: acc0 cfg_cnt=%0d (exp %0d)", acc0_cfg_cnt, WORDS_PER_CONFIG); fail_count=fail_count+1; end
     else if (acc0_cfg_rx[0]!==32'hC000_0000 || acc0_cfg_rx[1]!==32'hC000_0001 ||
              acc0_cfg_rx[2]!==32'hC000_0002 || acc0_cfg_rx[3]!==32'hC000_0003)
         begin
@@ -371,8 +457,8 @@ initial begin
     else $display("PASS T1: acc0 cfg data");
 
     // bba: target(5) src1(3) src2(7) src3(1)
-    if (acc0_bba_cnt !== 4)
-        begin $display("FAIL T1: acc0 bba_cnt=%0d (exp 4)", acc0_bba_cnt); fail_count=fail_count+1; end
+    if (acc0_bba_cnt !== NUM_BBA_SENDS)
+        begin $display("FAIL T1: acc0 bba_cnt=%0d (exp %0d)", acc0_bba_cnt, NUM_BBA_SENDS); fail_count=fail_count+1; end
     else if (acc0_bba_rx[0]!==32'hB000_0005 || acc0_bba_rx[1]!==32'hB000_0003 ||
              acc0_bba_rx[2]!==32'hB000_0007 || acc0_bba_rx[3]!==32'hB000_0001)
         begin
@@ -398,7 +484,7 @@ initial begin
     trigger(1'b0, 5'd1, 5'd10, 5'd11, 5'd12, 5'd9);
     wait_done;
 
-    if (acc0_cfg_cnt !== 4)
+    if (acc0_cfg_cnt !== WORDS_PER_CONFIG)
         begin $display("FAIL T2: acc0 cfg_cnt=%0d", acc0_cfg_cnt); fail_count=fail_count+1; end
     else if (acc0_cfg_rx[0]!==32'hC100_0000 || acc0_cfg_rx[1]!==32'hC100_0001 ||
              acc0_cfg_rx[2]!==32'hC100_0002 || acc0_cfg_rx[3]!==32'hC100_0003)
@@ -411,7 +497,7 @@ initial begin
     else $display("PASS T2: acc0 cfg data (config_id=1)");
 
     // bba: tgt(10) src1(11) src2(12) src3(9)
-    if (acc0_bba_cnt !== 4)
+    if (acc0_bba_cnt !== NUM_BBA_SENDS)
         begin $display("FAIL T2: acc0 bba_cnt=%0d", acc0_bba_cnt); fail_count=fail_count+1; end
     else if (acc0_bba_rx[0]!==32'hB000_000A || acc0_bba_rx[1]!==32'hB000_000B ||
              acc0_bba_rx[2]!==32'hB000_000C || acc0_bba_rx[3]!==32'hB000_0009)
@@ -429,8 +515,8 @@ initial begin
     trigger(1'b1, 5'd0, 5'd5, 5'd3, 5'd7, 5'd1);
     wait_done;
 
-    if (acc1_cfg_cnt !== 4)
-        begin $display("FAIL T3: acc1 cfg_cnt=%0d (exp 4)", acc1_cfg_cnt); fail_count=fail_count+1; end
+    if (acc1_cfg_cnt !== WORDS_PER_CONFIG)
+        begin $display("FAIL T3: acc1 cfg_cnt=%0d (exp %0d)", acc1_cfg_cnt, WORDS_PER_CONFIG); fail_count=fail_count+1; end
     else if (acc1_cfg_rx[0]!==32'hC000_0000 || acc1_cfg_rx[1]!==32'hC000_0001 ||
              acc1_cfg_rx[2]!==32'hC000_0002 || acc1_cfg_rx[3]!==32'hC000_0003)
         begin
@@ -441,8 +527,8 @@ initial begin
         end
     else $display("PASS T3: acc1 cfg data");
 
-    if (acc1_bba_cnt !== 4)
-        begin $display("FAIL T3: acc1 bba_cnt=%0d (exp 4)", acc1_bba_cnt); fail_count=fail_count+1; end
+    if (acc1_bba_cnt !== NUM_BBA_SENDS)
+        begin $display("FAIL T3: acc1 bba_cnt=%0d (exp %0d)", acc1_bba_cnt, NUM_BBA_SENDS); fail_count=fail_count+1; end
     else if (acc1_bba_rx[0]!==32'hB000_0005 || acc1_bba_rx[1]!==32'hB000_0003 ||
              acc1_bba_rx[2]!==32'hB000_0007 || acc1_bba_rx[3]!==32'hB000_0001)
         begin
@@ -467,7 +553,7 @@ initial begin
     trigger(1'b0, 5'd0, 5'd5, 5'd3, 5'd7, 5'd1);
     wait_done;
 
-    if (acc0_cfg_cnt !== 4 || acc0_bba_cnt !== 4)
+    if (acc0_cfg_cnt !== WORDS_PER_CONFIG || acc0_bba_cnt !== NUM_BBA_SENDS)
         begin
             $display("FAIL T4: second block incomplete: cfg_cnt=%0d bba_cnt=%0d",
                      acc0_cfg_cnt, acc0_bba_cnt);
@@ -488,14 +574,14 @@ initial begin
     bba_mem_wait_i = 1'b0;
     wait_done;
 
-    if (acc0_cfg_cnt !== 4)
+    if (acc0_cfg_cnt !== WORDS_PER_CONFIG)
         begin $display("FAIL T5: acc0 cfg_cnt=%0d", acc0_cfg_cnt); fail_count=fail_count+1; end
     else if (acc0_cfg_rx[0]!==32'hC000_0000 || acc0_cfg_rx[1]!==32'hC000_0001 ||
              acc0_cfg_rx[2]!==32'hC000_0002 || acc0_cfg_rx[3]!==32'hC000_0003)
         begin $display("FAIL T5: cfg data wrong after memory wait"); fail_count=fail_count+1; end
     else $display("PASS T5: cfg data correct despite memory back-pressure");
 
-    if (acc0_bba_cnt !== 4)
+    if (acc0_bba_cnt !== NUM_BBA_SENDS)
         begin $display("FAIL T5: acc0 bba_cnt=%0d", acc0_bba_cnt); fail_count=fail_count+1; end
     else if (acc0_bba_rx[0]!==32'hB000_0005 || acc0_bba_rx[1]!==32'hB000_0003 ||
              acc0_bba_rx[2]!==32'hB000_0007 || acc0_bba_rx[3]!==32'hB000_0001)
@@ -518,14 +604,14 @@ initial begin
     cm_buff_base_wait_i = 2'b00;
     wait_done;
 
-    if (acc0_cfg_cnt !== 4)
+    if (acc0_cfg_cnt !== WORDS_PER_CONFIG)
         begin $display("FAIL T6: acc0 cfg_cnt=%0d", acc0_cfg_cnt); fail_count=fail_count+1; end
     else if (acc0_cfg_rx[0]!==32'hC000_0000 || acc0_cfg_rx[1]!==32'hC000_0001 ||
              acc0_cfg_rx[2]!==32'hC000_0002 || acc0_cfg_rx[3]!==32'hC000_0003)
         begin $display("FAIL T6: cfg data wrong after accelerator wait"); fail_count=fail_count+1; end
     else $display("PASS T6: cfg data correct despite accelerator back-pressure");
 
-    if (acc0_bba_cnt !== 4)
+    if (acc0_bba_cnt !== NUM_BBA_SENDS)
         begin $display("FAIL T6: acc0 bba_cnt=%0d", acc0_bba_cnt); fail_count=fail_count+1; end
     else if (acc0_bba_rx[0]!==32'hB000_0005 || acc0_bba_rx[1]!==32'hB000_0003 ||
              acc0_bba_rx[2]!==32'hB000_0007 || acc0_bba_rx[3]!==32'hB000_0001)
