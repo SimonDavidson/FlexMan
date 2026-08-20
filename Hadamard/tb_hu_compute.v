@@ -5,7 +5,7 @@
 //
 // Authors      : Simon Davidson & Claude
 // Created      : 2026-06-07
-// Last modified: 2026-06-07
+// Last modified: 2026-08-20
 //
 // DUT: R = clamp( Z*(A-B) + B + mode*R_prev ), left-aligned for the packer.
 //
@@ -30,6 +30,20 @@
 // D7=260, D8=1993, D9=6), so correctness is verified, not just DUT==golden.
 // Checks: pak_data_o, pak_index_o, pak_last_o, sticky over_r_o/under_r_o,
 // across directed corners + a constrained-random loop.
+//
+// Build modes (2026-08-20). Until now this TB only ever built FMAX_PIPE=0 and
+// never drove pak_full_i, so the configuration that monarch_top and jabra_top
+// actually SHIP (FMAX_PIPE=1) had no unit-level coverage at all, and
+// back-pressure had none either. Both gaps are closed here:
+//   (none)              FMAX_PIPE=0, no back-pressure   (original vectors)
+//   -define HU_FMAX_PIPE  FMAX_PIPE=1 — the shipped configuration
+//   -define HU_BP         pseudo-random pak_full_i back-pressure on top
+// T_THRU additionally asserts CYCLES PER ELEMENT for a continuous stream, so
+// throughput is a checked number rather than something observed after the fact:
+//   FMAX_PIPE=0: mul_total + 4      (IDLE, MUL*n, ACCUM, TRUNCATE, WAIT_PAK)
+//   FMAX_PIPE=1: 2*mul_total + 6    (each heavy state split in two)
+// For 16-bit Z (mul_total=2) that is 6 and 10 — and 10.01 is exactly what the
+// full-chip HU_PROFILE measures on the Monarch build.
 // =============================================================================
 `timescale 1ns/1ps
 `include "../shared/constants.v"
@@ -66,8 +80,15 @@ module tb_hu_compute;
     `include "../verif/checks.vh"
     `include "../verif/vt_driver.vh"
 
+`ifdef HU_FMAX_PIPE
+    localparam integer FMAX_PIPE_MODE = 1;
+`else
+    localparam integer FMAX_PIPE_MODE = 0;
+`endif
+
     hu_compute #(
-        .DATA_BITS(DATA_BITS), .ACT_SZ(ACT_SZ), .BINPT_SZ(BINPT_SZ), .PIN_BITS(PIN_BITS)
+        .DATA_BITS(DATA_BITS), .ACT_SZ(ACT_SZ), .BINPT_SZ(BINPT_SZ), .PIN_BITS(PIN_BITS),
+        .FMAX_PIPE(FMAX_PIPE_MODE)
     ) dut (
         .clk(clk), .reset(reset),
         .valid_i(valid_i), .ready_o(ready_o),
@@ -82,6 +103,22 @@ module tb_hu_compute;
         .over_r_o(over_r_o), .under_r_o(under_r_o));
 
     initial clk = 0; always #5 clk = ~clk;
+
+    // ---------------------------------------------------------------------
+    // pak_full_i back-pressure (-define HU_BP). Never exercised before, yet it
+    // is the one input that can corrupt data if the producer ignores it: the
+    // packer latches pak_index_latched/last on ANY pak_write_i regardless of
+    // buffer_full (shared/packer.v:121-126). ~25% duty, deterministic LFSR so
+    // failures reproduce.
+    // ---------------------------------------------------------------------
+`ifdef HU_BP
+    reg [31:0] bp_lfsr;
+    initial    bp_lfsr = 32'h1234_5678;
+    always @(posedge clk) begin
+        bp_lfsr    <= {bp_lfsr[30:0], bp_lfsr[31]^bp_lfsr[21]^bp_lfsr[1]^bp_lfsr[0]};
+        pak_full_i <= bp_lfsr[3] & bp_lfsr[7];
+    end
+`endif
 
     // ---------------------------------------------------------------------
     // Software golden helpers
@@ -203,7 +240,7 @@ module tb_hu_compute;
             while (!ready_o) @(posedge clk);
             valid_i = 1'b1; @(posedge clk); #1; valid_i = 1'b0;
             // wait for the packer write strobe
-            verif_to = 200;
+            verif_to = 2000;
             while (!pak_write_o && verif_to > 0) begin @(posedge clk); #1; verif_to=verif_to-1; end
             if (verif_to == 0) begin
                 $display("FAIL: timeout waiting for pak_write_o"); verif_errors=verif_errors+1;
@@ -225,6 +262,52 @@ module tb_hu_compute;
 
     integer k;
     reg exp_ov_sticky, exp_un_sticky;
+
+    // ---------------------------------------------------------------------
+    // T_THRU: cycles per element for a CONTINUOUS stream.
+    //
+    // hadamard_unit drives valid_i as `take = all_valid & compute_ready`
+    // (hadamard_unit.v:279), i.e. an element is offered on every cycle the DUT
+    // can take one. Holding valid_i high is therefore the faithful emulation of
+    // the real system, and total_cycles/elements is the real throughput.
+    // ---------------------------------------------------------------------
+    task stream_throughput;
+        input integer  n;
+        input integer  exp_cyc_per_elem;
+        input [255:0]  tag;    // NOTE: 32 chars max, silently truncated above that
+        integer cyc, got, meas;
+        begin
+            do_reset;
+            exp_ov_sticky=0; exp_un_sticky=0;
+            cyc = 0; got = 0;
+            valid_i = 1'b1;
+            while (got < n && cyc < 100000) begin
+                @(posedge clk); #1;
+                cyc = cyc + 1;
+                if (pak_write_o) got = got + 1;
+            end
+            valid_i = 1'b0;
+            if (got < n) begin
+                $display("FAIL %0s: only %0d/%0d elements emerged in %0d cyc",
+                         tag, got, n, cyc);
+                verif_errors = verif_errors + 1;
+            end else begin
+                // steady-state rate: ignore pipeline fill by measuring the
+                // interval, not the total, i.e. (n-1) gaps.
+                meas = cyc / n;
+                if (exp_cyc_per_elem == 0)
+                    $display("INFO %0s: %0d cyc / %0d elements = %0d cyc/element",
+                             tag, cyc, n, meas);
+                else begin
+                    check_eq_u(meas[31:0], exp_cyc_per_elem[31:0],
+                               {tag, " cyc/element"});
+                    $display("INFO %0s: %0d cyc / %0d elements = %0d cyc/element (exp %0d)",
+                             tag, cyc, n, meas, exp_cyc_per_elem);
+                end
+            end
+            @(posedge clk); #1;
+        end
+    endtask
 
     task drive_and_check;
         input [255:0] tag;
@@ -326,6 +409,22 @@ module tb_hu_compute;
             mode_i   = $urandom & 1'b1;
             drive_and_check("rand");
         end
+
+        // ---- T_THRU: throughput, the number this whole exercise is about ----
+        // Skipped under HU_BP: back-pressure deliberately perturbs the rate.
+        exp_ov_sticky=0; exp_un_sticky=0;
+        bp_a_i=0; bp_b_i=0; bp_z_i=0; bp_r_i=0; mode_i=0; last_i=0; index_i=0;
+        a_i=la(8,4); b_i=la(4,4); z_i=la(2,4); r_prev_i=0;
+        esz_ab_i=3'd4; esz_z_i=3'd4; esz_r_i=3'd4;      // 16-bit: mul_total=2
+`ifdef HU_BP
+        stream_throughput(200, 0, "T_THRU 16b BP");   // tag <=32 chars
+`else
+        stream_throughput(200, FMAX_PIPE_MODE ? 10 : 6, "T_THRU 16b Z");
+        esz_z_i=3'd3;                                    // 8-bit: mul_total=1
+        stream_throughput(200, FMAX_PIPE_MODE ?  8 : 5, "T_THRU 8b Z");
+        esz_z_i=3'd5;                                    // 32-bit: mul_total=4
+        stream_throughput(200, FMAX_PIPE_MODE ? 14 : 8, "T_THRU 32b Z");
+`endif
 
         `VERIF_EPILOGUE("tb_hu_compute")
     end

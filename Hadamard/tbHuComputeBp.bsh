@@ -1,0 +1,14 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude | Created 2026-08-20 | Last modified 2026-08-20
+#
+# tb_hu_compute with FMAX_PIPE=1 AND pseudo-random pak_full_i back-pressure.
+#
+# Back-pressure was never driven by either Hadamard testbench, yet pak_full_i is
+# the one input that can corrupt data if the producer ignores it: the packer
+# latches pak_index_latched/last on ANY pak_write_i regardless of buffer_full
+# (shared/packer.v:121-126). This is the standing guard for that contract.
+xrun -sv -timescale 1ns/1ps -access wrc -top tb_hu_compute \
+  -define HU_FMAX_PIPE -define HU_BP \
+  hu_compute.v tb_hu_compute.v
