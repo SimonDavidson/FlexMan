@@ -114,7 +114,7 @@ shifted up by 2 bits relative to the legacy 5-bit layout.)
 | [24:21] | Slot 1 buffer ID | 4-bit buffer ID |
 | [26:25] | Slot 2 mode | 2-bit mode |
 | [30:27] | Slot 2 buffer ID | 4-bit buffer ID |
-| [31]    | Reserved | Set to zero |
+| [31]    | **Wide-form selector** | `0` = narrow, two-word TASK (the encoding below). `1` = **wide**, three-word TASK — see *Wide TASK form*. Was documented as reserved/zero, and every program image generated before 2026-08-20 has it clear, which is what makes the wide form a pure extension. |
 
 **Word 2:**
 
@@ -143,6 +143,48 @@ The `#Targets` (usage count) field was widened 3→4 bits (max 7→15), packing 
 bit 31 (no reserved bits). The 4-bit field is the natural ceiling for three long slots in a 32-bit
 word; it covers a recurrent buffer shared by N output-partition lanes (read by 6N+1 consumers — 13
 at N=2). 5-bit would need 33 bits — it does not fit.
+
+### Wide TASK form (2026-08-20)
+
+Block-diagonal (Monarch) networks at higher block counts need usage counts well past
+15 — 21 at nblocks=8, 45 at 20, **85 at 40**. Three long slots at 7-bit `#Targets`
+need 3×13 = 39 bits, which will not fit word 2. Rather than re-balance the existing
+format (losing a long slot, which Bosch uses) or grow every TASK by a word, a
+**second TASK form** is selected per instruction by **word 1 bit 31**:
+
+| | words | long slots | `#Targets` |
+|---|---|---|---|
+| narrow (`w1[31]=0`) | 2 | 3 | 4-bit, max 15 |
+| **wide** (`w1[31]=1`) | 3 | 3 | **7-bit, max 127** |
+
+Word 1 is otherwise **identical**. Words 2 and 3 pack long slots at the
+`SLOT_LONG_SZ = mode(2) + buf_id(BUFF_INDX_SZ) + #tgts(TGT_COUNT_SZ)` stride, in the
+same `{mode, buf_id, #tgts}` lsb-first order the scheduler uses internally — so a
+slot is never split across a word, and decode is a straight slice copy that
+rescales with the parameters.
+
+**Word 2 (wide)** — `[1:0]` sentinel `2'b00`, slot 3 at bit 2, slot 4 at bit
+`2+SLOT_LONG_SZ`, `[31:2+2*SLOT_LONG_SZ]` spare (4 bits at TGT_COUNT_SZ=7).
+**Word 3 (wide)** — slot 5 at bit 0, `[31:SLOT_LONG_SZ]` spare (19 bits).
+
+Both forms may be **mixed freely in one program**: an assembler should emit the
+narrow form whenever every count fits 4 bits, so programs grow only where needed.
+
+Enabled by the scheduler's `WIDE_NTGT` parameter (default 0). With `WIDE_NTGT=0`,
+bit 31 is ignored exactly as before and the decode is bit-identical.
+
+**FILL is different, and this is the one backward-incompatible part.** FILL word 1
+has no spare bit for a per-instruction selector, so its widened `#Targets` is a
+**build-wide** choice governed by the same `WIDE_NTGT` parameter:
+
+| | `#Targets` | Block size |
+|---|---|---|
+| `WIDE_NTGT=0` | `[12:9]`, 4-bit | `[31:13]`, 19-bit (512K words) |
+| `WIDE_NTGT=1` | `[15:9]`, **7-bit** | `[31:16]`, 16-bit (65,536 words) |
+
+A `WIDE_NTGT=1` build therefore requires a program whose FILLs use the wide
+encoding; a legacy image will not run on it. 16 bits of block size remains ample —
+the largest fill in any current schedule is 632 words.
 
 **Notes:**
 

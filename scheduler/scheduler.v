@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
+// Authors: Simon Davidson & Claude | Last modified: 2026-08-20
 `include "../shared/constants.v"
 
 `timescale 10ps/1ps
@@ -12,6 +13,24 @@
 
 module scheduler
    #(parameter TGT_COUNT_SZ        = 4,
+     // WIDE_NTGT=1 enables the three-word "wide" TASK form, selected per
+     // instruction by TASK word 1 bit 31 (always reserved and zero until now --
+     // ISA_REFERENCE.md:117 -- so enabling this ADDS an instruction form and
+     // leaves every existing encoding untouched). Needed because the narrow
+     // form's 4-bit ntgt caps usage counts at 15, while Monarch at nblocks=40
+     // needs 85.
+     //
+     // Default 0 = the original decode, bit-identical, and the wide logic
+     // constant-folds away entirely.
+     //
+     // CAVEAT: FILL word 1 has no spare bit, so its widened ntgt (7-bit [15:9],
+     // block_size 16-bit [31:16]) is NOT per-instruction -- it applies to the
+     // whole build. A WIDE_NTGT=1 build therefore requires a program whose FILLs
+     // use the wide encoder. This is the one part that is not backward
+     // compatible, which is why only tops that regenerate their program enable it.
+     //
+     // CONTRACT: the toolchain's isa.NTGT_SZ_WIDE must equal TGT_COUNT_SZ.
+     parameter WIDE_NTGT           = 0,
      parameter CFG_ID_SZ           = 7,
      // RELAX_LOOP_BARRIER=1 removes the all_tasks_drained gate from NXT and
      // LOOPEND (default 0 = the completion barriers, bit-identical behaviour).
@@ -248,6 +267,11 @@ reg  [PROG_DATA_BITS-1:0] task_w2_r;
 reg                        task_w2_pending_r;
 wire                       task_w2_arrived;
 reg                        pending_is_fill_r;    // 1 = pending word 2 is FILL
+// Wide (three-word) TASK: word 3 fetch state. Idle when WIDE_NTGT=0.
+reg                        task_w3_pending_r;
+reg                        pending_is_wide_r;    // 1 = this TASK is the wide form
+wire                       task_w3_arrived;
+wire                       inst_consumed_w3;
 // Registered fields from FILL word 1 (latched when FILL word 1 is consumed):
 reg  [19:0]                fill_block_size_r;
 reg  [BUFF_INDX_SZ-1:0]   fill_dst_buf_r;
@@ -412,6 +436,8 @@ assign inst_word = inst_word_valid_r ? held_inst_word_r : prog_mem_data_i;
 
 assign task_w2_arrived   = task_w2_pending_r & inst_valid;
 assign inst_consumed_w2  = task_w2_arrived & ~test_stall_pipe;
+assign task_w3_arrived   = task_w3_pending_r & inst_valid;
+assign inst_consumed_w3  = task_w3_arrived & ~test_stall_pipe;
 
 always @ (posedge clk)
 begin
@@ -419,6 +445,8 @@ begin
    begin
       task_w2_pending_r <= 1'b0;
       pending_is_fill_r <= 1'b0;
+      task_w3_pending_r <= 1'b0;
+      pending_is_wide_r <= 1'b0;
       task_w1_r         <= 'b0;
       task_w2_r         <= 'b0;
       fill_block_size_r <= 'b0;
@@ -433,14 +461,22 @@ begin
       begin
          task_w2_pending_r <= 1'b1;
          pending_is_fill_r <= inst_is_fill;
+         // Only a TASK can be wide; FILL stays two-word.
+         pending_is_wide_r <= (WIDE_NTGT != 0) & inst_is_task & inst_word[31];
          task_w1_r         <= inst_word;
          if (inst_is_fill) begin
-            // Latch FILL word 1 fields: [6:3]=buf_id (4 bits), [8]=colour,
-            // [12:9]=#targets (4 bits), [31:13]=block_size (19 bits)
+            // Latch FILL word 1 fields. [6:3]=buf_id, [8]=colour, then either
+            //   WIDE_NTGT=0: [12:9]  ntgt (4-bit),  [31:13] block_size (19-bit)
+            //   WIDE_NTGT=1: [15:9]  ntgt (7-bit),  [31:16] block_size (16-bit)
+            // FILL word 1 has no spare bit for a per-instruction selector, so
+            // this is a BUILD-WIDE choice -- see the WIDE_NTGT parameter note.
+            // 16 bits still covers 65,536 words; the largest fill in any current
+            // schedule is 632.
             fill_dst_buf_r    <= inst_word[3 +: BUFF_INDX_SZ];
             fill_ntgt_r       <= inst_word[9 +: TGT_COUNT_SZ];
             fill_colour_r     <= inst_word[8];
-            fill_block_size_r <= inst_word[31:13];
+            fill_block_size_r <= (WIDE_NTGT != 0) ? {3'b000, inst_word[31:16]}
+                                                  : inst_word[31:13];
          end
       end
       if (inst_consumed_w2)
@@ -450,12 +486,23 @@ begin
          task_w2_r         <= inst_word;
          if (pending_is_fill_r)
             fill_value_r <= inst_word;  // full 32-bit constant, no sentinel check
+         // Wide TASK: word 2 does NOT complete the instruction; go fetch word 3.
+         // task_w1_r/task_w2_r hold; load_new_entry is deferred to word 3.
+         if (pending_is_wide_r)
+            task_w3_pending_r <= 1'b1;
       end
-      // Flush in-flight two-word instruction on START or CONTINUE
+      if (inst_consumed_w3)
+      begin
+         task_w3_pending_r <= 1'b0;
+         pending_is_wide_r <= 1'b0;
+      end
+      // Flush any in-flight multi-word instruction on START or CONTINUE
       if (do_start | do_continue)
       begin
          task_w2_pending_r <= 1'b0;
          pending_is_fill_r <= 1'b0;
+         task_w3_pending_r <= 1'b0;
+         pending_is_wide_r <= 1'b0;
       end
    end
 end
@@ -475,8 +522,8 @@ begin
       fill_in_flight_r <= 1'b0;
 end
 
-// Suppress normal decode while fetching word 2:
-assign inst_valid_for_decode = inst_valid & ~task_w2_pending_r;
+// Suppress normal decode while fetching word 2 (or word 3 of a wide TASK):
+assign inst_valid_for_decode = inst_valid & ~task_w2_pending_r & ~task_w3_pending_r;
 
 // ------------------------------------------------------------
 // Loop counters
@@ -581,10 +628,13 @@ assign inst_consumed = inst_valid_for_decode & ~test_stall_pipe & (
                         | (inst_is_loopend & loop_barrier_ok)
                         | (inst_is_nxt    & loop_barrier_ok)
                        )
-                     | inst_consumed_w2;
+                     | inst_consumed_w2
+                     | inst_consumed_w3;
 
-// load_new_entry fires when word 2 of a two-word instruction is latched:
-assign load_new_entry = inst_consumed_w2;
+// load_new_entry fires on the LAST word of the instruction: word 2 for the
+// narrow form, word 3 for the wide one.
+assign load_new_entry = (inst_consumed_w2 & ~pending_is_wide_r)
+                      |  inst_consumed_w3;
 
 assign nxt_input_pulse_o  = inst_valid_for_decode & inst_is_nxt & inst_word[4] & loop_barrier_ok & ~test_stall_pipe;
 assign nxt_output_pulse_o = inst_valid_for_decode & inst_is_nxt & inst_word[5] & loop_barrier_ok & ~test_stall_pipe;
@@ -636,6 +686,23 @@ begin
       // Slot 2:
       d[2*SLOT_SHORT_SZ +: MODE_SZ]                        = task_w1_r[26:25];
       d[2*SLOT_SHORT_SZ + MODE_SZ +: BUFF_INDX_SZ]         = task_w1_r[30:27];
+      // ---- long slots 3..5 ----
+      if (pending_is_wide_r) begin
+         // WIDE form. The instruction packs long slots at exactly the same
+         // SLOT_LONG_SZ stride, and in the same {mode,id,ntgt} lsb-first order,
+         // that the entry uses internally -- so decode is a straight slice copy
+         // and rescales automatically with TGT_COUNT_SZ / BUFF_INDX_SZ.
+         //   W2: [1:0] sentinel, slot3 at bit 2, slot4 at bit 2+SLOT_LONG_SZ
+         //   W3: slot5 at bit 0
+         // task_w2_r is settled here (latched a cycle earlier); inst_word is the
+         // live W3, for the same reason the narrow path reads it live.
+         d[LONG_BASE + 0*SLOT_LONG_SZ +: SLOT_LONG_SZ] =
+                                     task_w2_r[2                 +: SLOT_LONG_SZ];
+         d[LONG_BASE + 1*SLOT_LONG_SZ +: SLOT_LONG_SZ] =
+                                     task_w2_r[2 + SLOT_LONG_SZ  +: SLOT_LONG_SZ];
+         d[LONG_BASE + 2*SLOT_LONG_SZ +: SLOT_LONG_SZ] =
+                                     inst_word[0                 +: SLOT_LONG_SZ];
+      end else begin
       // Slot 3 (long: mode+id+ntgt):
       // Use inst_word (live W2) not task_w2_r: load_new_entry fires in the same cycle
       // as inst_consumed_w2, before task_w2_r latches the new value at posedge.
@@ -650,6 +717,7 @@ begin
       d[LONG_BASE + 2*SLOT_LONG_SZ +: MODE_SZ]             = inst_word[23:22];
       d[LONG_BASE + 2*SLOT_LONG_SZ + MODE_SZ +: BUFF_INDX_SZ]         = inst_word[27:24];
       d[LONG_BASE + 2*SLOT_LONG_SZ + MODE_SZ + BUFF_INDX_SZ +: TGT_COUNT_SZ] = inst_word[31:28];
+      end
       // Header (acc_id zero-extended from 2-bit TASK field to TGT_ACC_SZ bits):
       d[E_COLOUR]                   = task_w1_r[12];
       d[E_ACC_START +: TGT_ACC_SZ] = {{(TGT_ACC_SZ-2){1'b0}}, task_w1_r[4:3]};
