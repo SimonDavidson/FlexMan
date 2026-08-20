@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
+// Authors: Simon Davidson & Claude | Last modified: 2026-08-20
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 /* Hadamard compute: R[i] = Z[i]*(A[i]-B[i]) + B[i] + mode*R_prev[i]
  *
@@ -168,11 +169,25 @@ reg signed [ACC_BITS-1:0] shifted_r;        /* ST_TRUNCATE -> ST_TRUNC_CLAMP*/
 wire [7:0] z_chunk;
 assign z_chunk = z_val >> ({mul_count, 3'b000});      /* byte mul_count of z_val */
 wire is_top_chunk = (mul_count == mul_total - 1'b1);
-wire signed [ACC_BITS-1:0] chunk_ext = is_top_chunk
-    ? $signed({{(ACC_BITS-8){z_chunk[7]}}, z_chunk})   /* sign-extend top byte   */
-    : $signed({{(ACC_BITS-8){1'b0}},       z_chunk});  /* zero-extend low bytes  */
-wire signed [ACC_BITS-1:0] amb_ext  = $signed({{(ACC_BITS-WIDE){amb[WIDE-1]}}, amb});
-wire signed [ACC_BITS-1:0] partial  = (chunk_ext * amb_ext) << ({mul_count, 3'b000});
+/* 2026-08-20: multiply operands are declared at their REAL widths, not at the
+ * accumulator width.  Previously both were sign-extended to ACC_BITS first, so
+ * this read as an 84 x 84 signed multiply; Vivado did not prune it back to the
+ * 8 significant bits of the chunk and spent 12 DSP48E2 on it -- 57% of every
+ * DSP in the whole design, for a multiply that needs about 2.  Narrowing to
+ * 9 x 49 -> 58 bits is the SAME arithmetic (the product cannot exceed 58 bits,
+ * so the old truncation to ACC_BITS never removed anything) and measures
+ * 12 -> 3 DSP48E2, 45 -> 41 CARRY8, 2202 -> 2126 LUT, FF unchanged, in
+ * out-of-context synthesis on xck26.  Verified bit-identical by tb_hu_compute's
+ * full suite (20,059 checks against the software golden, in both FMAX_PIPE
+ * modes) and by full-chip bit-exactness.
+ * Sign convention is unchanged: the top chunk is signed, lower chunks unsigned. */
+wire signed [8:0]          chunk_n = is_top_chunk
+    ? $signed({z_chunk[7], z_chunk})                   /* sign-extend top byte   */
+    : $signed({1'b0,       z_chunk});                  /* zero-extend low bytes  */
+wire signed [WIDE:0]       amb_n   = $signed({amb[WIDE-1], amb});
+wire signed [WIDE+9:0]     prod_n  = chunk_n * amb_n;  /* 9 x 49 -> 58 bits      */
+wire signed [ACC_BITS-1:0] partial =
+    $signed({{(ACC_BITS-WIDE-10){prod_n[WIDE+9]}}, prod_n}) << ({mul_count, 3'b000});
 
 /* -------------------------------------------------------------------------
  * Result holding register (ST_WAIT_PAK)
