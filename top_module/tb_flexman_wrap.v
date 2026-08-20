@@ -14,7 +14,7 @@
 // shared/bram_*.v primitive with a REGISTERED read. Nothing had ever simulated
 // that difference: the bba bug (fill_unit sampling a 1-cycle BRAM
 // combinationally) survived ~3 months of green core regressions and was only
-// caught when a downstream deployment wrapper TB became the first TB to drive a wrapper.
+// caught when a downstream deployment's TB became the first to drive a wrapper.
 //
 // The fix — hold fu_bba_mem_wait_i for the first cycle of each read — was
 // propagated into this wrapper on 2026-08-07 backed ONLY by elaboration and
@@ -37,8 +37,8 @@
 //
 // ⚠️ TWO WRAPPER-DEFAULT DISCREPANCIES FOUND WHILE WRITING THIS (2026-08-08)
 //   a) flexman_fpga_wrap declares WORDS_PER_CONFIG = 4. flexman.v itself
-//      defaults to 16, and jabra_top_fpga_wrap, another deployment wrapper,
-//      the deployment board top and the deployment wrapper ALL use 16 — this
+//      defaults to 16, and jabra_top_fpga_wrap plus all three downstream
+//      deployment wrappers ALL use 16 — this
 //      wrapper is the only one at 4. It changes the config_manager's cfg_mem
 //      stride (4 words per cfg_id instead of 16), so a program built for the
 //      16-word layout reads the wrong words. This TB instantiates with 16 to
