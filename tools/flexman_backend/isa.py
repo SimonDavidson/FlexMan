@@ -62,6 +62,17 @@ NTGT_MAX_NARROW   = (1 << NTGT_SZ_NARROW) - 1    # 15
 NTGT_MAX_WIDE     = (1 << NTGT_SZ_WIDE) - 1      # 127
 SLOT_LONG_SZ_WIDE = MODE_SZ + BUFF_INDX_SZ + NTGT_SZ_WIDE   # 13
 
+# cfg_id. The narrow TASK carries it in word 1 [11:5] -- 7 bits, 128 configs.
+# Monarch needs 172 at nblocks=20 and 329 at nblocks=40, so the WIDE form carries
+# it in word 3 instead, WHOLLY and contiguously (same principle as ntgt: no field
+# straddles a word). Word 3 has 19 bits spare after slot 5, so 9 bits fits with
+# room left. A wide TASK ALWAYS takes cfg_id from word 3; word 1's cfg field is
+# left zero there, so there is one rule and no redundant copy to diverge.
+CFG_ID_SZ_NARROW = 7
+CFG_ID_SZ_WIDE   = 9
+CFG_MAX_NARROW   = (1 << CFG_ID_SZ_NARROW) - 1     # 127
+CFG_MAX_WIDE     = (1 << CFG_ID_SZ_WIDE) - 1       # 511
+
 
 def _slot_long_wide(mode: int, buf: int, ntgt: int) -> int:
     """One long slot at the wide stride, lsb-first: {ntgt, id, mode}."""
@@ -130,9 +141,16 @@ def tw2_wide(m3: int, b3: int, n3: int,
             | _slot_long_wide(m4, b4, n4) << (2 + SLOT_LONG_SZ_WIDE))
 
 
-def tw3_wide(m5: int, b5: int, n5: int) -> int:
-    """Wide TASK word 3: long slot 5 at bit 0; [31:13] spare."""
-    return _slot_long_wide(m5, b5, n5)
+def tw3_wide(m5: int, b5: int, n5: int, cfg: int = 0) -> int:
+    """Wide TASK word 3: long slot 5 at bit 0, then cfg_id; rest spare.
+
+    cfg_id lives here rather than in word 1 because word 1 is full (bit 31 became
+    the wide selector) and because keeping it contiguous beats splitting it across
+    words -- you can read it straight out of a hex dump.
+    """
+    assert cfg <= CFG_MAX_WIDE, f"cfg_id {cfg} exceeds wide field ({CFG_MAX_WIDE})"
+    return (_slot_long_wide(m5, b5, n5)
+            | (cfg & CFG_MAX_WIDE) << SLOT_LONG_SZ_WIDE)
 
 
 def task_words(acc: int, cfg: int, colour: int,
@@ -143,16 +161,18 @@ def task_words(acc: int, cfg: int, colour: int,
                force_wide: bool = False) -> tuple:
     """Assemble one TASK, choosing the narrow (2-word) or wide (3-word) form.
 
-    Narrow is used whenever every usage count fits the 4-bit field, so programs
-    grow only where they must. force_wide=True emits the wide form regardless,
+    Narrow is used whenever every usage count fits the 4-bit field AND cfg_id fits
+    7 bits, so programs grow only where they must. force_wide=True emits the wide form regardless,
     which is what the nblocks=4 dual-encoding equivalence test uses: that variant
     fits BOTH forms, so the same schedule can be run through each decode path and
     required to be bit-exact.
     """
-    if force_wide or max(n3, n4, n5) > NTGT_MAX_NARROW:
-        return (tw1(acc, cfg, colour, m0, b0, m1, b1, m2, b2, wide=True),
+    # Wide is required by EITHER an oversized usage count or an oversized cfg_id.
+    if force_wide or max(n3, n4, n5) > NTGT_MAX_NARROW or cfg > CFG_MAX_NARROW:
+        # cfg_id goes in word 3; word 1's cfg field is zero in the wide form.
+        return (tw1(acc, 0, colour, m0, b0, m1, b1, m2, b2, wide=True),
                 tw2_wide(m3, b3, n3, m4, b4, n4),
-                tw3_wide(m5, b5, n5))
+                tw3_wide(m5, b5, n5, cfg))
     return (tw1(acc, cfg, colour, m0, b0, m1, b1, m2, b2),
             tw2(m3, b3, n3, m4, b4, n4, m5, b5, n5))
 

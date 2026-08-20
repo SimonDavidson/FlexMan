@@ -36,7 +36,7 @@ module tb_sch_wide;
 
 localparam TGT_ACC_SZ         = 3;
 localparam TGT_COUNT_SZ       = 7;    // wide build
-localparam CFG_ID_SZ          = 7;
+localparam CFG_ID_SZ          = 9;   // wide build: 512 configs (nb=40 needs 329)
 localparam NUM_BUFFERS        = 16;
 localparam BUFF_INDX_SZ       = 4;
 localparam COL_BUFF_ID_SZ     = 16;
@@ -76,12 +76,14 @@ function [31:0] tw1;                       // narrow TASK word 1
     begin tw1 = {1'b0, id2, m2, id1, m1, id0, m0, colour, cfg, acc, 3'b000}; end
 endfunction
 
-function [31:0] tw1_wide;                  // same, with the wide selector set
+// Wide word 1: selector set, and cfg_id field ZERO — a wide TASK carries cfg_id
+// in word 3 instead (word 1 is full, and contiguous beats split).
+function [31:0] tw1_wide;
     input [1:0] acc; input [6:0] cfg; input colour;
     input [1:0] m0; input [3:0] id0;
     input [1:0] m1; input [3:0] id1;
     input [1:0] m2; input [3:0] id2;
-    begin tw1_wide = {1'b1, id2, m2, id1, m1, id0, m0, colour, cfg, acc, 3'b000}; end
+    begin tw1_wide = {1'b1, id2, m2, id1, m1, id0, m0, colour, 7'd0, acc, 3'b000}; end
 endfunction
 
 function [31:0] tw2;                       // narrow word 2: 4-bit ntgt
@@ -102,9 +104,10 @@ function [31:0] tw2_wide;                  // wide word 2: sentinel + slots 3,4
     begin tw2_wide = {4'b0000, slot_wide(m4,id4,n4), slot_wide(m3,id3,n3), 2'b00}; end
 endfunction
 
-function [31:0] tw3_wide;                  // wide word 3: slot 5, rest spare
-    input [1:0] m5; input [3:0] id5; input [6:0] n5;
-    begin tw3_wide = {19'd0, slot_wide(m5,id5,n5)}; end
+function [31:0] tw3_wide;   // wide word 3: slot 5, then cfg_id, rest spare
+    input [1:0] m5; input [3:0] id5; input [6:0] n5; input [CFG_ID_SZ-1:0] cfg;
+    begin tw3_wide = {{(32-SLOT_LONG_SZ-CFG_ID_SZ){1'b0}}, cfg,
+                      slot_wide(m5,id5,n5)}; end
 endfunction
 
 localparam [31:0] STOP_INST = 32'h00000002;
@@ -169,7 +172,8 @@ endtask
 // dut.new_entry_data is the decoder's whole output: comparing it between the two
 // encodings is a direct test of the decode paths, independent of downstream
 // scheduling behaviour.
-localparam ENTRY_SZ = 3*(MODE_SZ+BUFF_INDX_SZ) + 3*SLOT_LONG_SZ + 1 + TGT_ACC_SZ + CFG_ID_SZ;
+localparam ENTRY_SZ    = 3*(MODE_SZ+BUFF_INDX_SZ) + 3*SLOT_LONG_SZ + 1 + TGT_ACC_SZ + CFG_ID_SZ;
+localparam E_CFG_START = 3*(MODE_SZ+BUFF_INDX_SZ) + 3*SLOT_LONG_SZ + 1 + TGT_ACC_SZ;
 reg [ENTRY_SZ-1:0] entry_cap [0:7];
 integer            entry_n = 0;
 always @(posedge clk) if (!reset && dut.load_new_entry) begin
@@ -209,14 +213,19 @@ initial begin
 
     prog_mem[2] = tw1_wide(2'd0, 7'd10, 1'b0, MODE_SRC,4'd1, MODE_SRC,4'd2, MODE_UNUSED,4'd0);
     prog_mem[3] = tw2_wide(MODE_TGT,4'd3,7'd9, MODE_RW,4'd4,7'd13);
-    prog_mem[4] = tw3_wide(MODE_SRC,4'd5,7'd2);
+    prog_mem[4] = tw3_wide(MODE_SRC,4'd5,7'd2, 7'd10);   // same cfg as the narrow twin
 
     // --- a task only the wide form can express ------------------------------
     prog_mem[5] = tw1_wide(2'd1, 7'd11, 1'b1, MODE_SRC,4'd6, MODE_UNUSED,4'd0, MODE_UNUSED,4'd0);
     prog_mem[6] = tw2_wide(MODE_TGT,4'd7,7'd85, MODE_RW,4'd8,7'd127);
-    prog_mem[7] = tw3_wide(MODE_SRC,4'd9,7'd64);
+    prog_mem[7] = tw3_wide(MODE_SRC,4'd9,7'd64, 7'd11);
 
-    prog_mem[8] = STOP_INST;
+    // --- a cfg_id only the wide form can express (329 configs at nblocks=40) ---
+    prog_mem[8]  = tw1_wide(2'd0, 7'd0, 1'b0, MODE_SRC,4'd1, MODE_UNUSED,4'd0, MODE_UNUSED,4'd0);
+    prog_mem[9]  = tw2_wide(MODE_TGT,4'd2,7'd3, MODE_UNUSED,4'd0,7'd0);
+    prog_mem[10] = tw3_wide(MODE_UNUSED,4'd0,7'd0, 9'd329);
+
+    prog_mem[11] = STOP_INST;
 
     reset = 1; sys_req = 0;
     repeat (4) @(posedge clk); #1;
@@ -254,8 +263,19 @@ initial begin
                  "W2 slot5 ntgt=64 survives (from word 3)");
     end
 
-    // ---- W3: exactly three entries, no phantom instructions ---------------
-    check_eq(entry_n, 3, "W3 exactly 3 tasks decoded (no phantom/lost words)");
+    // ---- W3: cfg_id beyond the narrow 7-bit field -------------------------
+    if (entry_n < 4) begin
+        $display("FAIL W3: wide-cfg task never loaded"); errors = errors + 1;
+    end else begin
+        check_eq((entry_cap[3] >> E_CFG_START) & ((1<<CFG_ID_SZ)-1), 329,
+                 "W3 cfg_id=329 survives (word 3)");
+    end
+    // cfg_id of the equivalence pair must also match (10, from opposite words)
+    check_eq((entry_cap[0] >> E_CFG_START) & ((1<<CFG_ID_SZ)-1), 10, "W1 narrow cfg_id");
+    check_eq((entry_cap[1] >> E_CFG_START) & ((1<<CFG_ID_SZ)-1), 10, "W1 wide cfg_id");
+
+    // ---- W4: exactly four entries, no phantom instructions ----------------
+    check_eq(entry_n, 4, "W4 exactly 4 tasks decoded (no phantom/lost words)");
 
     if (errors == 0) $display("=== tb_sch_wide: %0d check(s), 0 failure(s) ===\nPASS", checks);
     else             $display("=== tb_sch_wide: %0d check(s), %0d FAILURE(S) ===\nFAIL", checks, errors);

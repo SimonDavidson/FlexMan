@@ -153,3 +153,29 @@ def test_wide_ntgt_ceiling_is_enforced():
             pass
         else:
             raise AssertionError(f"ntgt={bad} should have been rejected")
+
+
+def test_wide_cfg_id_lives_wholly_in_word3():
+    w = isa.task_words(1, 329, 0, 0, 0, 0, 0, 0, 0,
+                       isa.M_TGT, 2, 3, 0, 0, 0, 0, 0, 0)
+    assert len(w) == 3, "cfg_id > 127 must force the wide form"
+    assert (w[0] >> 5) & 0x7F == 0, "word 1 cfg field must be zero in the wide form"
+    assert (w[2] >> isa.SLOT_LONG_SZ_WIDE) & isa.CFG_MAX_WIDE == 329
+
+
+def test_oversized_cfg_forces_wide_even_with_small_counts():
+    # counts all fit 4 bits; only cfg_id pushes it wide
+    narrow = isa.task_words(1, isa.CFG_MAX_NARROW, 0, 0, 0, 0, 0, 0, 0,
+                            isa.M_TGT, 2, 1, 0, 0, 0, 0, 0, 0)
+    assert len(narrow) == 2
+    wide = isa.task_words(1, isa.CFG_MAX_NARROW + 1, 0, 0, 0, 0, 0, 0, 0,
+                          isa.M_TGT, 2, 1, 0, 0, 0, 0, 0, 0)
+    assert len(wide) == 3
+
+
+def test_wide_cfg_ceiling_is_enforced():
+    try:
+        isa.tw3_wide(isa.M_UNUSED, 0, 0, isa.CFG_MAX_WIDE + 1)
+    except AssertionError:
+        return
+    raise AssertionError("cfg_id above the wide field should have been rejected")

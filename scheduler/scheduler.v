@@ -727,7 +727,16 @@ begin
       // Header (acc_id zero-extended from 2-bit TASK field to TGT_ACC_SZ bits):
       d[E_COLOUR]                   = task_w1_r[12];
       d[E_ACC_START +: TGT_ACC_SZ] = {{(TGT_ACC_SZ-2){1'b0}}, task_w1_r[4:3]};
-      d[E_CFG_START +: CFG_ID_SZ]  = task_w1_r[11:5];
+      // cfg_id: word 1 [11:5] is only 7 bits (128 configs), but Monarch needs 172
+      // at nblocks=20 and 329 at nblocks=40. The WIDE form therefore carries it
+      // WHOLLY in word 3, above slot 5 -- contiguous, like every other field, so
+      // it reads straight out of a hex dump. A wide TASK ALWAYS takes cfg_id from
+      // word 3 (word 1's cfg field is zero there): one rule, no redundant copy.
+      // inst_word is the live word 3 here, as for the slots above.
+      if (pending_is_wide_r)
+         d[E_CFG_START +: CFG_ID_SZ] = inst_word[SLOT_LONG_SZ +: CFG_ID_SZ];
+      else
+         d[E_CFG_START +: CFG_ID_SZ] = task_w1_r[11:5];   // zero-extends if wider
    end
 end
 
