@@ -186,6 +186,17 @@ A `WIDE_NTGT=1` build therefore requires a program whose FILLs use the wide
 encoding; a legacy image will not run on it. 16 bits of block size remains ample —
 the largest fill in any current schedule is 632 words.
 
+**Why FILL has no per-instruction selector, when bit 7 is free.** FILL word 1 bit 7
+*is* unused — `buf_id` occupies `[6:3]` and `colour` sits at `[8]`, and it is clear
+in all 111 FILL instructions across every committed image. It could carry a
+selector exactly like TASK's bit 31. It is **deliberately reserved instead**,
+because it is free only while `BUFF_INDX_SZ = 4`: at 32 buffers `buf_id` becomes
+`[7:3]` and consumes it. That ceiling is already binding — the N=2 multi-lane
+program uses **15 of the 16** buffer ids (5 singleton buffers + 5 per-lane roles,
+so N=3 would need 20). Spending bit 7 would cap the design at 16 buffers and block
+multi-lane beyond N=2. Making FILL build-wide costs far less, since only builds
+that regenerate their programs ever set `WIDE_NTGT=1`.
+
 **Notes:**
 
 - Slots 0–2 are **short slots**: they carry only mode and buffer ID, with no #Targets field.

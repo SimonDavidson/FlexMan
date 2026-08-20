@@ -23,11 +23,17 @@ module scheduler
      // Default 0 = the original decode, bit-identical, and the wide logic
      // constant-folds away entirely.
      //
-     // CAVEAT: FILL word 1 has no spare bit, so its widened ntgt (7-bit [15:9],
-     // block_size 16-bit [31:16]) is NOT per-instruction -- it applies to the
-     // whole build. A WIDE_NTGT=1 build therefore requires a program whose FILLs
-     // use the wide encoder. This is the one part that is not backward
-     // compatible, which is why only tops that regenerate their program enable it.
+     // CAVEAT: FILL's widened ntgt (7-bit [15:9], block_size 16-bit [31:16]) is
+     // FILL word 1 bit 7 IS free (buf_id occupies [6:3], colour sits at [8]) and could
+     // carry a per-instruction selector like TASK's bit 31 — but it is deliberately NOT
+     // spent. That bit is free only because BUFF_INDX_SZ=4; at 32 buffers buf_id becomes
+     // [7:3] and consumes it. The ceiling is already binding: the N=2 multi-lane program
+     // uses 15 of 16 buffer ids (5 singletons + 5 per-lane roles, so N=3 would need 20).
+     // Keeping bit 7 reserved preserves the ability to widen buf_id; the price is that
+     // FILL's widened ntgt is build-wide, which costs nothing real because only builds
+     // that regenerate their programs set WIDE_NTGT=1.
+     // A WIDE_NTGT=1 build therefore requires a program whose FILLs use the wide
+     // encoder. This is the one part that is not backward compatible.
      //
      // CONTRACT: the toolchain's isa.NTGT_SZ_WIDE must equal TGT_COUNT_SZ.
      parameter WIDE_NTGT           = 0,
