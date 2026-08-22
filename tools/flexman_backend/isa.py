@@ -53,7 +53,9 @@ M_TGT    = 0b11
 #       [27:15] slot 4
 #       [31:28] spare
 #   W3  [12:0]  slot 5
-#       [31:13] spare
+#       [21:13] cfg_id (9 bits)
+#       [22]    disjoint hint (see DISJOINT_BIT)
+#       [31:23] spare
 MODE_SZ           = 2
 BUFF_INDX_SZ      = 4
 NTGT_SZ_NARROW    = 4
@@ -72,6 +74,20 @@ CFG_ID_SZ_NARROW = 7
 CFG_ID_SZ_WIDE   = 9
 CFG_MAX_NARROW   = (1 << CFG_ID_SZ_NARROW) - 1     # 127
 CFG_MAX_WIDE     = (1 << CFG_ID_SZ_WIDE) - 1       # 511
+
+# Disjoint hint: wide word 3, the bit immediately above cfg_id (22 at the standard
+# widths). Set only when the GENERATOR HAS PROVED that this task's buffer writes do
+# not overlap those of the previous task on the same accelerator -- it lets
+# sch_entry skip the RW needs-full check, so blocks writing disjoint sub-ranges of
+# one output buffer stop serialising on each other's completion.
+#
+# WIDE FORM ONLY: the narrow TASK is packed solid to bit 31 in both words. That is
+# the right restriction -- the wide form is what nblocks>=8 uses, and nblocks=4 has
+# almost nothing to gain (~0.5%).
+#
+# The scheduler derives the same position as SLOT_LONG_SZ + CFG_ID_SZ, so the two
+# stay in step if either field is ever resized.
+DISJOINT_BIT     = SLOT_LONG_SZ_WIDE + CFG_ID_SZ_WIDE   # 22
 
 
 def _slot_long_wide(mode: int, buf: int, ntgt: int) -> int:
@@ -141,8 +157,8 @@ def tw2_wide(m3: int, b3: int, n3: int,
             | _slot_long_wide(m4, b4, n4) << (2 + SLOT_LONG_SZ_WIDE))
 
 
-def tw3_wide(m5: int, b5: int, n5: int, cfg: int = 0) -> int:
-    """Wide TASK word 3: long slot 5 at bit 0, then cfg_id; rest spare.
+def tw3_wide(m5: int, b5: int, n5: int, cfg: int = 0, disjoint: bool = False) -> int:
+    """Wide TASK word 3: long slot 5 at bit 0, then cfg_id, then the disjoint hint.
 
     cfg_id lives here rather than in word 1 because word 1 is full (bit 31 became
     the wide selector) and because keeping it contiguous beats splitting it across
@@ -150,7 +166,8 @@ def tw3_wide(m5: int, b5: int, n5: int, cfg: int = 0) -> int:
     """
     assert cfg <= CFG_MAX_WIDE, f"cfg_id {cfg} exceeds wide field ({CFG_MAX_WIDE})"
     return (_slot_long_wide(m5, b5, n5)
-            | (cfg & CFG_MAX_WIDE) << SLOT_LONG_SZ_WIDE)
+            | (cfg & CFG_MAX_WIDE) << SLOT_LONG_SZ_WIDE
+            | (1 << DISJOINT_BIT if disjoint else 0))
 
 
 def task_words(acc: int, cfg: int, colour: int,
@@ -158,7 +175,7 @@ def task_words(acc: int, cfg: int, colour: int,
                m3: int, b3: int, n3: int,
                m4: int, b4: int, n4: int,
                m5: int, b5: int, n5: int,
-               force_wide: bool = False) -> tuple:
+               force_wide: bool = False, disjoint: bool = False) -> tuple:
     """Assemble one TASK, choosing the narrow (2-word) or wide (3-word) form.
 
     Narrow is used whenever every usage count fits the 4-bit field AND cfg_id fits
@@ -167,12 +184,14 @@ def task_words(acc: int, cfg: int, colour: int,
     fits BOTH forms, so the same schedule can be run through each decode path and
     required to be bit-exact.
     """
-    # Wide is required by EITHER an oversized usage count or an oversized cfg_id.
-    if force_wide or max(n3, n4, n5) > NTGT_MAX_NARROW or cfg > CFG_MAX_NARROW:
+    # Wide is required by EITHER an oversized usage count or an oversized cfg_id --
+    # or by a disjoint hint, which the narrow form has no room to carry.
+    if (force_wide or disjoint
+            or max(n3, n4, n5) > NTGT_MAX_NARROW or cfg > CFG_MAX_NARROW):
         # cfg_id goes in word 3; word 1's cfg field is zero in the wide form.
         return (tw1(acc, 0, colour, m0, b0, m1, b1, m2, b2, wide=True),
                 tw2_wide(m3, b3, n3, m4, b4, n4),
-                tw3_wide(m5, b5, n5, cfg))
+                tw3_wide(m5, b5, n5, cfg, disjoint))
     return (tw1(acc, cfg, colour, m0, b0, m1, b1, m2, b2),
             tw2(m3, b3, n3, m4, b4, n4, m5, b5, n5))
 

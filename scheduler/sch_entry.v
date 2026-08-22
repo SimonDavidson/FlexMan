@@ -8,7 +8,23 @@ module sch_entry  #(parameter SCH_ENTRY_SZ        = 52,
                     parameter NUM_SLOTS           = 6,
                     parameter MODE_SZ             = 2,
                     parameter TGT_COUNT_SZ        = 3,
-                    parameter ACC_ID_BTM          = 0    // kept for sch_table compat
+                    parameter ACC_ID_BTM          = 0,   // kept for sch_table compat
+                    // DISJOINT_HINT=1 honours entry_hint_i (2026-08-22). Default 0
+                    // ignores it entirely, so ready_to_execute_o is unchanged.
+                    //
+                    // The hint means: "my buffer writes do not overlap those of
+                    // the previous task on MY accelerator". Monarch's
+                    // block-diagonal blocks each write a disjoint sub-range of one
+                    // output buffer, but the buffer model is whole-buffer, so
+                    // without this they serialise on each other's COMPLETION —
+                    // which is exactly the drain ANN_OVERLAP exists to hide.
+                    // Set per task by the generator, which computes the ranges and
+                    // can prove disjointness; hardware cannot see them.
+                    //
+                    // It bypasses the RW "needs full" check ONLY. TGT still needs
+                    // free (measured never to block) and SRC still needs full, so
+                    // real producer/consumer dependencies are untouched.
+                    parameter DISJOINT_HINT       = 0
     )
              (input  wire                      clk,
               input  wire                      reset,
@@ -17,11 +33,14 @@ module sch_entry  #(parameter SCH_ENTRY_SZ        = 52,
               input  wire                      delete_entry_i,
               input  wire                      new_entry_valid_i,
               input  wire [SCH_ENTRY_SZ-1:0]   new_entry_data_i,
+              input  wire                      new_entry_hint_i,
               input  wire                      shift_in_entry_valid_i,
               input  wire [SCH_ENTRY_SZ-1:0]   shift_in_entry_data_i,
+              input  wire                      shift_in_entry_hint_i,
               output wire                      shift_out_entry_valid_o,
               output reg                       entry_valid_o,
               output reg  [SCH_ENTRY_SZ-1:0]   entry_data_o,
+              output reg                       entry_hint_o,
 
               input  wire [NUM_HW_ACCELERATORS-1:0] acc_busy_i,
               input  wire [NUM_BUFFERS-1:0]    buffers_full_i,
@@ -48,6 +67,7 @@ localparam ACC_ID_START  = COLOUR_START + 1;
 
 wire entry_valid_nxt;
 wire [SCH_ENTRY_SZ-1:0] entry_data_nxt;
+wire entry_hint_nxt;
 
 assign shift_out_entry_valid_o = delete_entry_i ? 1'b0 : entry_valid_o;
 
@@ -61,13 +81,23 @@ assign entry_data_nxt  = load_new_entry_i ? new_entry_data_i
                        : shift_entry_i    ? shift_in_entry_data_i
                        :                    entry_data_o;
 
+// The hint rides alongside the entry rather than inside it: only this module
+// reads it, and widening SCH_ENTRY_SZ would force a lockstep edit of the
+// ENTRY_DATA_SZ localparam every top recomputes for itself.
+assign entry_hint_nxt  = load_new_entry_i ? new_entry_hint_i
+                       : delete_entry_i   ? entry_hint_o
+                       : shift_entry_i    ? shift_in_entry_hint_i
+                       :                    entry_hint_o;
+
 always @ (posedge clk)
    if (reset) begin
       entry_valid_o <= 1'b0;
       entry_data_o  <= 'b0;
+      entry_hint_o  <= 1'b0;
    end else begin
       entry_valid_o <= entry_valid_nxt;
       entry_data_o  <= entry_data_nxt;
+      entry_hint_o  <= entry_hint_nxt;
    end
 
 // Task colour and accelerator ID from stored entry:
@@ -80,6 +110,9 @@ wire acc_free = &(~required_acc | ~acc_busy_i);
 wire [NUM_SLOTS-1:0] slot_src_ok;
 wire [NUM_SLOTS-1:0] slot_tgt_ok;
 
+// Disjoint-hint bypass, applied to RW slots only (never SRC, never TGT).
+wire hint_ok = (DISJOINT_HINT != 0) & entry_hint_o;
+
 // Short slots 0-2 (mode + id, no ntgt):
 genvar gs;
 generate
@@ -91,7 +124,8 @@ generate
       // RW needs no free check: full=1 already implies the buffer is not busy.
       // Busy state (full=0, free=0) is caught by the full check failing.
       wire needs_free = (md == `MODE_TGT);
-      assign slot_src_ok[gs] = ~needs_full
+      wire rw_bypass  = hint_ok & (md == `MODE_RW);
+      assign slot_src_ok[gs] = ~needs_full | rw_bypass
                              | (buffers_full_i[bid] & (buffers_colour_i[bid] == entry_colour));
       assign slot_tgt_ok[gs] = ~needs_free | buffers_free_i[bid];
    end
@@ -103,7 +137,8 @@ generate
       wire [BUFF_INDX_SZ-1:0] bid = entry_data_o[BASE + MODE_SZ +: BUFF_INDX_SZ];
       wire needs_full = (md == `MODE_SRC) | (md == `MODE_RW);
       wire needs_free = (md == `MODE_TGT);
-      assign slot_src_ok[SLOTS_SHORT + gs] = ~needs_full
+      wire rw_bypass  = hint_ok & (md == `MODE_RW);
+      assign slot_src_ok[SLOTS_SHORT + gs] = ~needs_full | rw_bypass
                              | (buffers_full_i[bid] & (buffers_colour_i[bid] == entry_colour));
       assign slot_tgt_ok[SLOTS_SHORT + gs] = ~needs_free | buffers_free_i[bid];
    end

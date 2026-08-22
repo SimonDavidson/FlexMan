@@ -12,7 +12,9 @@ module sch_table  #(parameter SCH_ENTRY_SZ        = 52,
                     // SLOT_LONG_SZ).  Forwarded to every sch_entry below.
                     parameter MODE_SZ             = 2,
                     parameter BUFF_INDX_SZ        = 4,
-                    parameter TGT_COUNT_SZ        = 3
+                    parameter TGT_COUNT_SZ        = 3,
+                    // Forwarded to every sch_entry; default 0 ignores entry_hint_i.
+                    parameter DISJOINT_HINT       = 0
     )
              (input  wire                      clk,
               input  wire                      reset,
@@ -23,6 +25,8 @@ module sch_table  #(parameter SCH_ENTRY_SZ        = 52,
               input  wire                      load_new_entry_i,
               input  wire                      delete_entry_i,
               input  wire [SCH_ENTRY_SZ-1:0]   entry_data_i,
+              // Rides alongside entry_data_i rather than inside it — see sch_entry.
+              input  wire                      entry_hint_i,
 
               // Resource state:
               input  wire [NUM_HW_ACCELERATORS-1:0] acc_busy_i,
@@ -49,6 +53,7 @@ module sch_table  #(parameter SCH_ENTRY_SZ        = 52,
 
 wire [SCH_ENTRY_SZ-1:0] entry_data_r [0:NUM_SCH_ENTRIES-1];
 wire  [NUM_SCH_ENTRIES:0]  entry_valid_r;
+wire  [NUM_SCH_ENTRIES:0]  entry_hint_r;
 wire  [NUM_SCH_ENTRIES:0]  shift_out_valid;
 reg  [NUM_SCH_ENTRIES:0]   shift_entry;
 wire [NUM_SCH_ENTRIES-1:0] new_entry_valid_r;
@@ -132,6 +137,7 @@ assign launching             = (|select_to_go[NUM_SCH_ENTRIES-1:0]) & dispatch_o
 assign dispatch_to_acc_o     = launching;
 
 assign entry_valid_r[NUM_SCH_ENTRIES]   = 1'b0;
+assign entry_hint_r[NUM_SCH_ENTRIES]    = 1'b0;
 assign shift_out_valid[NUM_SCH_ENTRIES] = 1'b0;
 
 // Debug taps (no functional effect):
@@ -141,60 +147,72 @@ assign dbg_ready_to_go_o = ready_to_go;
 // Instantiate scheduler entries:
 sch_entry #(.SCH_ENTRY_SZ(SCH_ENTRY_SZ), .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATORS),
             .TGT_ACC_SZ(TGT_ACC_SZ), .NUM_BUFFERS(NUM_BUFFERS), .ACC_ID_BTM(ACC_ID_BTM),
-            .MODE_SZ(MODE_SZ), .BUFF_INDX_SZ(BUFF_INDX_SZ), .TGT_COUNT_SZ(TGT_COUNT_SZ)
+            .MODE_SZ(MODE_SZ), .BUFF_INDX_SZ(BUFF_INDX_SZ), .TGT_COUNT_SZ(TGT_COUNT_SZ),
+            .DISJOINT_HINT(DISJOINT_HINT)
            ) sch_entry0 (
    .clk(clk), .reset(reset),
    .load_new_entry_i(load_entry[0]), .shift_entry_i(shift_entry[0]),
    .delete_entry_i(delete_entry[0]), .new_entry_valid_i(new_entry_valid_r[0]),
-   .new_entry_data_i(entry_data_i),
+   .new_entry_data_i(entry_data_i), .new_entry_hint_i(entry_hint_i),
    .shift_in_entry_valid_i(entry_valid_r[1]), .shift_in_entry_data_i(entry_data_r[1]),
+   .shift_in_entry_hint_i(entry_hint_r[1]),
    .shift_out_entry_valid_o(shift_out_valid[0]),
    .entry_valid_o(entry_valid_r[0]), .entry_data_o(entry_data_r[0]),
+   .entry_hint_o(entry_hint_r[0]),
    .acc_busy_i(acc_busy_i), .buffers_full_i(buffers_full_i),
    .buffers_free_i(buffers_free_i), .buffers_colour_i(buffers_colour_i),
    .ready_to_execute_o(ready_to_go[0]));
 
 sch_entry #(.SCH_ENTRY_SZ(SCH_ENTRY_SZ), .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATORS),
             .TGT_ACC_SZ(TGT_ACC_SZ), .NUM_BUFFERS(NUM_BUFFERS), .ACC_ID_BTM(ACC_ID_BTM),
-            .MODE_SZ(MODE_SZ), .BUFF_INDX_SZ(BUFF_INDX_SZ), .TGT_COUNT_SZ(TGT_COUNT_SZ)
+            .MODE_SZ(MODE_SZ), .BUFF_INDX_SZ(BUFF_INDX_SZ), .TGT_COUNT_SZ(TGT_COUNT_SZ),
+            .DISJOINT_HINT(DISJOINT_HINT)
            ) sch_entry1 (
    .clk(clk), .reset(reset),
    .load_new_entry_i(load_entry[1]), .shift_entry_i(shift_entry[1]),
    .delete_entry_i(delete_entry[1]), .new_entry_valid_i(new_entry_valid_r[1]),
-   .new_entry_data_i(entry_data_i),
+   .new_entry_data_i(entry_data_i), .new_entry_hint_i(entry_hint_i),
    .shift_in_entry_valid_i(entry_valid_r[2]), .shift_in_entry_data_i(entry_data_r[2]),
+   .shift_in_entry_hint_i(entry_hint_r[2]),
    .shift_out_entry_valid_o(shift_out_valid[1]),
    .entry_valid_o(entry_valid_r[1]), .entry_data_o(entry_data_r[1]),
+   .entry_hint_o(entry_hint_r[1]),
    .acc_busy_i(acc_busy_i), .buffers_full_i(buffers_full_i),
    .buffers_free_i(buffers_free_i), .buffers_colour_i(buffers_colour_i),
    .ready_to_execute_o(ready_to_go[1]));
 
 sch_entry #(.SCH_ENTRY_SZ(SCH_ENTRY_SZ), .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATORS),
             .TGT_ACC_SZ(TGT_ACC_SZ), .NUM_BUFFERS(NUM_BUFFERS), .ACC_ID_BTM(ACC_ID_BTM),
-            .MODE_SZ(MODE_SZ), .BUFF_INDX_SZ(BUFF_INDX_SZ), .TGT_COUNT_SZ(TGT_COUNT_SZ)
+            .MODE_SZ(MODE_SZ), .BUFF_INDX_SZ(BUFF_INDX_SZ), .TGT_COUNT_SZ(TGT_COUNT_SZ),
+            .DISJOINT_HINT(DISJOINT_HINT)
            ) sch_entry2 (
    .clk(clk), .reset(reset),
    .load_new_entry_i(load_entry[2]), .shift_entry_i(shift_entry[2]),
    .delete_entry_i(delete_entry[2]), .new_entry_valid_i(new_entry_valid_r[2]),
-   .new_entry_data_i(entry_data_i),
+   .new_entry_data_i(entry_data_i), .new_entry_hint_i(entry_hint_i),
    .shift_in_entry_valid_i(entry_valid_r[3]), .shift_in_entry_data_i(entry_data_r[3]),
+   .shift_in_entry_hint_i(entry_hint_r[3]),
    .shift_out_entry_valid_o(shift_out_valid[2]),
    .entry_valid_o(entry_valid_r[2]), .entry_data_o(entry_data_r[2]),
+   .entry_hint_o(entry_hint_r[2]),
    .acc_busy_i(acc_busy_i), .buffers_full_i(buffers_full_i),
    .buffers_free_i(buffers_free_i), .buffers_colour_i(buffers_colour_i),
    .ready_to_execute_o(ready_to_go[2]));
 
 sch_entry #(.SCH_ENTRY_SZ(SCH_ENTRY_SZ), .NUM_HW_ACCELERATORS(NUM_HW_ACCELERATORS),
             .TGT_ACC_SZ(TGT_ACC_SZ), .NUM_BUFFERS(NUM_BUFFERS), .ACC_ID_BTM(ACC_ID_BTM),
-            .MODE_SZ(MODE_SZ), .BUFF_INDX_SZ(BUFF_INDX_SZ), .TGT_COUNT_SZ(TGT_COUNT_SZ)
+            .MODE_SZ(MODE_SZ), .BUFF_INDX_SZ(BUFF_INDX_SZ), .TGT_COUNT_SZ(TGT_COUNT_SZ),
+            .DISJOINT_HINT(DISJOINT_HINT)
            ) sch_entry3 (
    .clk(clk), .reset(reset),
    .load_new_entry_i(load_entry[3]), .shift_entry_i(shift_entry[3]),
    .delete_entry_i(delete_entry[3]), .new_entry_valid_i(new_entry_valid_r[3]),
-   .new_entry_data_i(entry_data_i),
+   .new_entry_data_i(entry_data_i), .new_entry_hint_i(entry_hint_i),
    .shift_in_entry_valid_i(1'b0), .shift_in_entry_data_i(entry_data_r[3]),
+   .shift_in_entry_hint_i(entry_hint_r[3]),
    .shift_out_entry_valid_o(shift_out_valid[3]),
    .entry_valid_o(entry_valid_r[3]), .entry_data_o(entry_data_r[3]),
+   .entry_hint_o(entry_hint_r[3]),
    .acc_busy_i(acc_busy_i), .buffers_full_i(buffers_full_i),
    .buffers_free_i(buffers_free_i), .buffers_colour_i(buffers_colour_i),
    .ready_to_execute_o(ready_to_go[3]));

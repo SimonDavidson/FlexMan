@@ -153,7 +153,14 @@ end else begin : gen_depth2
          // both in one pass keeps push+pop in the same cycle correct.
          case ({push, pop})
             2'b01: begin                       // pop only
-                      ent_r[0] <= ent_r[1];
+                      // Only shift when a successor is actually waiting.  On the
+                      // last pop the head is HELD, exactly as the DEPTH=1
+                      // register does, so the two are indistinguishable whenever
+                      // tasks never overlap (tb_acc_tracker_d2 T4 asserts this).
+                      // Consumers read slot_*_o on the completion cycle, when the
+                      // head is still valid either way — but matching outright
+                      // beats relying on that.
+                      if (occ_r == 2'd2) ent_r[0] <= ent_r[1];
                    end
             2'b10: begin                       // push only
                       if (occ_r == 2'd0) ent_r[0] <= new_set;

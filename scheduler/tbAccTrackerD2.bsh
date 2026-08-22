@@ -1,0 +1,10 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude | Created 2026-08-22 | Last modified 2026-08-22
+#
+# acc_hw_buffer_tracker DEPTH=2: two tasks in flight, the OLDEST one's slot set
+# stays published (sch_buffer_state applies it on the next completion), and with
+# acc_ready_next_i low the behaviour is identical to DEPTH=1.
+xrun -sv -timescale 1ns/1ps -access wrc -top tb_acc_tracker_d2 \
+  acc_hw_buffer_tracker.v tb_acc_tracker_d2.v

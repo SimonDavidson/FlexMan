@@ -165,7 +165,25 @@ rescales with the parameters.
 
 **Word 2 (wide)** — `[1:0]` sentinel `2'b00`, slot 3 at bit 2, slot 4 at bit
 `2+SLOT_LONG_SZ`, `[31:2+2*SLOT_LONG_SZ]` spare (4 bits at TGT_COUNT_SZ=7).
-**Word 3 (wide)** — slot 5 at bit 0, `[31:SLOT_LONG_SZ]` spare (19 bits).
+**Word 3 (wide)** — slot 5 at bit 0, then `cfg_id` (9 bits, 512 configs) at
+`[SLOT_LONG_SZ +: CFG_ID_SZ]`, then the **disjoint hint** at
+`[SLOT_LONG_SZ + CFG_ID_SZ]` (bit 22 at the standard widths); `[31:23]` spare.
+
+`cfg_id` lives here rather than in word 1 because word 1 is full (bit 31 became
+the wide selector) and because keeping it contiguous means it reads straight out
+of a hex dump. A wide TASK ALWAYS takes `cfg_id` from word 3; word 1's `cfg`
+field is left zero there, so there is one rule and no duplicate to diverge.
+
+| bit | field | meaning |
+|-----|-------|---------|
+| [22] | **Disjoint hint** | `1` = this task's buffer writes do not overlap those of the previous task on the SAME accelerator, so `sch_entry` may skip its RW "needs full" check. Set by the generator, which knows each task's written sub-range; hardware cannot see those ranges. Honoured only when the scheduler is built with `DISJOINT_HINT=1`, and it REQUIRES `MULTI_WRITER=1` in the buffer entries — otherwise a completing predecessor marks the buffer full while its successor is still writing. Zero in every image generated before 2026-08-22. |
+
+Why the hint exists: FlexMan's dependency model is whole-buffer, but a
+block-diagonal layer has every block writing a disjoint sub-range of ONE output
+buffer. Without the hint those blocks serialise on each other's *completion* —
+115,496 cycles of an nblocks=40 Monarch frame (11.1%) with the accelerator idle
+and willing. It is wide-form only: the narrow TASK is packed solid to bit 31 in
+both words, and nblocks=4 (the only narrow Monarch build) has ~0.5% to gain.
 
 Both forms may be **mixed freely in one program**: an assembler should emit the
 narrow form whenever every count fits 4 bits, so programs grow only where needed.

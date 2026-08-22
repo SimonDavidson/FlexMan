@@ -49,7 +49,10 @@ module sch_buffer_state
         parameter NUM_SLOTS           = 6,
         parameter MODE_SZ             = 2,
         // One bit per accelerator; 1 = allow a second task in flight.
-        parameter OVERLAP_ACC_MASK    = {NUM_HW_ACCELERATORS{1'b0}}
+        parameter OVERLAP_ACC_MASK    = {NUM_HW_ACCELERATORS{1'b0}},
+        // 1 = buffers tolerate more than one outstanding writer (needed with
+        // sch_entry's disjoint hint). Default 0 = original behaviour.
+        parameter MULTI_WRITER        = 0
        )
        (input  wire                    clk,
         input  wire                    reset,
@@ -282,7 +285,8 @@ assign acc_available_o = acc_free;
 genvar bi;
 generate
    for (bi = 0; bi < NUM_BUFFERS; bi = bi + 1) begin : gen_buf
-      buffer_state_entry #(.TGT_COUNT_SZ(TGT_COUNT_SZ)) buffer_n (
+      buffer_state_entry #(.TGT_COUNT_SZ(TGT_COUNT_SZ),
+                           .MULTI_WRITER(MULTI_WRITER)) buffer_n (
          .clk(clk),
          .reset(reset),
          .mark_as_full_i(mark_as_full[bi]),

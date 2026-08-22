@@ -72,7 +72,7 @@ module tb_sch_table;
         .clk(clk), .reset(reset),
         .table_slot_free_o(table_slot_free_o), .table_empty_o(table_empty_o),
         .load_new_entry_i(load_new_entry_i), .delete_entry_i(delete_entry_i),
-        .entry_data_i(entry_data_i),
+        .entry_data_i(entry_data_i), .entry_hint_i(1'b0),
         .acc_busy_i(acc_busy_i), .buffers_full_i(buffers_full_i),
         .buffers_free_i(buffers_free_i), .buffers_colour_i(buffers_colour_i),
         .cm_busy_i(1'b0),

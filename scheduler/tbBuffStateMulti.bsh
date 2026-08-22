@@ -1,0 +1,10 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude | Created 2026-08-22 | Last modified 2026-08-22
+#
+# buffer_state_entry MULTI_WRITER=1: a buffer must not read as FULL while any
+# writer is still outstanding, and must be indistinguishable from the original
+# single-writer entry whenever writers never overlap.
+xrun -sv -timescale 1ns/1ps -access wrc -top tb_buffer_state_multi \
+  buffer_state_entry.v tb_buffer_state_multi.v

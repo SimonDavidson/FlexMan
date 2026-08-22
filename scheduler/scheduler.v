@@ -67,6 +67,17 @@ module scheduler
      // stage.  Default 0 = original behaviour everywhere.  A masked
      // accelerator must drive acc_ready_next_i.  See acc_hw_buffer_tracker.
      parameter OVERLAP_ACC_MASK    = {NUM_HW_ACCELERATORS{1'b0}},
+     // DISJOINT_HINT=1 honours the wide TASK's per-instruction "my buffer writes
+     // do not overlap the previous task on my accelerator" bit, letting sch_entry
+     // skip the RW needs-full check. Default 0 ignores it. The bit sits just
+     // above cfg_id in wide word 3 and is zero in every image generated before
+     // 2026-08-22, so honouring it is a no-op on existing programs — the
+     // parameter exists to make that explicit rather than implicit.
+     // Requires MULTI_WRITER=1 in the buffer entries, else a completing
+     // predecessor marks the buffer full while its successor is still writing.
+     parameter DISJOINT_HINT       = 0,
+     // Must be 1 whenever DISJOINT_HINT is (see buffer_state_entry).
+     parameter MULTI_WRITER        = 0,
      // ACC ID width in scheduler table (3 bits to accommodate fill_unit at id 4):
      parameter TGT_ACC_SZ          = 3,
      // Derived entry layout sizes:
@@ -207,6 +218,7 @@ localparam LOOP_CNT_SZ = 26;
 wire                            start_new_task;
 reg  [ENTRY_DATA_SZ-1:0]        d;
 wire [ENTRY_DATA_SZ-1:0]        new_entry_data;
+wire                            new_entry_hint;
 wire [ENTRY_DATA_SZ-1:0]        entry_data_to_be_launched;
 wire [TGT_ACC_SZ-1:0]           to_launch_acc_hw_id;   // declared here for
                                                        // dispatch_in_flight_r below
@@ -749,6 +761,14 @@ end
 
 assign new_entry_data = d;
 
+// Disjoint hint: wide word 3, the bit immediately above cfg_id (bit 22 at the
+// standard SLOT_LONG_SZ=13 / CFG_ID_SZ=9). Derived rather than hardcoded so it
+// tracks the field widths, exactly as the slot and cfg_id slices above do.
+// FILL and narrow TASK never carry it.
+localparam E_HINT_BIT = SLOT_LONG_SZ + CFG_ID_SZ;
+assign new_entry_hint = (DISJOINT_HINT != 0) & ~pending_is_fill_r
+                      & pending_is_wide_r & inst_word[E_HINT_BIT];
+
 // ------------------------------------------------------------
 // Scheduler table
 
@@ -762,13 +782,15 @@ sch_table #(
    .ACC_ID_BTM(E_ACC_START),
    .MODE_SZ(MODE_SZ),
    .BUFF_INDX_SZ(BUFF_INDX_SZ),
-   .TGT_COUNT_SZ(TGT_COUNT_SZ)
+   .TGT_COUNT_SZ(TGT_COUNT_SZ),
+   .DISJOINT_HINT(DISJOINT_HINT)
 ) sch_table0 (
    .clk(clk),
    .reset(sch_clr),
    .load_new_entry_i(load_new_entry),
    .delete_entry_i(1'b0),
    .entry_data_i(new_entry_data),
+   .entry_hint_i(new_entry_hint),
    .dispatch_to_acc_o(start_new_task),
    .entry_data_o(entry_data_to_be_launched),
    .table_slot_free_o(table_slot_free),
@@ -795,7 +817,8 @@ sch_buffer_state #(
    .TGT_COUNT_SZ(TGT_COUNT_SZ),
    .NUM_SLOTS(NUM_SLOTS),
    .MODE_SZ(MODE_SZ),
-   .OVERLAP_ACC_MASK(OVERLAP_ACC_MASK)
+   .OVERLAP_ACC_MASK(OVERLAP_ACC_MASK),
+   .MULTI_WRITER(MULTI_WRITER)
 ) sch_buff_state0 (
    .clk(clk),
    .reset(sch_clr),
