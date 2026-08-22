@@ -287,6 +287,7 @@ scheduler #(
     .acc_busy_i(acc_busy),
     .acc_finished_i(acc_finished),
     .acc_result_i(acc_result),
+    .acc_ready_next_i({NUM_HW_ACCELERATORS{1'b0}}),
     .start_new_block_o(start_new_block),
     .target_acc_o(target_acc),
     .buffer_info_o(buffer_info),

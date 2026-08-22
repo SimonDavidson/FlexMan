@@ -5,7 +5,8 @@
 // sch_buffer_state
 //
 // Author: Simon D.
-// Version: 2.0
+// Version: 2.1
+// Authors: Simon Davidson & Claude   Last modified: 2026-08-22
 //
 // Tracks buffer and accelerator state for the scheduler.
 //
@@ -17,6 +18,21 @@
 //
 // On completion, slots with mode 10 or 11 are marked full with the
 // stored #targets count from the completing task.
+//
+// OVERLAP_ACC_MASK (2026-08-22, Simon Davidson & Claude)
+// ------------------------------------------------------
+// Default 0 = every accelerator behaves exactly as before.  A set bit gives
+// that accelerator a 2-deep buffer tracker, letting it accept its next task
+// while the current one drains its output stage (see acc_hw_buffer_tracker's
+// DEPTH).  Masked accelerators must drive acc_ready_next_i.
+//
+// Masked accelerators also get a 2-bit pending-completion counter instead of
+// the single pending BIT.  With two tasks in flight, two acc_finished_i pulses
+// arriving within one cycle would otherwise be merged by
+//    (pending | finished) & ~selected
+// and one completion lost for good — its buffers never freed, the scheduler
+// stalled.  Unmasked accelerators keep the original single-bit expression
+// verbatim, so nothing existing changes.
 //
 
 `define MODE_UNUSED 2'b00
@@ -31,7 +47,9 @@ module sch_buffer_state
         parameter TGT_ACC_SZ          = $clog2(NUM_HW_ACCELERATORS),
         parameter TGT_COUNT_SZ        = 3,
         parameter NUM_SLOTS           = 6,
-        parameter MODE_SZ             = 2
+        parameter MODE_SZ             = 2,
+        // One bit per accelerator; 1 = allow a second task in flight.
+        parameter OVERLAP_ACC_MASK    = {NUM_HW_ACCELERATORS{1'b0}}
        )
        (input  wire                    clk,
         input  wire                    reset,
@@ -40,6 +58,10 @@ module sch_buffer_state
         input wire [NUM_HW_ACCELERATORS-1:0] acc_busy_i,
         input wire [NUM_HW_ACCELERATORS-1:0] acc_finished_i,
         input wire [NUM_HW_ACCELERATORS-1:0] acc_result_i,
+
+        // Per-accelerator "I can take another task now" level.  Consulted only
+        // for accelerators set in OVERLAP_ACC_MASK; tie to 0 otherwise.
+        input wire [NUM_HW_ACCELERATORS-1:0] acc_ready_next_i,
 
         // External buffer pre-fill:
         input wire                     mark_buff_as_full_i,
@@ -100,8 +122,28 @@ reg found;
 //-----------------------------------------------------------------
 // Pending-completion queue
 //-----------------------------------------------------------------
-assign acc_process_pending_nxt = (acc_process_pending_r | acc_finished_i)
-                               & ~selected_finisher;
+genvar pi;
+generate
+   for (pi = 0; pi < NUM_HW_ACCELERATORS; pi = pi + 1) begin : gen_pend
+      if (((OVERLAP_ACC_MASK >> pi) & 1) == 0) begin : gen_bit
+         // Original: at most one completion can ever be outstanding.
+         assign acc_process_pending_nxt[pi] =
+                  (acc_process_pending_r[pi] | acc_finished_i[pi])
+                & ~selected_finisher[pi];
+      end else begin : gen_cnt
+         // Overlapped: count completions so two cannot merge.  Saturates at 3,
+         // which is unreachable with a 2-deep tracker but keeps the adder safe.
+         reg  [1:0] cnt_r;
+         wire       inc     = acc_finished_i[pi] & (cnt_r != 2'd3);
+         wire [1:0] cnt_nxt = cnt_r + {1'b0, inc}
+                                    - {1'b0, selected_finisher[pi]};
+         always @ (posedge clk)
+            if (reset) cnt_r <= 2'd0;
+            else       cnt_r <= cnt_nxt;
+         assign acc_process_pending_nxt[pi] = (cnt_nxt != 2'd0);
+      end
+   end
+endgenerate
 
 always @ (posedge clk)
 begin
@@ -213,7 +255,8 @@ generate
          .NUM_SLOTS(NUM_SLOTS),
          .BUFF_INDX_SZ(BUFF_INDX_SZ),
          .TGT_COUNT_SZ(TGT_COUNT_SZ),
-         .MODE_SZ(MODE_SZ)
+         .MODE_SZ(MODE_SZ),
+         .DEPTH((((OVERLAP_ACC_MASK >> ai) & 1) != 0) ? 2 : 1)
       ) hw_n (
          .clk(clk),
          .reset(reset),
@@ -222,6 +265,7 @@ generate
          .slot_mode_i(slot_mode_i),
          .slot_ntgt_i(slot_ntgt_i),
          .task_finished_i(selected_finisher[ai]),
+         .acc_ready_next_i(acc_ready_next_i[ai]),
          .acc_free_o(acc_free[ai]),
          .slot_buff_o(tr_slot_buff[ai]),
          .slot_mode_o(tr_slot_mode[ai]),

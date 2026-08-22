@@ -479,6 +479,7 @@ scheduler #(
     .acc_busy_i          ({1'b0, fmi_busy}),
     .acc_finished_i      ({1'b0, fmi_finished}),
     .acc_result_i        ({1'b0, fmi_result}),
+    .acc_ready_next_i    ({NUM_HW_ACCELERATORS{1'b0}}),   // no overlapped accelerators
     .start_new_block_o   (sch_start_new_block),
     .target_acc_o        (sch_target_acc),
     .buffer_info_o       (sch_buffer_info),

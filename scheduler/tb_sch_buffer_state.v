@@ -69,6 +69,7 @@ module tb_sch_buffer_state;
         .NUM_SLOTS(NUM_SLOTS), .MODE_SZ(MODE_SZ)) dut (
         .clk(clk), .reset(reset),
         .acc_busy_i(acc_busy_i), .acc_finished_i(acc_finished_i), .acc_result_i(acc_result_i),
+        .acc_ready_next_i({NUM_HW_ACCELERATORS{1'b0}}),
         .mark_buff_as_full_i(mark_buff_as_full_i), .full_buff_id_i(full_buff_id_i),
         .full_buff_usage_i(full_buff_usage_i),
         .start_new_task_i(start_new_task_i), .tgt_acc_id_i(tgt_acc_id_i),

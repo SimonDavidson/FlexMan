@@ -152,6 +152,7 @@ scheduler #(
     .acc_busy_i({NUM_HW_ACCELERATORS{1'b0}}),
     .acc_finished_i({NUM_HW_ACCELERATORS{1'b0}}),
     .acc_result_i(1'b0),
+    .acc_ready_next_i(1'b0),
     .start_new_block_o(start_new_block), .target_acc_o(target_acc),
     .buffer_info_o(buffer_info),
     .nxt_input_pulse_o(), .nxt_output_pulse_o(),

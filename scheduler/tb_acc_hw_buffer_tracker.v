@@ -48,6 +48,7 @@ module tb_acc_hw_buffer_tracker;
         .new_task_i(new_task_i),
         .slot_buff_i(slot_buff_i), .slot_mode_i(slot_mode_i), .slot_ntgt_i(slot_ntgt_i),
         .task_finished_i(task_finished_i),
+        .acc_ready_next_i(1'b0),          // DEPTH=1 ignores this
         .acc_free_o(acc_free_o),
         .slot_buff_o(slot_buff_o), .slot_mode_o(slot_mode_o), .slot_ntgt_o(slot_ntgt_o));
 

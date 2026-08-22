@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
-// Authors: Simon Davidson & Claude | Last modified: 2026-08-20
+// Authors: Simon Davidson & Claude | Last modified: 2026-08-22
 `include "../shared/constants.v"
 
 `timescale 10ps/1ps
@@ -62,6 +62,11 @@ module scheduler
      // Six buffer slots: 3 short (mode+id) + 3 long (mode+id+ntgt)
      parameter NUM_SLOTS           = 6,
      parameter MODE_SZ             = 2,
+     // One bit per accelerator; 1 = that accelerator may hold TWO tasks in
+     // flight, accepting the next while the current one drains its output
+     // stage.  Default 0 = original behaviour everywhere.  A masked
+     // accelerator must drive acc_ready_next_i.  See acc_hw_buffer_tracker.
+     parameter OVERLAP_ACC_MASK    = {NUM_HW_ACCELERATORS{1'b0}},
      // ACC ID width in scheduler table (3 bits to accommodate fill_unit at id 4):
      parameter TGT_ACC_SZ          = 3,
      // Derived entry layout sizes:
@@ -99,6 +104,8 @@ module scheduler
      input wire [NUM_HW_ACCELERATORS-1:0] acc_busy_i,
      input wire [NUM_HW_ACCELERATORS-1:0] acc_finished_i,
      input wire [NUM_HW_ACCELERATORS-1:0] acc_result_i,
+     // Only meaningful for accelerators set in OVERLAP_ACC_MASK; tie 0 else.
+     input wire [NUM_HW_ACCELERATORS-1:0] acc_ready_next_i,
      output wire                          start_new_block_o,
      output wire [TGT_ACC_SZ-1:0]         target_acc_o,
      output wire [ENTRY_DATA_SZ-1:0]      buffer_info_o,
@@ -787,13 +794,15 @@ sch_buffer_state #(
    .TGT_ACC_SZ(TGT_ACC_SZ),
    .TGT_COUNT_SZ(TGT_COUNT_SZ),
    .NUM_SLOTS(NUM_SLOTS),
-   .MODE_SZ(MODE_SZ)
+   .MODE_SZ(MODE_SZ),
+   .OVERLAP_ACC_MASK(OVERLAP_ACC_MASK)
 ) sch_buff_state0 (
    .clk(clk),
    .reset(sch_clr),
    .acc_busy_i(acc_busy_i),
    .acc_finished_i(acc_finished_i),
    .acc_result_i(acc_result_i),
+   .acc_ready_next_i(acc_ready_next_i),
    .mark_buff_as_full_i(do_mark_full),
    .full_buff_id_i(mark_full_id),
    .full_buff_usage_i(mark_full_cnt),
