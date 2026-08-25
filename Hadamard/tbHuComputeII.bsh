@@ -1,0 +1,18 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude | Created 2026-08-25 | Last modified 2026-08-25
+#
+# tb_hu_compute with HU_II=1 — the 5-stage pipeline that takes the initiation
+# interval from (mul_total + 4) to mul_total cycles per element.
+#
+# This runs the SAME independent software golden as tbHuCompute.bsh (~20k checks
+# against the true math), which is the point: the pipeline moves arithmetic
+# between cycles and must not change a single result bit.
+#
+# Throughput asserted: 2 cyc/element for 16-bit Z (was 6), 4 for 32-bit (was 8).
+# The 8-bit case floors at 2 rather than 1 because ready_o is registered and
+# stage A is one deep — irrelevant to Monarch, which is 16-bit throughout.
+xrun -sv -timescale 1ns/1ps -access wrc -top tb_hu_compute \
+  -define HU_II \
+  hu_compute.v tb_hu_compute.v

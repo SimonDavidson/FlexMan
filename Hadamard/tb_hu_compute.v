@@ -37,6 +37,7 @@
 // back-pressure had none either. Both gaps are closed here:
 //   (none)              FMAX_PIPE=0, no back-pressure   (original vectors)
 //   -define HU_FMAX_PIPE  FMAX_PIPE=1 — the shipped configuration
+//   -define HU_II         HU_II=1 — the 5-stage pipeline, II = mul_total
 //   -define HU_BP         pseudo-random pak_full_i back-pressure on top
 // T_THRU additionally asserts CYCLES PER ELEMENT for a continuous stream, so
 // throughput is a checked number rather than something observed after the fact:
@@ -80,6 +81,11 @@ module tb_hu_compute;
     `include "../verif/checks.vh"
     `include "../verif/vt_driver.vh"
 
+`ifdef HU_II
+    localparam integer HU_II_MODE = 1;
+`else
+    localparam integer HU_II_MODE = 0;
+`endif
 `ifdef HU_FMAX_PIPE
     localparam integer FMAX_PIPE_MODE = 1;
 `else
@@ -88,7 +94,8 @@ module tb_hu_compute;
 
     hu_compute #(
         .DATA_BITS(DATA_BITS), .ACT_SZ(ACT_SZ), .BINPT_SZ(BINPT_SZ), .PIN_BITS(PIN_BITS),
-        .FMAX_PIPE(FMAX_PIPE_MODE)
+        .FMAX_PIPE(FMAX_PIPE_MODE),
+        .HU_II(HU_II_MODE)
     ) dut (
         .clk(clk), .reset(reset),
         .valid_i(valid_i), .ready_o(ready_o),
@@ -419,11 +426,11 @@ module tb_hu_compute;
 `ifdef HU_BP
         stream_throughput(200, 0, "T_THRU 16b BP");   // tag <=32 chars
 `else
-        stream_throughput(200, FMAX_PIPE_MODE ? 10 : 6, "T_THRU 16b Z");
+        stream_throughput(200, HU_II_MODE ? 2 : (FMAX_PIPE_MODE ? 10 : 6), "T_THRU 16b Z");
         esz_z_i=3'd3;                                    // 8-bit: mul_total=1
-        stream_throughput(200, FMAX_PIPE_MODE ?  8 : 5, "T_THRU 8b Z");
+        stream_throughput(200, HU_II_MODE ? 2 : (FMAX_PIPE_MODE ?  8 : 5), "T_THRU 8b Z");
         esz_z_i=3'd5;                                    // 32-bit: mul_total=4
-        stream_throughput(200, FMAX_PIPE_MODE ? 14 : 8, "T_THRU 32b Z");
+        stream_throughput(200, HU_II_MODE ? 4 : (FMAX_PIPE_MODE ? 14 : 8), "T_THRU 32b Z");
 `endif
 
         `VERIF_EPILOGUE("tb_hu_compute")

@@ -16,7 +16,11 @@ module hadamard_unit #(
     /* FPGA-Fmax: registered stream-cache read-returns (default-OFF = original) */
     parameter REG_RETURN           = 0,
     /* FPGA-Fmax: pipeline hu_compute's heavy states (default-OFF = original) */
-    parameter FMAX_PIPE            = 0
+    parameter FMAX_PIPE            = 0,
+    /* HU_II=1: hu_compute runs as a 5-stage pipeline, II = mul_total
+     * (2 cyc/element for 16-bit Z instead of 6). Default OFF, bit-identical.
+     * Mutually exclusive with FMAX_PIPE -- see hu_compute.v. */
+    parameter HU_II       = 0
 )(
     input  wire                    clk,
     input  wire                    reset,
@@ -305,7 +309,8 @@ hu_compute #(
     .ACT_SZ     (ACT_SZ),
     .BINPT_SZ   (5),
     .PIN_BITS   (PIN_BITS),
-    .FMAX_PIPE  (FMAX_PIPE)
+    .FMAX_PIPE  (FMAX_PIPE),
+    .HU_II      (HU_II)
 ) u_compute (
     .clk            (clk),
     .reset          (reset),

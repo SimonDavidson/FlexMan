@@ -1,0 +1,15 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude | Created 2026-08-25 | Last modified 2026-08-25
+#
+# tb_hu_compute with HU_II=1 AND randomised packer back-pressure.
+#
+# The pipeline handles pak_full_i by freezing every stage at once, so this is
+# the test that matters most for it: a write stalling while a multiply result
+# lands is exactly the hazard a global freeze exists to prevent. The Monarch
+# workload never back-pressures (HU_PROFILE measured the packer never full),
+# so without this the path would ship unexercised.
+xrun -sv -timescale 1ns/1ps -access wrc -top tb_hu_compute \
+  -define HU_II -define HU_BP \
+  hu_compute.v tb_hu_compute.v
