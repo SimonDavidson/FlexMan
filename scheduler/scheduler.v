@@ -761,11 +761,25 @@ end
 
 assign new_entry_data = d;
 
-// Disjoint hint: wide word 3, the bit immediately above cfg_id (bit 22 at the
-// standard SLOT_LONG_SZ=13 / CFG_ID_SZ=9). Derived rather than hardcoded so it
-// tracks the field widths, exactly as the slot and cfg_id slices above do.
-// FILL and narrow TASK never carry it.
-localparam E_HINT_BIT = SLOT_LONG_SZ + CFG_ID_SZ;
+// Disjoint hint: wide word 3, the bit immediately above cfg_id.
+//
+// It must be read at the ISA's WIDE widths, NOT at this instance's. The wide
+// TASK ENCODING is fixed by the toolchain (isa.DISJOINT_BIT = SLOT_LONG_SZ_WIDE
+// + CFG_ID_SZ_WIDE = 13 + 9 = 22) whatever CFG_ID_SZ this instance happens to
+// carry, so deriving the position from CFG_ID_SZ tracks the wrong thing. This
+// previously read "derived rather than hardcoded so it tracks the field widths",
+// which is backwards, and it bit: a variant whose config count fits 7 bits was
+// given CFG_ID_SZ=7, the hint was read at bit 20, EVERY hint was lost, and the
+// SP/NP overlap collapsed -- 1.85% of frame time at nblocks=8, with the run
+// still bit-exact so nothing failed (2026-09-01).
+//
+// Neutral where things already worked: at CFG_ID_SZ=9 / TGT_COUNT_SZ=7 the old
+// expression is also 22. FILL and narrow TASK never carry the hint, and
+// DISJOINT_HINT defaults to 0, so a narrow-only build is unaffected either way.
+localparam NTGT_SZ_WIDE_ISA      = 7;    // == isa.NTGT_SZ_WIDE
+localparam CFG_ID_SZ_WIDE_ISA    = 9;    // == isa.CFG_ID_SZ_WIDE
+localparam SLOT_LONG_SZ_WIDE_ISA = MODE_SZ + BUFF_INDX_SZ + NTGT_SZ_WIDE_ISA;
+localparam E_HINT_BIT = SLOT_LONG_SZ_WIDE_ISA + CFG_ID_SZ_WIDE_ISA;   // 22
 assign new_entry_hint = (DISJOINT_HINT != 0) & ~pending_is_fill_r
                       & pending_is_wide_r & inst_word[E_HINT_BIT];
 
