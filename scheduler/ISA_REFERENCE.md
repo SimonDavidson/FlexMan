@@ -165,9 +165,29 @@ rescales with the parameters.
 
 **Word 2 (wide)** — `[1:0]` sentinel `2'b00`, slot 3 at bit 2, slot 4 at bit
 `2+SLOT_LONG_SZ`, `[31:2+2*SLOT_LONG_SZ]` spare (4 bits at TGT_COUNT_SZ=7).
-**Word 3 (wide)** — slot 5 at bit 0, then `cfg_id` (9 bits, 512 configs) at
-`[SLOT_LONG_SZ +: CFG_ID_SZ]`, then the **disjoint hint** at
-`[SLOT_LONG_SZ + CFG_ID_SZ]` (bit 22 at the standard widths); `[31:23]` spare.
+**Word 3 (wide)** — slot 5 at bit 0, then `cfg_id` (**12 bits, 4096 configs**) at
+`[12:0]`→`[24:13]`, `[30:25]` spare, and the **disjoint hint PINNED at bit 31**.
+
+```
+ 31   30      25   24              13   12                    0
+ ┌────┬────────────┬──────────────────┬───────────────────────┐
+ │hint│   spare    │      cfg_id      │        slot 5         │
+ │PIN │(cfg_id may │     (12 bits)    │  {ntgt, id, mode}     │
+ │ NED│ grow here) │                  │  SLOT_LONG_SZ_WIDE=13 │
+ └────┴────────────┴──────────────────┴───────────────────────┘
+```
+
+Both positions are ISA constants (`isa.CFG_ID_SZ_WIDE`, `isa.DISJOINT_BIT`) and must be
+decoded at those values, **never** derived from an instance's `CFG_ID_SZ`/`TGT_COUNT_SZ`
+— those size a given build's storage and may legitimately be narrower.
+
+`cfg_id` was 9 bits until 2026-09-04; two-factor Monarch at nblocks=40 needs 964 configs
+against the old ceiling of 511. The hint used to sit immediately above `cfg_id` (bit 22)
+and so had to move whenever `cfg_id` grew. That adjacency was a standing trap: in
+2026-09-01 a build parameterised `CFG_ID_SZ=7` read the hint at bit 20, lost **every**
+hint, and gave up 1.85% of frame time at nblocks=8 — while staying bit-exact, so no test
+failed. Pinning the hint at bit 31 makes the two independent: `cfg_id` can grow into
+`[30:25]` later by changing one constant, with nothing below the hint to disturb.
 
 `cfg_id` lives here rather than in word 1 because word 1 is full (bit 31 became
 the wide selector) and because keeping it contiguous means it reads straight out
@@ -176,7 +196,7 @@ field is left zero there, so there is one rule and no duplicate to diverge.
 
 | bit | field | meaning |
 |-----|-------|---------|
-| [22] | **Disjoint hint** | `1` = this task's buffer writes do not overlap those of the previous task on the SAME accelerator, so `sch_entry` may skip its RW "needs full" check. Set by the generator, which knows each task's written sub-range; hardware cannot see those ranges. Honoured only when the scheduler is built with `DISJOINT_HINT=1`, and it REQUIRES `MULTI_WRITER=1` in the buffer entries — otherwise a completing predecessor marks the buffer full while its successor is still writing. Zero in every image generated before 2026-08-22. |
+| [31] | **Disjoint hint** | `1` = this task's buffer writes do not overlap those of the previous task on the SAME accelerator, so `sch_entry` may skip its RW "needs full" check. Set by the generator, which knows each task's written sub-range; hardware cannot see those ranges. Honoured only when the scheduler is built with `DISJOINT_HINT=1`, and it REQUIRES `MULTI_WRITER=1` in the buffer entries — otherwise a completing predecessor marks the buffer full while its successor is still writing. Zero in every image generated before 2026-08-22, and at bit 22 rather than 31 in images generated before 2026-09-04. |
 
 Why the hint exists: FlexMan's dependency model is whole-buffer, but a
 block-diagonal layer has every block writing a disjoint sub-range of ONE output

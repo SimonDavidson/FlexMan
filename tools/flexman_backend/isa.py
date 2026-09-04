@@ -5,7 +5,7 @@
 #
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-08-20
+# Last modified: 2026-09-04
 #
 # Pure-Python (no torch). Bit-encodings mirror scheduler/ISA_REFERENCE.md and
 # tb_scheduler.v. This is the single source of truth for ISA encoding, shared by
@@ -53,9 +53,9 @@ M_TGT    = 0b11
 #       [27:15] slot 4
 #       [31:28] spare
 #   W3  [12:0]  slot 5
-#       [21:13] cfg_id (9 bits)
-#       [22]    disjoint hint (see DISJOINT_BIT)
-#       [31:23] spare
+#       [24:13] cfg_id (12 bits)
+#       [30:25] spare  (cfg_id may grow into these without moving anything else)
+#       [31]    disjoint hint (PINNED — see DISJOINT_BIT)
 MODE_SZ           = 2
 BUFF_INDX_SZ      = 4
 NTGT_SZ_NARROW    = 4
@@ -67,13 +67,17 @@ SLOT_LONG_SZ_WIDE = MODE_SZ + BUFF_INDX_SZ + NTGT_SZ_WIDE   # 13
 # cfg_id. The narrow TASK carries it in word 1 [11:5] -- 7 bits, 128 configs.
 # Monarch needs 172 at nblocks=20 and 329 at nblocks=40, so the WIDE form carries
 # it in word 3 instead, WHOLLY and contiguously (same principle as ntgt: no field
-# straddles a word). Word 3 has 19 bits spare after slot 5, so 9 bits fits with
+# straddles a word). Word 3 has 19 bits spare after slot 5, so 12 bits fits with
 # room left. A wide TASK ALWAYS takes cfg_id from word 3; word 1's cfg field is
 # left zero there, so there is one rule and no redundant copy to diverge.
+#
+# 9 -> 12 bits (2026-09-04): the TWO-FACTOR Monarch net needs 964 configs at
+# nblocks=40 (484 at 20), against the old ceiling of 511. 12 bits leaves 4.2x
+# headroom; 10 would have left 60 config ids and re-broken on the next change.
 CFG_ID_SZ_NARROW = 7
-CFG_ID_SZ_WIDE   = 9
+CFG_ID_SZ_WIDE   = 12
 CFG_MAX_NARROW   = (1 << CFG_ID_SZ_NARROW) - 1     # 127
-CFG_MAX_WIDE     = (1 << CFG_ID_SZ_WIDE) - 1       # 511
+CFG_MAX_WIDE     = (1 << CFG_ID_SZ_WIDE) - 1       # 4095
 
 # Disjoint hint: wide word 3, the bit immediately above cfg_id (22 at the standard
 # widths). Set only when the GENERATOR HAS PROVED that this task's buffer writes do
@@ -85,9 +89,15 @@ CFG_MAX_WIDE     = (1 << CFG_ID_SZ_WIDE) - 1       # 511
 # the right restriction -- the wide form is what nblocks>=8 uses, and nblocks=4 has
 # almost nothing to gain (~0.5%).
 #
-# The scheduler derives the same position as SLOT_LONG_SZ + CFG_ID_SZ, so the two
-# stay in step if either field is ever resized.
-DISJOINT_BIT     = SLOT_LONG_SZ_WIDE + CFG_ID_SZ_WIDE   # 22
+# PINNED at bit 31, deliberately NOT derived from SLOT_LONG_SZ_WIDE + CFG_ID_SZ_WIDE.
+# It used to sit immediately above cfg_id, and that adjacency is exactly what bit us
+# (2026-09-01, scheduler.v:764): a variant parameterised CFG_ID_SZ=7 read the hint at
+# bit 20, lost EVERY hint, and gave up 1.85% of frame time at nblocks=8 -- while
+# staying bit-exact, so no test failed. A field that moves whenever a neighbour grows
+# is a standing trap. At the top of the word it cannot move again, and widening
+# cfg_id (2026-09-04, 9 -> 12) becomes a one-constant change: cfg_id grows upward
+# into [30:25] and the hint stays put.
+DISJOINT_BIT     = 31
 
 
 def _slot_long_wide(mode: int, buf: int, ntgt: int) -> int:

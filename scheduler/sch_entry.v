@@ -52,7 +52,7 @@ module sch_entry  #(parameter SCH_ENTRY_SZ        = 52,
 // Slot layout within SCH_ENTRY_SZ (lsb first):
 //   Slots 0-2 (short): [mode(2), id(BUFF_INDX_SZ)]
 //   Slots 3-5 (long):  [mode(2), id(BUFF_INDX_SZ), ntgt(TGT_COUNT_SZ)]
-//   colour(1), acc_id(TGT_ACC_SZ), cfg_id(5)
+//   colour(1), acc_id(TGT_ACC_SZ), cfg_id(CFG_ID_SZ)   // opaque here; sized by the parent
 localparam SLOT_SHORT_SZ = MODE_SZ + BUFF_INDX_SZ;
 localparam SLOT_LONG_SZ  = MODE_SZ + BUFF_INDX_SZ + TGT_COUNT_SZ;
 localparam SLOTS_SHORT   = 3;

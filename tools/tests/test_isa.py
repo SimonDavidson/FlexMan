@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Author: Simon Davidson & Claude
 # Created: 2026-06-08
-# Last modified: 2026-08-20
+# Last modified: 2026-09-04
 # Unit tests for flexman_backend.isa (no torch, no pytest required).
 from flexman_backend import isa
 
@@ -179,3 +179,34 @@ def test_wide_cfg_ceiling_is_enforced():
     except AssertionError:
         return
     raise AssertionError("cfg_id above the wide field should have been rejected")
+
+
+def test_disjoint_bit_is_pinned_at_31():
+    """The hint's position must NOT track cfg_id's width.
+
+    It used to be SLOT_LONG_SZ_WIDE + CFG_ID_SZ_WIDE, i.e. immediately above
+    cfg_id. That adjacency silently lost every hint once (2026-09-01) and would
+    have had to move again when cfg_id went 9 -> 12 for two-factor nblocks=40.
+    Asserted against the literal 31, not against a derived expression, so that
+    widening cfg_id again cannot quietly drag the hint with it.
+    """
+    assert isa.DISJOINT_BIT == 31
+    assert isa.DISJOINT_BIT != isa.SLOT_LONG_SZ_WIDE + isa.CFG_ID_SZ_WIDE, (
+        "the hint has become adjacent to cfg_id again")
+    # cfg_id must not be able to reach the hint, at any legal value.
+    top = isa.tw3_wide(isa.M_UNUSED, 0, 0, isa.CFG_MAX_WIDE)
+    assert (top >> isa.DISJOINT_BIT) & 1 == 0, "max cfg_id set the hint bit"
+    # ...and the hint must not bleed down into cfg_id.
+    hinted = isa.tw3_wide(isa.M_UNUSED, 0, 0, 0, disjoint=True)
+    assert (hinted >> isa.SLOT_LONG_SZ_WIDE) & isa.CFG_MAX_WIDE == 0
+    assert (hinted >> isa.DISJOINT_BIT) & 1 == 1
+
+
+def test_wide_cfg_id_covers_two_factor_nblocks40():
+    """964 configs at two-factor nblocks=40 -- the case that forced 9 -> 12 bits."""
+    assert isa.CFG_MAX_WIDE >= 964, "wide cfg_id cannot address two-factor nb=40"
+    w = isa.task_words(1, 964, 0, 0, 0, 0, 0, 0, 0,
+                       isa.M_TGT, 2, 3, 0, 0, 0, 0, 0, 0, disjoint=True)
+    assert len(w) == 3
+    assert (w[2] >> isa.SLOT_LONG_SZ_WIDE) & isa.CFG_MAX_WIDE == 964
+    assert (w[2] >> isa.DISJOINT_BIT) & 1 == 1

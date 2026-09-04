@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
-// Authors: Simon Davidson & Claude | Last modified: 2026-08-22
+// Authors: Simon Davidson & Claude | Last modified: 2026-09-04
 `include "../shared/constants.v"
 
 `timescale 10ps/1ps
@@ -187,11 +187,22 @@ wire [TGT_COUNT_SZ-1:0] mark_full_cnt = sys_data_i[BUFF_INDX_SZ +: TGT_COUNT_SZ]
 // Entry data field offsets (lsb first, matching sch_entry):
 //   Slots 0-2: [mode(2), id(4)] × 3  =  3 × 6 = 18 bits
 //   Slots 3-5: [mode(2), id(4), ntgt(TGT_COUNT_SZ)] × 3 = 3 × 10 = 30 bits (default TGT_COUNT_SZ=4)
-//   colour(1), acc_id(TGT_ACC_SZ=3), cfg_id(CFG_ID_SZ=7)
+//   colour(1), acc_id(TGT_ACC_SZ=3), cfg_id(CFG_ID_SZ, default 7)
 localparam LONG_BASE   = 3 * SLOT_SHORT_SZ;           // 18
 localparam E_COLOUR    = LONG_BASE + 3 * SLOT_LONG_SZ; // 48 (default TGT_COUNT_SZ=4)
 localparam E_ACC_START = E_COLOUR + 1;                 // 49
 localparam E_CFG_START = E_ACC_START + TGT_ACC_SZ;    // 52 (TGT_ACC_SZ=3)
+
+// ---- Wide-TASK ENCODING constants -- the toolchain's, NOT this instance's ----
+// These describe the bits the assembler emits (flexman_backend/isa.py) and must
+// never be derived from CFG_ID_SZ / TGT_COUNT_SZ, which size this instance's
+// storage and may legitimately be narrower. Deriving them from the instance is
+// what lost every disjoint hint in 2026-09-01; see E_HINT_BIT's use below.
+//   W3 [12:0] slot 5 | [24:13] cfg_id | [30:25] spare | [31] disjoint hint
+localparam NTGT_SZ_WIDE_ISA      = 7;    // == isa.NTGT_SZ_WIDE
+localparam CFG_ID_SZ_WIDE_ISA    = 12;   // == isa.CFG_ID_SZ_WIDE
+localparam SLOT_LONG_SZ_WIDE_ISA = MODE_SZ + BUFF_INDX_SZ + NTGT_SZ_WIDE_ISA;
+localparam E_HINT_BIT = 31;              // == isa.DISJOINT_BIT (PINNED, not derived)
 
 // Instruction opcodes:
 localparam INST_TASK    = 3'b000;
@@ -747,13 +758,26 @@ begin
       d[E_COLOUR]                   = task_w1_r[12];
       d[E_ACC_START +: TGT_ACC_SZ] = {{(TGT_ACC_SZ-2){1'b0}}, task_w1_r[4:3]};
       // cfg_id: word 1 [11:5] is only 7 bits (128 configs), but Monarch needs 172
-      // at nblocks=20 and 329 at nblocks=40. The WIDE form therefore carries it
-      // WHOLLY in word 3, above slot 5 -- contiguous, like every other field, so
-      // it reads straight out of a hex dump. A wide TASK ALWAYS takes cfg_id from
-      // word 3 (word 1's cfg field is zero there): one rule, no redundant copy.
-      // inst_word is the live word 3 here, as for the slots above.
+      // at nblocks=20 one-factor and 964 at nblocks=40 two-factor. The WIDE form
+      // therefore carries it WHOLLY in word 3, above slot 5 -- contiguous, like
+      // every other field, so it reads straight out of a hex dump. A wide TASK
+      // ALWAYS takes cfg_id from word 3 (word 1's cfg field is zero there): one
+      // rule, no redundant copy. inst_word is the live word 3 here.
+      //
+      // Read at the ISA's POSITION AND WIDTH, never at this instance's. Both
+      // SLOT_LONG_SZ and CFG_ID_SZ are instance parameters; the wide ENCODING is
+      // fixed by the toolchain. This is the same trap that cost every disjoint
+      // hint at bit 20 (see E_HINT_BIT above) -- it was fixed there in 2026-09-01
+      // but left standing HERE, which is the only reason the contract "cfg_id must
+      // be the wide width whenever the wide form is used, even when the config
+      // count would fit 7 bits" ever existed. Reading at the ISA position retires
+      // that contract: CFG_ID_SZ now sizes the scheduler-table entry field ONLY.
+      // Verilog resizes on assignment, so a CFG_ID_SZ narrower than the ISA field
+      // still truncates -- which is a genuine misconfiguration, and the front-end's
+      // pool_geom guard is what catches it. Neutral at CFG_ID_SZ=9/TGT_COUNT_SZ=7,
+      // where both the old and new expressions are inst_word[13 +: 9].
       if (pending_is_wide_r)
-         d[E_CFG_START +: CFG_ID_SZ] = inst_word[SLOT_LONG_SZ +: CFG_ID_SZ];
+         d[E_CFG_START +: CFG_ID_SZ] = inst_word[SLOT_LONG_SZ_WIDE_ISA +: CFG_ID_SZ_WIDE_ISA];
       else
          d[E_CFG_START +: CFG_ID_SZ] = task_w1_r[11:5];   // zero-extends if wider
    end
@@ -761,25 +785,24 @@ end
 
 assign new_entry_data = d;
 
-// Disjoint hint: wide word 3, the bit immediately above cfg_id.
+// Disjoint hint: wide word 3, PINNED at bit 31 (== isa.DISJOINT_BIT).
 //
-// It must be read at the ISA's WIDE widths, NOT at this instance's. The wide
-// TASK ENCODING is fixed by the toolchain (isa.DISJOINT_BIT = SLOT_LONG_SZ_WIDE
-// + CFG_ID_SZ_WIDE = 13 + 9 = 22) whatever CFG_ID_SZ this instance happens to
-// carry, so deriving the position from CFG_ID_SZ tracks the wrong thing. This
-// previously read "derived rather than hardcoded so it tracks the field widths",
-// which is backwards, and it bit: a variant whose config count fits 7 bits was
-// given CFG_ID_SZ=7, the hint was read at bit 20, EVERY hint was lost, and the
-// SP/NP overlap collapsed -- 1.85% of frame time at nblocks=8, with the run
-// still bit-exact so nothing failed (2026-09-01).
+// It used to sit immediately above cfg_id, derived as SLOT_LONG_SZ + CFG_ID_SZ
+// from THIS INSTANCE's parameters. That was backwards twice over -- the wide TASK
+// ENCODING is fixed by the toolchain whatever CFG_ID_SZ an instance carries -- and
+// it bit: a variant whose config count fits 7 bits was given CFG_ID_SZ=7, the hint
+// was read at bit 20, EVERY hint was lost, and the SP/NP overlap collapsed -- 1.85%
+// of frame time at nblocks=8, with the run still bit-exact so nothing failed
+// (2026-09-01). Reading it at the ISA's widths fixed the symptom.
 //
-// Neutral where things already worked: at CFG_ID_SZ=9 / TGT_COUNT_SZ=7 the old
-// expression is also 22. FILL and narrow TASK never carry the hint, and
-// DISJOINT_HINT defaults to 0, so a narrow-only build is unaffected either way.
-localparam NTGT_SZ_WIDE_ISA      = 7;    // == isa.NTGT_SZ_WIDE
-localparam CFG_ID_SZ_WIDE_ISA    = 9;    // == isa.CFG_ID_SZ_WIDE
-localparam SLOT_LONG_SZ_WIDE_ISA = MODE_SZ + BUFF_INDX_SZ + NTGT_SZ_WIDE_ISA;
-localparam E_HINT_BIT = SLOT_LONG_SZ_WIDE_ISA + CFG_ID_SZ_WIDE_ISA;   // 22
+// 2026-09-04 removes the cause. A hint adjacent to a growing field has to move
+// every time that field grows, and moving it is a silent, bit-exact regression --
+// the worst kind. Widening cfg_id 9 -> 12 for the two-factor net at nblocks=40
+// (964 configs) would have moved it again. Pinned at the top of the word it cannot
+// move: cfg_id now grows upward into [30:25] with nothing downstream of it.
+//
+// FILL and narrow TASK never carry the hint, and DISJOINT_HINT defaults to 0, so a
+// narrow-only build (Bosch, FMI, example_app) is unaffected either way.
 assign new_entry_hint = (DISJOINT_HINT != 0) & ~pending_is_fill_r
                       & pending_is_wide_r & inst_word[E_HINT_BIT];
 

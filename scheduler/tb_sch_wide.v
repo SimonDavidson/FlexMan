@@ -5,7 +5,7 @@
 //
 // Authors      : Simon Davidson & Claude
 // Created      : 2026-08-20
-// Last modified: 2026-08-20
+// Last modified: 2026-09-04
 //
 // The narrow TASK packs three long slots x [mode(2)+id(4)+ntgt(4)] into word 2's
 // 30 usable bits, capping usage counts at 15. Monarch at nblocks=40 needs 85.
@@ -36,7 +36,8 @@ module tb_sch_wide;
 
 localparam TGT_ACC_SZ         = 3;
 localparam TGT_COUNT_SZ       = 7;    // wide build
-localparam CFG_ID_SZ          = 9;   // wide build: 512 configs (nb=40 needs 329)
+localparam CFG_ID_SZ          = 12;  // wide build: 4096 configs
+                                     // (two-factor nb=40 needs 964; one-factor 329)
 localparam NUM_BUFFERS        = 16;
 localparam BUFF_INDX_SZ       = 4;
 localparam COL_BUFF_ID_SZ     = 16;
@@ -104,9 +105,14 @@ function [31:0] tw2_wide;                  // wide word 2: sentinel + slots 3,4
     begin tw2_wide = {4'b0000, slot_wide(m4,id4,n4), slot_wide(m3,id3,n3), 2'b00}; end
 endfunction
 
-function [31:0] tw3_wide;   // wide word 3: slot 5, then cfg_id, rest spare
-    input [1:0] m5; input [3:0] id5; input [6:0] n5; input [CFG_ID_SZ-1:0] cfg;
-    begin tw3_wide = {{(32-SLOT_LONG_SZ-CFG_ID_SZ){1'b0}}, cfg,
+// Wide word 3: slot 5 | cfg_id | spare | disjoint hint PINNED at bit 31.
+// The hint is at the TOP of the word, deliberately NOT adjacent to cfg_id -- that
+// adjacency is what silently lost every hint in 2026-09-01. Built here the same way
+// isa.tw3_wide builds it, so this TB fails if either side drifts.
+function [31:0] tw3_wide;
+    input [1:0] m5; input [3:0] id5; input [6:0] n5;
+    input [CFG_ID_SZ-1:0] cfg; input hint;
+    begin tw3_wide = {hint, {(31-SLOT_LONG_SZ-CFG_ID_SZ){1'b0}}, cfg,
                       slot_wide(m5,id5,n5)}; end
 endfunction
 
@@ -214,17 +220,25 @@ initial begin
 
     prog_mem[2] = tw1_wide(2'd0, 7'd10, 1'b0, MODE_SRC,4'd1, MODE_SRC,4'd2, MODE_UNUSED,4'd0);
     prog_mem[3] = tw2_wide(MODE_TGT,4'd3,7'd9, MODE_RW,4'd4,7'd13);
-    prog_mem[4] = tw3_wide(MODE_SRC,4'd5,7'd2, 7'd10);   // same cfg as the narrow twin
+    prog_mem[4] = tw3_wide(MODE_SRC,4'd5,7'd2, 7'd10, 1'b0); // same cfg as the narrow twin
 
     // --- a task only the wide form can express ------------------------------
     prog_mem[5] = tw1_wide(2'd1, 7'd11, 1'b1, MODE_SRC,4'd6, MODE_UNUSED,4'd0, MODE_UNUSED,4'd0);
     prog_mem[6] = tw2_wide(MODE_TGT,4'd7,7'd85, MODE_RW,4'd8,7'd127);
-    prog_mem[7] = tw3_wide(MODE_SRC,4'd9,7'd64, 7'd11);
+    prog_mem[7] = tw3_wide(MODE_SRC,4'd9,7'd64, 7'd11, 1'b0);
 
-    // --- a cfg_id only the wide form can express (329 configs at nblocks=40) ---
+    // --- a cfg_id only the WIDE form can express, with the disjoint hint set ---
+    // 964 = the two-factor config count at nblocks=40. It needs 10 bits, so this
+    // task was literally unencodable under the old 9-bit field (ceiling 511); it
+    // was cfg=329 (one-factor nb=40) before 2026-09-04.
+    // The hint is set at the same time deliberately: cfg_id is 12 bits at [24:13]
+    // and the hint is PINNED at 31. Were the two ever adjacent again, one would
+    // corrupt the other and this check would fail. Only 4 tasks can be in flight
+    // (NUM_SCH_ENTRIES=4, nothing completes them here), so this is the one slot
+    // available for it -- the field's maximum is covered by the encoding checks.
     prog_mem[8]  = tw1_wide(2'd0, 7'd0, 1'b0, MODE_SRC,4'd1, MODE_UNUSED,4'd0, MODE_UNUSED,4'd0);
     prog_mem[9]  = tw2_wide(MODE_TGT,4'd2,7'd3, MODE_UNUSED,4'd0,7'd0);
-    prog_mem[10] = tw3_wide(MODE_UNUSED,4'd0,7'd0, 9'd329);
+    prog_mem[10] = tw3_wide(MODE_UNUSED,4'd0,7'd0, 12'd964, 1'b1);
 
     prog_mem[11] = STOP_INST;
 
@@ -268,9 +282,18 @@ initial begin
     if (entry_n < 4) begin
         $display("FAIL W3: wide-cfg task never loaded"); errors = errors + 1;
     end else begin
-        check_eq((entry_cap[3] >> E_CFG_START) & ((1<<CFG_ID_SZ)-1), 329,
-                 "W3 cfg_id=329 survives (word 3)");
+        check_eq((entry_cap[3] >> E_CFG_START) & ((1<<CFG_ID_SZ)-1), 964,
+                 "W3 cfg_id=964 survives word 3 with the hint set (9 bits held 511)");
     end
+    // The encoding itself: a maximal cfg_id must not reach bit 31, and the hint
+    // must not reach into cfg_id. Checked on the words, independent of the DUT.
+    check_eq(tw3_wide(MODE_UNUSED,4'd0,7'd0, 12'd4095, 1'b0) >> 31, 1'b0,
+             "W3b max cfg_id does not set the hint bit");
+    check_eq(tw3_wide(MODE_UNUSED,4'd0,7'd0, 12'd0, 1'b1) >> 31, 1'b1,
+             "W3b hint sets bit 31");
+    check_eq((tw3_wide(MODE_UNUSED,4'd0,7'd0, 12'd0, 1'b1) >> SLOT_LONG_SZ)
+             & ((1<<CFG_ID_SZ)-1), 12'd0,
+             "W3b hint does not bleed into cfg_id");
     // cfg_id of the equivalence pair must also match (10, from opposite words)
     check_eq((entry_cap[0] >> E_CFG_START) & ((1<<CFG_ID_SZ)-1), 10, "W1 narrow cfg_id");
     check_eq((entry_cap[1] >> E_CFG_START) & ((1<<CFG_ID_SZ)-1), 10, "W1 wide cfg_id");
