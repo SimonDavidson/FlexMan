@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
+// Authors: Simon Davidson & Claude   Last modified: 2026-09-17
 `timescale 10ps/1ps
 `include "../shared/constants.v"
 
@@ -472,6 +473,21 @@ flexman #(
 // Program memory: scheduler loads via AXI (prog_mem_wr_*), reads instructions.
 // COMBINATIONAL-read (distributed RAM): the scheduler instruction fetch assumes
 // 0-cycle program memory under wait=0 and double-fires NXT with a 1-cycle BRAM.
+// ── BRAM read gating (RD_GATE) ───────────────────────────────────────────────
+// Each memory below already receives a per-cycle read strobe (<mem>_rd_o); until
+// 2026-09-17 this wrapper ignored it and the arrays read on EVERY edge forever.
+// Measured on a downstream deployment: 16 mW of block-RAM power with the design
+// idle (clock running, every read strobe low), of which gating recovers ~87%, at
+// no cost in area or timing. The bba bram_tdp below has always been gated this
+// way -- this extends the same idea to the rest.
+//
+// Build the ungated variant with -define NO_RD_GATE for an A/B comparison.
+`ifdef NO_RD_GATE
+localparam RD_GATE_EN = 0;
+`else
+localparam RD_GATE_EN = 1;
+`endif
+
 bram_dist #(.DEPTH(PROG_MEM_DEPTH), .DATA_W(PROG_DATA_BITS)) u_prog_mem (
     .clk   (clk),
     .we    (prog_mem_wr_o),
@@ -482,13 +498,13 @@ bram_dist #(.DEPTH(PROG_MEM_DEPTH), .DATA_W(PROG_DATA_BITS)) u_prog_mem (
 );
 
 // Config memory: config_manager reads and writes (separate rd/wr addr buses).
-bram_sdp #(.DEPTH(CFG_MEM_DEPTH), .DATA_W(32)) u_cfg_mem (
+bram_sdp #(.DEPTH(CFG_MEM_DEPTH), .DATA_W(32), .RD_GATE(RD_GATE_EN)) u_cfg_mem (
     .clk   (clk),
     .we    (cfg_mem_wr_o),
     .waddr (cfg_mem_wr_addr_o[CFG_ABITS-1:0]),
     .din   (cfg_mem_wr_data_o),
     .raddr (cfg_mem_addr_o[CFG_ABITS-1:0]),
-    .dout  (cfg_mem_data_i)
+    .re(cfg_mem_rd_o), .dout  (cfg_mem_data_i)
 );
 
 // BBA memory: config_manager R/W on port A, fill_unit read on port B.
@@ -508,113 +524,113 @@ bram_tdp #(.DEPTH(BBA_MEM_DEPTH), .DATA_W(32)) u_bba_mem (
 
 // ─── snnAcc0 memories ─────────────────────────────────────────────────────────
 
-bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS)) u_s0_weight_mem (
+bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS), .RD_GATE(RD_GATE_EN)) u_s0_weight_mem (
     .clk   (clk),
     .we    (s0_weight_mem_wr_o),
     .waddr (s0_weight_mem_wr_addr_o[ACC_ABITS-1:0]),
     .din   (s0_weight_mem_wr_data_o),
     .raddr (s0_weight_mem_addr_o[ACC_ABITS-1:0]),
-    .dout  (s0_weight_mem_data_i)
+    .re(s0_weight_mem_rd_o), .dout  (s0_weight_mem_data_i)
 );
 
-bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS)) u_s0_bias_curr_mem (
+bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS), .RD_GATE(RD_GATE_EN)) u_s0_bias_curr_mem (
     .clk   (clk),
     .we    (s0_bias_curr_mem_wr_o),
     .waddr (s0_bias_curr_mem_wr_addr_o[ACC_ABITS-1:0]),
     .din   (s0_bias_curr_mem_wr_data_o),
     .raddr (s0_bias_curr_mem_addr_o[ACC_ABITS-1:0]),
-    .dout  (s0_bias_curr_mem_data_i)
+    .re(s0_bias_curr_mem_rd_o), .dout  (s0_bias_curr_mem_data_i)
 );
 
-bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS)) u_s0_thresh_mem (
+bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS), .RD_GATE(RD_GATE_EN)) u_s0_thresh_mem (
     .clk   (clk),
     .we    (s0_thresh_mem_wr_o),
     .waddr (s0_thresh_mem_wr_addr_o[ACC_ABITS-1:0]),
     .din   (s0_thresh_mem_wr_data_o),
     .raddr (s0_thresh_mem_addr_o[ACC_ABITS-1:0]),
-    .dout  (s0_thresh_mem_data_i)
+    .re(s0_thresh_mem_rd_o), .dout  (s0_thresh_mem_data_i)
 );
 
-bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`POT_BITS)) u_s0_pot_mem (
+bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`POT_BITS), .RD_GATE(RD_GATE_EN)) u_s0_pot_mem (
     .clk  (clk),
     .we   (s0_pot_mem_wr_o),
     .addr (s0_pot_mem_addr_o[ACC_ABITS-1:0]),
     .din  (s0_pot_mem_data_o),
-    .dout (s0_pot_mem_data_i)
+    .re(s0_pot_mem_rd_o), .dout (s0_pot_mem_data_i)
 );
 
 // ─── snnAcc1 memories ─────────────────────────────────────────────────────────
 
-bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS)) u_s1_weight_mem (
+bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS), .RD_GATE(RD_GATE_EN)) u_s1_weight_mem (
     .clk   (clk),
     .we    (s1_weight_mem_wr_o),
     .waddr (s1_weight_mem_wr_addr_o[ACC_ABITS-1:0]),
     .din   (s1_weight_mem_wr_data_o),
     .raddr (s1_weight_mem_addr_o[ACC_ABITS-1:0]),
-    .dout  (s1_weight_mem_data_i)
+    .re(s1_weight_mem_rd_o), .dout  (s1_weight_mem_data_i)
 );
 
-bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS)) u_s1_bias_curr_mem (
+bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS), .RD_GATE(RD_GATE_EN)) u_s1_bias_curr_mem (
     .clk   (clk),
     .we    (s1_bias_curr_mem_wr_o),
     .waddr (s1_bias_curr_mem_wr_addr_o[ACC_ABITS-1:0]),
     .din   (s1_bias_curr_mem_wr_data_o),
     .raddr (s1_bias_curr_mem_addr_o[ACC_ABITS-1:0]),
-    .dout  (s1_bias_curr_mem_data_i)
+    .re(s1_bias_curr_mem_rd_o), .dout  (s1_bias_curr_mem_data_i)
 );
 
-bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS)) u_s1_thresh_mem (
+bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS), .RD_GATE(RD_GATE_EN)) u_s1_thresh_mem (
     .clk   (clk),
     .we    (s1_thresh_mem_wr_o),
     .waddr (s1_thresh_mem_wr_addr_o[ACC_ABITS-1:0]),
     .din   (s1_thresh_mem_wr_data_o),
     .raddr (s1_thresh_mem_addr_o[ACC_ABITS-1:0]),
-    .dout  (s1_thresh_mem_data_i)
+    .re(s1_thresh_mem_rd_o), .dout  (s1_thresh_mem_data_i)
 );
 
-bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`POT_BITS)) u_s1_pot_mem (
+bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`POT_BITS), .RD_GATE(RD_GATE_EN)) u_s1_pot_mem (
     .clk  (clk),
     .we   (s1_pot_mem_wr_o),
     .addr (s1_pot_mem_addr_o[ACC_ABITS-1:0]),
     .din  (s1_pot_mem_data_o),
-    .dout (s1_pot_mem_data_i)
+    .re(s1_pot_mem_rd_o), .dout (s1_pot_mem_data_i)
 );
 
 // ─── annAcc memories ──────────────────────────────────────────────────────────
 
-bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS)) u_a0_weight_mem (
+bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS), .RD_GATE(RD_GATE_EN)) u_a0_weight_mem (
     .clk   (clk),
     .we    (a0_weight_mem_wr_o),
     .waddr (a0_weight_mem_wr_addr_o[ACC_ABITS-1:0]),
     .din   (a0_weight_mem_wr_data_o),
     .raddr (a0_weight_mem_addr_o[ACC_ABITS-1:0]),
-    .dout  (a0_weight_mem_data_i)
+    .re(a0_weight_mem_rd_o), .dout  (a0_weight_mem_data_i)
 );
 
-bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS)) u_a0_bias_curr_mem (
+bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS), .RD_GATE(RD_GATE_EN)) u_a0_bias_curr_mem (
     .clk   (clk),
     .we    (a0_bias_curr_mem_wr_o),
     .waddr (a0_bias_curr_mem_wr_addr_o[ACC_ABITS-1:0]),
     .din   (a0_bias_curr_mem_wr_data_o),
     .raddr (a0_bias_curr_mem_addr_o[ACC_ABITS-1:0]),
-    .dout  (a0_bias_curr_mem_data_i)
+    .re(a0_bias_curr_mem_rd_o), .dout  (a0_bias_curr_mem_data_i)
 );
 
-bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS)) u_a0_thresh_mem (
+bram_sdp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`WTD_BITS), .RD_GATE(RD_GATE_EN)) u_a0_thresh_mem (
     .clk   (clk),
     .we    (a0_thresh_mem_wr_o),
     .waddr (a0_thresh_mem_wr_addr_o[ACC_ABITS-1:0]),
     .din   (a0_thresh_mem_wr_data_o),
     .raddr (a0_thresh_mem_addr_o[ACC_ABITS-1:0]),
-    .dout  (a0_thresh_mem_data_i)
+    .re(a0_thresh_mem_rd_o), .dout  (a0_thresh_mem_data_i)
 );
 
-bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`POT_BITS)) u_a0_pot_mem (
+bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`POT_BITS), .RD_GATE(RD_GATE_EN)) u_a0_pot_mem (
     .clk  (clk),
     .we   (a0_pot_mem_wr_o),
     .addr (a0_pot_mem_addr_o[ACC_ABITS-1:0]),
     .din  (a0_pot_mem_data_o),
-    .dout (a0_pot_mem_data_i)
+    .re(a0_pot_mem_rd_o), .dout (a0_pot_mem_data_i)
 );
 
 // ─── Shared act/spike/syn_curr + Hadamard pool — 4 interleaved 32-bit banks ───
@@ -622,36 +638,36 @@ bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(`POT_BITS)) u_a0_pot_mem (
 // shared_pool crossbar inside flexman); bank = addr[1:0], word = addr>>2 already
 // applied to *_addr_o.  wait tied low (synchronous 1-cycle BRAM).  Depth reuses
 // ACC_MEM_DEPTH per bank; revisit if a pooled net needs > 4xACC_MEM_DEPTH words.
-bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(32)) u_m0_data_mem (
+bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(32), .RD_GATE(RD_GATE_EN)) u_m0_data_mem (
     .clk  (clk),
     .we   (m0_data_mem_wr_o),
     .addr (m0_data_mem_addr_o[ACC_ABITS-1:0]),
     .din  (m0_data_mem_wdata_o),
-    .dout (m0_data_mem_rdata_i)
+    .re(m0_data_mem_rd_o), .dout (m0_data_mem_rdata_i)
 );
 
-bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(32)) u_m1_data_mem (
+bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(32), .RD_GATE(RD_GATE_EN)) u_m1_data_mem (
     .clk  (clk),
     .we   (m1_data_mem_wr_o),
     .addr (m1_data_mem_addr_o[ACC_ABITS-1:0]),
     .din  (m1_data_mem_wdata_o),
-    .dout (m1_data_mem_rdata_i)
+    .re(m1_data_mem_rd_o), .dout (m1_data_mem_rdata_i)
 );
 
-bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(32)) u_m2_data_mem (
+bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(32), .RD_GATE(RD_GATE_EN)) u_m2_data_mem (
     .clk  (clk),
     .we   (m2_data_mem_wr_o),
     .addr (m2_data_mem_addr_o[ACC_ABITS-1:0]),
     .din  (m2_data_mem_wdata_o),
-    .dout (m2_data_mem_rdata_i)
+    .re(m2_data_mem_rd_o), .dout (m2_data_mem_rdata_i)
 );
 
-bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(32)) u_m3_data_mem (
+bram_sp #(.DEPTH(ACC_MEM_DEPTH), .DATA_W(32), .RD_GATE(RD_GATE_EN)) u_m3_data_mem (
     .clk  (clk),
     .we   (m3_data_mem_wr_o),
     .addr (m3_data_mem_addr_o[ACC_ABITS-1:0]),
     .din  (m3_data_mem_wdata_o),
-    .dout (m3_data_mem_rdata_i)
+    .re(m3_data_mem_rd_o), .dout (m3_data_mem_rdata_i)
 );
 
 // ─── IOB output registers ─────────────────────────────────────────────────────
