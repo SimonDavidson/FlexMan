@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
-// Authors: Simon Davidson & Claude | Created 2026-06-16 | Last modified 2026-08-14
+// Authors: Simon Davidson & Claude | Created 2026-06-16 | Last modified 2026-09-17
 `timescale 10ps/1ps
 
 // Simple dual-port synchronous BRAM — UltraRAM-targeted variant of bram_sdp.
@@ -44,6 +44,19 @@ module bram_sdp_uram #(
     // block), which is the dominant memory cost on that family. Behaviour is
     // unchanged: still a 1-cycle registered read.
     (* ramstyle = "M10K" *) reg [DATA_W-1:0] mem [0:DEPTH-1];
+`elsif NO_URAM
+    // NO_URAM (2026-09-17): Xilinx families with no UltraRAM sites -- 7-series,
+    // Spartan-7, Artix-7. Without this branch the `else` below applies
+    // ram_style="ultra" on a device that has no such primitive, which had never
+    // been synthesised and whose outcome (silent fallback / warning / error) was
+    // unknown. Force block RAM explicitly instead of relying on the tool.
+    //
+    // This costs block RAM: a 16384x32 store is 512 Kbit ~= 15 RAMB36 tiles, so
+    // on a small part it is the memory footprint that decides whether the design
+    // fits, not the logic. Behaviour is unchanged -- still a 1-cycle registered
+    // read -- so this is a mapping directive only, and it is DEFAULT-OFF: a build
+    // that does not define NO_URAM is bit-identical to every build before it.
+    (* ram_style = "block" *) reg [DATA_W-1:0] mem [0:DEPTH-1];
 `else
     (* ram_style = "ultra" *) reg [DATA_W-1:0] mem [0:DEPTH-1];
 `endif
