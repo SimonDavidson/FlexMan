@@ -1,0 +1,6 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude | Created 2026-09-23 | Last modified 2026-09-23
+xrun -sv -timescale 10ps/1ps -access wrc -top tb_clk_gate \
+  clk_gate.v clk_gate_ctrl.v tb_clk_gate.v ${COV_ARGS:-}
