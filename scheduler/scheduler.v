@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
-// Authors: Simon Davidson & Claude | Last modified: 2026-09-04
+// Authors: Simon Davidson & Claude | Last modified: 2026-09-29
 `include "../shared/constants.v"
 
 `timescale 10ps/1ps
@@ -55,6 +55,25 @@ module scheduler
      parameter NUM_HW_ACCELERATORS = 2,
      parameter PROG_ADDR_BITS      = 10,
      parameter PROG_DATA_BITS      = 32,
+     // PROG_MEM_SYNC=1 lets the program store be a 1-cycle SRAM macro instead of
+     // a combinational (flop / LUTRAM) array. Default 0 = original fetch,
+     // bit-identical; prog_mem_rd_o then just mirrors prog_mem_req_o.
+     //
+     // Why the default can't take an SRAM: the fetch consumes prog_mem_data_i
+     // the cycle AFTER the request, at whatever prog_counter_r holds THEN. A
+     // combinational store returns mem[prog_counter_r] regardless; an SRAM
+     // returns the word at the address it sampled, which is one PC stale after
+     // a consume -> the instruction executes twice (Bosch 7-Aug, pc=28).
+     //
+     // With PROG_MEM_SYNC=1 the read address is the PC register's NEXT value,
+     // so the SRAM output in every cycle is mem[prog_counter_r] -- exactly what
+     // the combinational store returned, so the fetch FSM is untouched and
+     // costs ZERO cycles. prog_mem_rd_o issues a read only when that next PC
+     // differs from the current one (or after reset / a program write), so the
+     // store must HOLD its output between reads (see monarch_sram32_prog).
+     // CONTRACT: no program writes while the program runs; the store must be
+     // registered-read (a combinational store here is a combinational loop).
+     parameter PROG_MEM_SYNC       = 0,
      parameter BUFF_INDX_SZ        = $clog2(NUM_BUFFERS),
      // AXI address range for program memory writes (host loads instructions here)
      parameter [31:0] SCH_PROG_MEM_ADDR = 32'hD000_0000,
@@ -104,6 +123,9 @@ module scheduler
      input  wire [PROG_DATA_BITS-1:0]  prog_mem_data_i,
      output wire                       prog_mem_req_o,
      input  wire                       prog_mem_wait_i,
+     // Read strobe for a PROG_MEM_SYNC store (== prog_mem_req_o otherwise).
+     // Additive: existing tops may leave it unconnected.
+     output wire                       prog_mem_rd_o,
 
      // Program memory write interface (host loads program via AXI):
      output wire                       prog_mem_wr_o,
@@ -592,8 +614,29 @@ end
 
 assign keep_fetching  = prog_running_r & ~prog_stopping_r & ~inst_is_stop
                       & ~prog_paused_r;
-assign prog_mem_addr_o = prog_counter_r;
 assign prog_mem_req_o  = keep_fetching & (~inst_valid | ~inst_word_valid_nxt);
+
+// PROG_MEM_SYNC look-ahead: the value prog_counter_r takes at the next edge.
+wire [PROG_ADDR_BITS-1:0] prog_counter_d = sch_clr          ? {PROG_ADDR_BITS{1'b0}}
+                                         : prog_running_nxt ? prog_counter_nxt
+                                         :                    prog_counter_r;
+// 1 = the SRAM output currently holds mem[prog_counter_r]. A write is 1RW
+// write-priority (the read that cycle is lost) and may hit the PC's word.
+reg prog_rd_valid_r;
+assign prog_mem_rd_o = (PROG_MEM_SYNC != 0)
+                     ? (~prog_rd_valid_r | (prog_counter_d != prog_counter_r))
+                     : prog_mem_req_o;
+always @ (posedge clk)
+   if (sch_clr | prog_mem_wr_o) prog_rd_valid_r <= 1'b0;
+   else if (prog_mem_rd_o)      prog_rd_valid_r <= 1'b1;
+assign prog_mem_addr_o = (PROG_MEM_SYNC != 0) ? prog_counter_d : prog_counter_r;
+
+`ifndef SYNTHESIS
+// The look-ahead is only equivalent while the SRAM output is current.
+always @ (posedge clk)
+   if ((PROG_MEM_SYNC != 0) & ~sch_clr & word_ready_r & ~prog_rd_valid_r)
+      $display("[%0t] %m ERROR: PROG_MEM_SYNC fetch consumed a stale word (program written while running?)", $time);
+`endif
 
 always @ (posedge clk)
 begin
