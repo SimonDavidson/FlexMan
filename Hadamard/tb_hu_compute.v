@@ -5,7 +5,7 @@
 //
 // Authors      : Simon Davidson & Claude
 // Created      : 2026-06-07
-// Last modified: 2026-08-20
+// Last modified: 2026-10-01
 //
 // DUT: R = clamp( Z*(A-B) + B + mode*R_prev ), left-aligned for the packer.
 //
@@ -119,6 +119,17 @@ module tb_hu_compute;
     // failures reproduce.
     // ---------------------------------------------------------------------
 `ifdef HU_BP
+    // Input bubbles for the streaming test (2026-10-01). A continuous stream
+    // keeps the II=2 pipeline in a fixed phase where E is never valid in a
+    // ready cycle, so a stall can never START while the producer is taking --
+    // the window in which the HU_II drop bug lives. In the real unit the
+    // stream generators' pool reads see wait states, which shifts that phase;
+    // ~30% bubbles reproduce it.
+    reg [31:0] in_lfsr;
+    initial    in_lfsr = 32'h0BAD_F00D;
+    always @(posedge clk)
+        in_lfsr <= {in_lfsr[30:0], in_lfsr[31]^in_lfsr[21]^in_lfsr[1]^in_lfsr[0]};
+    wire in_bubble = in_lfsr[5] & ~in_lfsr[11];      // ~25-30% of cycles
     reg [31:0] bp_lfsr;
     initial    bp_lfsr = 32'h1234_5678;
     always @(posedge clk) begin
@@ -282,18 +293,38 @@ module tb_hu_compute;
         input integer  n;
         input integer  exp_cyc_per_elem;
         input [255:0]  tag;    // NOTE: 32 chars max, silently truncated above that
-        integer cyc, got, meas;
+        integer cyc, got, meas, offered, drain;
         begin
             do_reset;
             exp_ov_sticky=0; exp_un_sticky=0;
-            cyc = 0; got = 0;
+            cyc = 0; got = 0; offered = 0;
             valid_i = 1'b1;
             while (got < n && cyc < 100000) begin
+`ifdef HU_BP
+                valid_i = ~in_bubble;
+`endif
+                // hadamard_unit's `take` -- the streams advance on exactly this
+                if (valid_i && ready_o) offered = offered + 1;
                 @(posedge clk); #1;
                 cyc = cyc + 1;
                 if (pak_write_o) got = got + 1;
             end
             valid_i = 1'b0;
+            // CONSERVATION (2026-10-01): every element the producer handed over
+            // must come out. Counting outputs alone cannot see a drop here,
+            // because valid_i is held high and an identical element is simply
+            // offered again -- which is how the HU_II stall-vs-ready drop
+            // (Clement, butterfly bring-up) passed this bench.
+            drain = 0;
+            while (got < offered && drain < 200) begin
+                @(posedge clk); #1; drain = drain + 1;
+                if (pak_write_o) got = got + 1;
+            end
+            if (got != offered) begin
+                $display("FAIL %0s: %0d elements taken by the producer, %0d emerged (%0d DROPPED)",
+                         tag, offered, got, offered - got);
+                verif_errors = verif_errors + 1;
+            end
             if (got < n) begin
                 $display("FAIL %0s: only %0d/%0d elements emerged in %0d cyc",
                          tag, got, n, cyc);

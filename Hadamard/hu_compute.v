@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
-// Authors: Simon Davidson & Claude | Last modified: 2026-08-20
+// Authors: Simon Davidson & Claude | Last modified: 2026-10-01
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 /* Hadamard compute: R[i] = Z[i]*(A[i]-B[i]) + B[i] + mode*R_prev[i]
  *
@@ -571,7 +571,19 @@ if (HU_II == 0) begin : gen_hu_seq
      * a whole-pipeline freeze is both correct and much simpler than
      * per-stage skid buffers.  tbHuComputeBp.bsh exercises it deliberately. */
     wire p_stall  = e_vld & pak_full_i;
-    wire a_accept = ready_o & valid_i & ~p_stall;
+    /* Accept on ready_o ALONE (fix 2026-10-01). hadamard_unit fires `take`
+     * -- advancing all four input streams -- on ready_o & all_valid, with no
+     * view of p_stall. ready_o is REGISTERED from the previous cycle's
+     * p_stall, so a stall that starts in a ready cycle used to refuse an
+     * element the streams had already given up: it was silently dropped
+     * (Clement, butterfly bring-up: pool wait states shift the pipeline
+     * phase into that window; a continuous stream never reaches it).
+     * Safe because ready_o=1 implies stage A is EMPTY this cycle (ready_o
+     * was ~a_vld_nxt, and A does not move under stall), so loading A during
+     * a stall overwrites nothing; ready_o then drops next cycle. No new
+     * combinational path -- qualifying ready_o with the live p_stall instead
+     * would put pak_full -> take -> stream request -> pool wait on one path. */
+    wire a_accept = ready_o & valid_i;
     wire b_take   = a_vld & ~b_vld & ~p_stall;   /* A -> B this cycle      */
     wire a_vld_nxt = b_take ? a_accept : (a_vld | a_accept);
 
@@ -642,7 +654,14 @@ if (HU_II == 0) begin : gen_hu_seq
                 a_eszz <= elem_sz_z_i;    a_eszr <= elem_sz_r_i;
                 a_mode <= mode_i;         a_idx  <= index_i;  a_lst <= last_i;
             end
-            if (!p_stall) a_vld <= a_vld_nxt;
+            /* Unconditional: under stall b_take=0, so a_vld_nxt = a_vld |
+             * a_accept -- the freeze plus the one element accepted above. */
+            a_vld <= a_vld_nxt;
+`ifndef SYNTHESIS
+            /* The invariant the accept-on-ready_o fix rests on. */
+            if (ready_o && a_vld)
+                $display("[%0t] %m ERROR: ready_o with stage A occupied -- an accept would overwrite it", $time);
+`endif
 
             /* ---------------- stage B: multiply ------------------------ */
             if (mul_active) begin
