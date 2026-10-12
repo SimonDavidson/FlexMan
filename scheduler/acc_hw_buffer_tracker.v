@@ -7,7 +7,7 @@
 // Author: Simon D.
 // Version: 2.1
 // Date 10/2/2025
-// Authors: Simon Davidson & Claude   Last modified: 2026-08-22
+// Authors: Simon Davidson & Claude   Last modified: 2026-10-12
 //
 // Tracks which buffers are in use by one hardware accelerator.
 // Stores six slots (mode + buffer ID + #targets) so sch_buffer_state
@@ -40,6 +40,14 @@
 // dispatch in sch_entry, and still update on completion), so relaxing this is a
 // RESOURCE relaxation only.
 //
+// DEPTH>=3 (2026-10-12, gen_depthn): the same in-order FIFO, DEPTH entries
+// deep. acc_ready_next_i then licenses EVERY accept beyond the first: free
+// while 1..DEPTH-1 tasks are in flight and the accelerator says it can take
+// one more, full at DEPTH. The accelerator must therefore hold
+// acc_ready_next_i low whenever it cannot hold yet another task -- the JABRA
+// annAcc does this with its config shadow (ready = shadow free). DEPTH=1 and
+// DEPTH=2 are untouched below.
+//
 
 module acc_hw_buffer_tracker
     #(parameter NUM_SLOTS    = 6,
@@ -48,6 +56,7 @@ module acc_hw_buffer_tracker
       parameter MODE_SZ      = 2,
       // 1 = original single in-flight task.  2 = allow one further task to be
       // accepted while the current one drains (needs acc_ready_next_i).
+      // >=3 = DEPTH tasks in flight (gen_depthn).
       parameter DEPTH        = 1)
     (input wire                                   clk,
      input wire                                   reset,
@@ -115,7 +124,7 @@ if (DEPTH < 2) begin : gen_depth1
          acc_free_r <= acc_free_nxt;
    end
 
-end else begin : gen_depth2
+end else if (DEPTH == 2) begin : gen_depth2
 
    //--------------------------------------------------------------
    // Two-deep in-order FIFO of slot sets.
@@ -201,6 +210,74 @@ end else begin : gen_depth2
    end
 
    assign acc_free_o = acc_free_r;
+
+end else begin : gen_depthn
+
+   //--------------------------------------------------------------
+   // DEPTH-deep in-order FIFO of slot sets (DEPTH >= 3). ent_r[0] is the
+   // HEAD: the oldest in-flight task, whose slots are published on slot_*_o.
+   // Completion is strictly in order, so a shift register needs no tags.
+   //--------------------------------------------------------------
+   localparam OW = $clog2(DEPTH + 1);
+   reg [SLOTSET_SZ-1:0] ent_r [0:DEPTH-1];
+   reg         [OW-1:0] occ_r;
+   reg                  acc_free_r;
+   integer              k;
+
+   wire [SLOTSET_SZ-1:0] new_set = {slot_ntgt_i, slot_mode_i, slot_buff_i};
+   wire push = new_task_i;
+   wire pop  = task_finished_i;
+   wire [OW-1:0] occ_nxt = occ_r + {{(OW-1){1'b0}}, push} - {{(OW-1){1'b0}}, pop};
+
+   always @ (posedge clk)
+   begin
+      if (reset)
+      begin
+         for (k = 0; k < DEPTH; k = k + 1) ent_r[k] <= 'b0;
+         occ_r <= 'b0;
+      end
+      else
+      begin
+         occ_r <= occ_nxt;
+         // Pop: shift down, but only over entries that hold a task, so the
+         // head is HELD on the last pop exactly as DEPTH=1/2 hold it.
+         if (pop)
+            for (k = 0; k < DEPTH - 1; k = k + 1)
+               if (k + 1 < occ_r) ent_r[k] <= ent_r[k + 1];
+         // Push lands at the tail AFTER this cycle's pop.
+         if (push)
+         begin
+            if (occ_r == 0)  ent_r[0] <= new_set;
+            else if (pop)    ent_r[occ_r - 1] <= new_set;
+            else             ent_r[occ_r] <= new_set;
+         end
+      end
+   end
+
+   assign slot_buff_o = ent_r[0][0                                  +: NUM_SLOTS*BUFF_INDX_SZ];
+   assign slot_mode_o = ent_r[0][NUM_SLOTS*BUFF_INDX_SZ             +: NUM_SLOTS*MODE_SZ];
+   assign slot_ntgt_o = ent_r[0][NUM_SLOTS*(BUFF_INDX_SZ + MODE_SZ) +: NUM_SLOTS*TGT_COUNT_SZ];
+
+   // Registered, as DEPTH=2: empty -> free; 1..DEPTH-1 -> free while the
+   // accelerator can take another; DEPTH -> full.
+   wire acc_free_nxt = (occ_nxt == 0)     ? 1'b1
+                     : (occ_nxt < DEPTH)  ? acc_ready_next_i
+                     :                      1'b0;
+
+   always @ (posedge clk)
+      if (reset) acc_free_r <= 1'b1;
+      else       acc_free_r <= acc_free_nxt;
+
+   assign acc_free_o = acc_free_r;
+
+   // synopsys translate_off
+   always @ (posedge clk)
+      if (!reset && ((push && !pop && occ_r == DEPTH) || (pop && !push && occ_r == 0))) begin
+         $display("FATAL %m: tracker %s (occupancy %0d, DEPTH %0d)",
+                  push ? "overflow" : "underflow", occ_r, DEPTH);
+         $fatal;
+      end
+   // synopsys translate_on
 
 end
 endgenerate

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Simon Davidson, University of Manchester
-// Authors: Simon Davidson & Claude | Last modified: 2026-09-29
+// Authors: Simon Davidson & Claude | Last modified: 2026-10-12
 `include "../shared/constants.v"
 
 `timescale 10ps/1ps
@@ -86,6 +86,13 @@ module scheduler
      // stage.  Default 0 = original behaviour everywhere.  A masked
      // accelerator must drive acc_ready_next_i.  See acc_hw_buffer_tracker.
      parameter OVERLAP_ACC_MASK    = {NUM_HW_ACCELERATORS{1'b0}},
+     // OVERLAP_DEPTH (2026-10-12): tasks in flight for a masked accelerator,
+     // 2 (default, the behaviour above) or 3. At 3 the accelerator's
+     // acc_ready_next_i licenses the third accept too, and a DISJOINT hint
+     // must mean "disjoint from EVERY earlier writer that can still be in
+     // flight" (the previous two). buffer_state_entry's 2-bit writer count
+     // holds the three writers that allows; deeper is refused below.
+     parameter OVERLAP_DEPTH       = 2,
      // DISJOINT_HINT=1 honours the wide TASK's per-instruction "my buffer writes
      // do not overlap the previous task on my accelerator" bit, letting sch_entry
      // skip the RW needs-full check. Default 0 ignores it. The bit sits just
@@ -898,6 +905,7 @@ sch_buffer_state #(
    .NUM_SLOTS(NUM_SLOTS),
    .MODE_SZ(MODE_SZ),
    .OVERLAP_ACC_MASK(OVERLAP_ACC_MASK),
+   .OVERLAP_DEPTH(OVERLAP_DEPTH),
    .MULTI_WRITER(MULTI_WRITER)
 ) sch_buff_state0 (
    .clk(clk),
@@ -986,5 +994,14 @@ assign dbg_frontend_o = {
 };
 
 assign dbg_inst_word_o = inst_word;
+
+// OVERLAP_DEPTH guard (2026-10-12): buffer_state_entry's 2-bit writer count
+// tops out at three outstanding writers.
+// synopsys translate_off
+initial if (OVERLAP_DEPTH < 2 || OVERLAP_DEPTH > 3) begin
+   $display("FATAL %m: OVERLAP_DEPTH=%0d unsupported (2 or 3)", OVERLAP_DEPTH);
+   $fatal;
+end
+// synopsys translate_on
 
 endmodule

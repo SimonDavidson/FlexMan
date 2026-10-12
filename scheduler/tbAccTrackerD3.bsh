@@ -1,0 +1,9 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude | Created 2026-10-12 | Last modified 2026-10-12
+#
+# acc_hw_buffer_tracker DEPTH=3 (gen_depthn) against a behavioural in-order
+# queue, and DEPTH=3/2 identical to DEPTH=1 with acc_ready_next_i low.
+xrun -sv -timescale 1ns/1ps -access wrc -top tb_acc_tracker_d3 \
+  acc_hw_buffer_tracker.v tb_acc_tracker_d3.v

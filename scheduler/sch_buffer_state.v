@@ -6,7 +6,7 @@
 //
 // Author: Simon D.
 // Version: 2.1
-// Authors: Simon Davidson & Claude   Last modified: 2026-08-22
+// Authors: Simon Davidson & Claude   Last modified: 2026-10-12
 //
 // Tracks buffer and accelerator state for the scheduler.
 //
@@ -34,6 +34,11 @@
 // stalled.  Unmasked accelerators keep the original single-bit expression
 // verbatim, so nothing existing changes.
 //
+// OVERLAP_DEPTH (2026-10-12): how many tasks a MASKED accelerator may hold in
+// flight. Default 2 = exactly the above. 3 gives it a 3-deep tracker
+// (acc_hw_buffer_tracker gen_depthn) and a 3-bit pending counter (up to three
+// completions may then be outstanding). Unmasked accelerators are unaffected.
+//
 
 `define MODE_UNUSED 2'b00
 `define MODE_SRC    2'b01
@@ -50,6 +55,8 @@ module sch_buffer_state
         parameter MODE_SZ             = 2,
         // One bit per accelerator; 1 = allow a second task in flight.
         parameter OVERLAP_ACC_MASK    = {NUM_HW_ACCELERATORS{1'b0}},
+        // Tasks in flight for a masked accelerator (2 or 3); default 2.
+        parameter OVERLAP_DEPTH       = 2,
         // 1 = buffers tolerate more than one outstanding writer (needed with
         // sch_entry's disjoint hint). Default 0 = original behaviour.
         parameter MULTI_WRITER        = 0
@@ -133,6 +140,25 @@ generate
          assign acc_process_pending_nxt[pi] =
                   (acc_process_pending_r[pi] | acc_finished_i[pi])
                 & ~selected_finisher[pi];
+      end else if (OVERLAP_DEPTH >= 3) begin : gen_cntn
+         // OVERLAP_DEPTH>=3: up to OVERLAP_DEPTH completions outstanding, so
+         // the counter is one bit wider than that needs and must never fill.
+         localparam CW = $clog2(OVERLAP_DEPTH + 1) + 1;
+         reg  [CW-1:0] cnt_r;
+         wire [CW-1:0] cnt_nxt = cnt_r + {{(CW-1){1'b0}}, acc_finished_i[pi]}
+                                       - {{(CW-1){1'b0}}, selected_finisher[pi]};
+         always @ (posedge clk)
+            if (reset) cnt_r <= {CW{1'b0}};
+            else       cnt_r <= cnt_nxt;
+         assign acc_process_pending_nxt[pi] = (cnt_nxt != {CW{1'b0}});
+         // synopsys translate_off
+         always @ (posedge clk)
+            if (!reset && cnt_r > OVERLAP_DEPTH) begin
+               $display("FATAL %m: %0d completions pending, more than OVERLAP_DEPTH %0d",
+                        cnt_r, OVERLAP_DEPTH);
+               $fatal;
+            end
+         // synopsys translate_on
       end else begin : gen_cnt
          // Overlapped: count completions so two cannot merge.  Saturates at 3,
          // which is unreachable with a 2-deep tracker but keeps the adder safe.
@@ -259,7 +285,7 @@ generate
          .BUFF_INDX_SZ(BUFF_INDX_SZ),
          .TGT_COUNT_SZ(TGT_COUNT_SZ),
          .MODE_SZ(MODE_SZ),
-         .DEPTH((((OVERLAP_ACC_MASK >> ai) & 1) != 0) ? 2 : 1)
+         .DEPTH((((OVERLAP_ACC_MASK >> ai) & 1) != 0) ? OVERLAP_DEPTH : 1)
       ) hw_n (
          .clk(clk),
          .reset(reset),
