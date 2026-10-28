@@ -48,6 +48,16 @@
 // Banks are EXTERNAL (instantiated by the top/testbench); this module is the
 // arbiter + read-data return only. All ports are flattened Verilog-2001 vectors:
 // requester k occupies bit k / word [k*W +: W]; bank b occupies bit b / [b*W +: W].
+//
+// PTR_RST (default 0, added 2026-10-28, Simon Davidson & Claude): the pointers'
+// start value is set by an `initial`, which synthesis drops, so in a netlist
+// they power up X. Silicon is fine (any start is a legal rotation), but a
+// gate-level sim is not: the grant term "k > rr_ptr" is X for every k except 0,
+// so the first request from any requester other than 0 waits on X. In strict
+// mode the pointer never moves, so it stays X for good. PTR_RST=1 adds an
+// async reset (rst_i) to NUM_REQ-1, the same value. PTR_RST=0 leaves rst_i
+// unused: existing instantiations need not connect it and are unchanged.
+// Last modified: 2026-10-28
 // ───────────────────────────────────────────────────────────────────────────
 
 module shared_pool #(
@@ -56,10 +66,12 @@ module shared_pool #(
     parameter ADDR_W    = 30,
     parameter DATA_W    = 32,
     parameter ARB_RR    = 0,      // 0 = strict priority (default), 1 = round-robin
-    parameter ARB_FAST  = 0       // 0 = sequential scan (default), 1 = log-depth
+    parameter ARB_FAST  = 0,      // 0 = sequential scan (default), 1 = log-depth
                                   //   grant logic; same winner, shallower circuit
+    parameter PTR_RST   = 0       // 1 = rst_i resets the RR pointers (see header)
 )(
     input  wire                        clk,
+    input  wire                        rst_i,        // used only when PTR_RST=1
 
     // ── Requester side ──────────────────────────────────────────────────────
     input  wire [NUM_REQ-1:0]          req_act_i,    // requesting this cycle
@@ -263,13 +275,26 @@ module shared_pool #(
 
     // ── Advance the rotating pointer past each bank's winner (RR mode only) ──
     integer bb;
-    always @(posedge clk) begin
-        if (ARB_RR) begin
-            for (bb = 0; bb < NUM_BANKS; bb = bb + 1)
-                if (bank_grant[bb])
-                    rr_ptr[bb] <= win_idx_flat[bb*REQ_IDX_W +: REQ_IDX_W];
+    generate if (PTR_RST != 0) begin : g_ptr_rst
+        always @(posedge clk or posedge rst_i) begin
+            if (rst_i) begin
+                for (bb = 0; bb < NUM_BANKS; bb = bb + 1)
+                    rr_ptr[bb] <= NUM_REQ-1;
+            end else if (ARB_RR) begin
+                for (bb = 0; bb < NUM_BANKS; bb = bb + 1)
+                    if (bank_grant[bb])
+                        rr_ptr[bb] <= win_idx_flat[bb*REQ_IDX_W +: REQ_IDX_W];
+            end
         end
-    end
+    end else begin : g_ptr
+        always @(posedge clk) begin
+            if (ARB_RR) begin
+                for (bb = 0; bb < NUM_BANKS; bb = bb + 1)
+                    if (bank_grant[bb])
+                        rr_ptr[bb] <= win_idx_flat[bb*REQ_IDX_W +: REQ_IDX_W];
+            end
+        end
+    end endgenerate
 
     // ── Read-data return: register serving bank per reader, mux next cycle ───
     reg [BANK_SEL_BITS-1:0] rdsel_r [0:NUM_REQ-1];
