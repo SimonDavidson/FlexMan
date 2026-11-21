@@ -1,0 +1,33 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude
+# Created: 2026-06-07 ; Last modified: 2026-06-07
+#
+# Sweeps np_fetch_sel (plain + prefetch) over EB in {8,16} x LANES in {1,2,4}
+# (LANES<=EPW) x PF in {0,1}.  Fails if any config does not print PASS.
+set -u
+RTL="np_fetch_sel.v np_line_fetch.v np_line_fetch_pf.v tb_np_line_fetch.v"
+fail=0
+for EB in 8 16; do
+  for LANES in 1 2 4; do
+    EPW=$((32 / EB))
+    if [ "$LANES" -gt "$EPW" ]; then continue; fi
+    for PF in 0 1; do
+      echo "=== np_line_fetch EB=$EB LANES=$LANES PF=$PF ==="
+      log="xrun_fetch_EB${EB}_L${LANES}_PF${PF}.log"
+      xrun -sv -timescale 1ns/1ps -access wrc -top tb_np_line_fetch \
+           -define EB=$EB -define LANES=$LANES -define PF=$PF $RTL > "$log" 2>&1
+      if grep -q '^PASS$' "$log" && ! grep -q '^FAIL' "$log"; then
+        echo "  PASS  (EB=$EB LANES=$LANES PF=$PF)"
+      else
+        echo "  FAIL  (EB=$EB LANES=$LANES PF=$PF)  -- see $log"
+        grep -E '^FAIL|Error|\*E' "$log" | head -10
+        fail=1
+      fi
+    done
+  done
+done
+echo "------------------------------------------------------------"
+if [ "$fail" -eq 0 ]; then echo "ALL NP_LINE_FETCH CONFIGS PASS"; else echo "NP_LINE_FETCH: SOME CONFIGS FAILED"; fi
+exit $fail

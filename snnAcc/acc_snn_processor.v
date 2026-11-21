@@ -83,6 +83,13 @@ module acc_snn_processor # (
     parameter NP_SPIKE_SLICE_BITS     = 8,
     parameter NP_SYN_DECAY_BITS       = 32,
     parameter NP_POT_DECAY_BITS       = 32,
+    // Lane-parallel widening (experiment), a SINGLE knob driving BOTH stages.
+    // NUM_LANES=1 keeps the original scalar spike_processing + neuron_processing
+    // (bit-identical baseline). >1 selects the wide variants (single-fetch
+    // parallel-deserialise; needs 8/16-bit syn_curr/state, NUM_LANES <=
+    // 32/SLICE_BITS; SP wide = full connectivity). PREFETCH hides the fetch.
+    parameter NUM_LANES               = 1,
+    parameter PREFETCH                = 0,
     parameter MEM_ADDR_BITS           = `ADDR_SIZE
 )(
     input  wire clk,
@@ -439,8 +446,9 @@ module acc_snn_processor # (
     wire my_dispatch = start_new_block_i & (target_acc_i == TGT_ACC_ID);
 
     //================================================================
-    // spike_processing instantiation
+    // spike_processing instantiation (generate-selected: original vs wide)
     //================================================================
+    generate if (NUM_LANES == 1) begin : g_sp_orig
     spike_processing # (
         .NUM_TIMESTEPS        (SP_NUM_TIMESTEPS),
         .X_INPUT_SZ           (SP_X_INPUT_SZ),
@@ -537,10 +545,102 @@ module acc_snn_processor # (
         .syn_curr_mem_data_wr_o (sp_syn_curr_mem_data_wr),
         .syn_curr_mem_data_rd_i (syn_curr_mem_data_i)
     );
+    end else begin : g_sp_wide
+    //--------------------------------------------------------------------
+    // Lane-parallel spike_processing (full connectivity). Identical ports.
+    //--------------------------------------------------------------------
+    spike_processing_wide # (
+        .NUM_LANES            (NUM_LANES),
+        .PREFETCH             (PREFETCH),
+        .WEIGHT_ELEM_BITS     (SP_WEIGHT_ENTRY_BITS),
+        .NUM_TIMESTEPS        (SP_NUM_TIMESTEPS),
+        .X_INPUT_SZ           (SP_X_INPUT_SZ),
+        .Y_INPUT_SZ           (SP_Y_INPUT_SZ),
+        .X_OUTPUT_SZ          (SP_X_OUTPUT_SZ),
+        .Y_OUTPUT_SZ          (SP_Y_OUTPUT_SZ),
+        .X_KERNEL_SZ          (SP_X_KERNEL_SZ),
+        .Y_KERNEL_SZ          (SP_Y_KERNEL_SZ),
+        .X_KERNEL_OFF_SZ      (SP_X_KERNEL_OFF_SZ),
+        .Y_KERNEL_OFF_SZ      (SP_Y_KERNEL_OFF_SZ),
+        .X_STEP_SZ            (SP_X_STEP_SZ),
+        .Y_STEP_SZ            (SP_Y_STEP_SZ),
+        .ELEMS_PER_ROW        (SP_ELEMS_PER_ROW),
+        .ROWS_PER_NEURON      (SP_ROWS_PER_NEURON),
+        .TIMESTEP_SZ          (SP_TIMESTEP_SZ),
+        .IN_DATA_BITS         (SP_IN_DATA_BITS),
+        .ELEM_SZ              (SP_ELEM_SZ),
+        .ACT_SLICE_SZ         (SP_ACT_SLICE_SZ),
+        .ACT_DATA_IDX_SZ      (SP_ACT_DATA_IDX_SZ),
+        .WEIGHT_ENTRY_BITS    (SP_WEIGHT_ENTRY_BITS),
+        .WEIGHT_IDX_SZ        (SP_WEIGHT_IDX_SZ),
+        .WEIGHT_SLICE_SZ      (SP_WEIGHT_SLICE_SZ),
+        .WEIGHT_DATA_IDX_SZ   (SP_WEIGHT_DATA_IDX_SZ),
+        .SYN_CURR_IDX_SZ      (SP_SYN_CURR_IDX_SZ),
+        .SYN_CURR_DATA_IDX_SZ (SP_SYN_CURR_DATA_IDX_SZ),
+        .SYN_CURR_SLICE_SZ    (SP_SYN_CURR_SLICE_SZ),
+        .SYN_CURR_SLICE_BITS  (SP_SYN_CURR_SLICE_BITS),
+        .BIAS_CURR_IDX_SZ     (SP_BIAS_CURR_IDX_SZ),
+        .BIAS_CURR_DATA_IDX_SZ(SP_BIAS_CURR_DATA_IDX_SZ),
+        .BIAS_CURR_SLICE_SZ   (SP_BIAS_CURR_SLICE_SZ),
+        .BIAS_CURR_SLICE_BITS (SP_BIAS_CURR_SLICE_BITS),
+        .MEM_ADDR_BITS        (MEM_ADDR_BITS)
+    ) u_spike_processing (
+        .clk                    (clk),
+        .reset                  (reset),
+        .act_base_addr_i        (sp_act_base_addr_r),
+        .weight_base_addr_i     (sp_weight_base_addr_r),
+        .syn_curr_base_addr_i   (syn_curr_base_addr_r),
+        .weight_sz_i            (sp_weight_sz_r),
+        .bin_point_syn_curr_i   (bin_point_syn_curr_r),
+        .in_x_len_i             (sp_in_x_len_r),
+        .in_y_len_i             (sp_in_y_len_r),
+        .out_x_len_i            (sp_out_x_len_r),
+        .out_y_len_i            (sp_out_y_len_r),
+        .weights_per_word_i     (sp_weights_per_word_r),
+        .rows_per_neuron_i      (sp_rows_per_neuron_r),
+        .weight_idx_sz_i        (sp_weight_idx_sz_r),
+        .weight_mode_i          (sp_weight_mode_r),
+        .x_kernel_len_i         (sp_x_kernel_len_r),
+        .y_kernel_len_i         (sp_y_kernel_len_r),
+        .x_kernel_offset_i      (sp_x_kernel_offset_r),
+        .y_kernel_offset_i      (sp_y_kernel_offset_r),
+        .x_kernel_step_i        (sp_x_kernel_step_r),
+        .y_kernel_step_i        (sp_y_kernel_step_r),
+        .index_sz_i             (sp_index_sz_r),
+        .tuple_sz_i             (sp_tuple_sz_r),
+        .sparse_count_i         (sp_sparse_count_r),
+        .start_new_block_i      (my_dispatch),
+        .target_acc_i           (dispatched_target_acc_r),
+        .buffer_info_i          (buffer_info_i),
+        .spike_proc_finished_o  (spike_proc_finished_o),
+        .acc_busy_o             (sp_acc_busy),
+        .acc_finished_o         (sp_acc_finished),
+        .src1_buff_addr_i       (sp_src1_buff_addr_i),
+        .src2_buff_addr_i       (sp_src2_buff_addr_i),
+        .src3_buff_addr_i       (sp_src3_buff_addr_i),
+        .tgt_buff_addr_i        (sp_tgt_buff_addr_i),
+        .weight_row_len_i       (sp_weight_row_len_i),
+        .weight_mem_rd_o        (weight_mem_rd_o),
+        .weight_mem_wait_i      (weight_mem_wait_i),
+        .weight_mem_addr_o      (weight_mem_addr_o),
+        .weight_mem_data_i      (weight_mem_data_i),
+        .act_mem_req_o          (act_mem_req_o),
+        .act_mem_wait_i         (act_mem_wait_i),
+        .act_mem_addr_o         (act_mem_addr_o),
+        .act_mem_data_i         (act_mem_data_i),
+        .syn_curr_mem_wr_o      (sp_syn_curr_mem_wr),
+        .syn_curr_mem_rd_o      (sp_syn_curr_mem_rd),
+        .syn_curr_mem_wait_i    (sp_syn_curr_mem_wait),
+        .syn_curr_mem_addr_o    (sp_syn_curr_mem_addr),
+        .syn_curr_mem_data_wr_o (sp_syn_curr_mem_data_wr),
+        .syn_curr_mem_data_rd_i (syn_curr_mem_data_i)
+    );
+    end endgenerate
 
     //================================================================
-    // neuron_processing instantiation
+    // neuron_processing instantiation (generate-selected: original vs wide)
     //================================================================
+    generate if (NUM_LANES == 1) begin : g_np_orig
     neuron_processing # (
         .TGT_ACC_ID           (TGT_ACC_ID),
         .NUM_TIMESTEPS        (NP_NUM_TIMESTEPS),
@@ -635,5 +735,91 @@ module acc_snn_processor # (
         .spike_mem_addr_o       (spike_mem_addr_o),
         .spike_mem_data_o       (spike_mem_data_o)
     );
+    end else begin : g_np_wide
+    //--------------------------------------------------------------------
+    // Lane-parallel variant. Port list identical to neuron_processing.
+    // Requires 8/16-bit state width with NP_NUM_LANES <= 32/SLICE_BITS.
+    //--------------------------------------------------------------------
+    neuron_processing_wide # (
+        .TGT_ACC_ID           (TGT_ACC_ID),
+        .NUM_LANES            (NUM_LANES),
+        .PREFETCH             (PREFETCH),
+        .NUM_TIMESTEPS        (NP_NUM_TIMESTEPS),
+        .TIMESTEP_SZ          (NP_TIMESTEP_SZ),
+        .IN_DATA_BITS         (NP_IN_DATA_BITS),
+        .NEURON_IDX_SZ        (NP_NEURON_IDX_SZ),
+        .SYN_CURR_IDX_SZ      (NP_SYN_CURR_IDX_SZ),
+        .SYN_CURR_DATA_IDX_SZ (NP_SYN_CURR_DATA_IDX_SZ),
+        .SYN_CURR_SLICE_SZ    (NP_SYN_CURR_SLICE_SZ),
+        .SYN_CURR_SLICE_BITS  (NP_SYN_CURR_SLICE_BITS),
+        .BIAS_CURR_IDX_SZ     (NP_BIAS_CURR_IDX_SZ),
+        .BIAS_CURR_DATA_IDX_SZ(NP_BIAS_CURR_DATA_IDX_SZ),
+        .BIAS_CURR_SLICE_SZ   (NP_BIAS_CURR_SLICE_SZ),
+        .BIAS_CURR_SLICE_BITS (NP_BIAS_CURR_SLICE_BITS),
+        .POT_IDX_SZ           (NP_POT_IDX_SZ),
+        .POT_DATA_IDX_SZ      (NP_POT_DATA_IDX_SZ),
+        .POT_SLICE_SZ         (NP_POT_SLICE_SZ),
+        .POT_SLICE_BITS       (NP_POT_SLICE_BITS),
+        .SPIKE_IDX_SZ         (NP_SPIKE_IDX_SZ),
+        .SPIKE_DATA_IDX_SZ    (NP_SPIKE_DATA_IDX_SZ),
+        .SPIKE_SLICE_SZ       (NP_SPIKE_SLICE_SZ),
+        .SPIKE_SLICE_BITS     (NP_SPIKE_SLICE_BITS),
+        .SYN_DECAY_BITS       (NP_SYN_DECAY_BITS),
+        .POT_DECAY_BITS       (NP_POT_DECAY_BITS),
+        .MEM_ADDR_BITS        (MEM_ADDR_BITS)
+    ) u_neuron_processing (
+        .clk                    (clk),
+        .reset                  (reset),
+        .last_neuron_idx_i      (np_last_neuron_idx_r),
+        .syn_curr_base_addr_i   (syn_curr_base_addr_r),
+        .bias_curr_base_addr_i  (np_bias_curr_base_addr_r),
+        .thresh_base_addr_i     (np_thresh_base_addr_r),
+        .pot_base_addr_i        (np_pot_base_addr_r),
+        .spike_base_addr_i      (np_spike_base_addr_r),
+        .syn_curr_sz_i          (np_syn_curr_sz_r),
+        .bias_curr_sz_i         (np_bias_curr_sz_r),
+        .pot_sz_i               (np_pot_sz_r),
+        .bin_point_syn_curr_i   (bin_point_syn_curr_r),
+        .syn_curr_decay_mult_i  (np_syn_curr_decay_mult_r[NP_SYN_DECAY_BITS-1:0]),
+        .pot_decay_mult_i       (np_pot_decay_mult_r[NP_POT_DECAY_BITS-1:0]),
+        .sub_on_fire_i          (np_mode_r[0]),
+        .clear_pot_i            (np_mode_r[2]),
+        .start_new_block_i      (sp_acc_finished & ~sp_skip_neuron_r),
+        .target_acc_i           (dispatched_target_acc_r),
+        .buffer_info_i          (buffer_info_i),
+        .neuron_proc_finished_o (np_neuron_proc_finished),
+        .acc_busy_o             (np_acc_busy),
+        .acc_finished_o         (np_acc_finished),
+        .src1_buff_addr_i       (np_src1_buff_addr_i),
+        .src2_buff_addr_i       (np_src2_buff_addr_i),
+        .src3_buff_addr_i       (np_src3_buff_addr_i),
+        .tgt_buff_addr_i        (np_tgt_buff_addr_i),
+        .weight_row_len_i       (np_weight_row_len_i),
+        .syn_curr_mem_wr_o      (np_syn_curr_mem_wr),
+        .syn_curr_mem_rd_o      (np_syn_curr_mem_rd),
+        .syn_curr_mem_wait_i    (np_syn_curr_mem_wait),
+        .syn_curr_mem_addr_o    (np_syn_curr_mem_addr),
+        .syn_curr_mem_data_o    (np_syn_curr_mem_data_wr),
+        .syn_curr_mem_data_i    (syn_curr_mem_data_i),
+        .bias_curr_mem_rd_o     (bias_curr_mem_rd_o),
+        .bias_curr_mem_wait_i   (bias_curr_mem_wait_i),
+        .bias_curr_mem_addr_o   (bias_curr_mem_addr_o),
+        .bias_curr_mem_data_i   (bias_curr_mem_data_i),
+        .thresh_mem_rd_o        (thresh_mem_rd_o),
+        .thresh_mem_wait_i      (thresh_mem_wait_i),
+        .thresh_mem_addr_o      (thresh_mem_addr_o),
+        .thresh_mem_data_i      (thresh_mem_data_i),
+        .pot_mem_wr_o           (pot_mem_wr_o),
+        .pot_mem_rd_o           (pot_mem_rd_o),
+        .pot_mem_wait_i         (pot_mem_wait_i),
+        .pot_mem_addr_o         (pot_mem_addr_o),
+        .pot_mem_data_o         (pot_mem_data_o),
+        .pot_mem_data_i         (pot_mem_data_i),
+        .spike_mem_wr_o         (spike_mem_wr_o),
+        .spike_mem_wait_i       (spike_mem_wait_i),
+        .spike_mem_addr_o       (spike_mem_addr_o),
+        .spike_mem_data_o       (spike_mem_data_o)
+    );
+    end endgenerate
 
 endmodule

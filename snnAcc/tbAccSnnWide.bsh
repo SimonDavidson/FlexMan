@@ -1,0 +1,33 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude
+# Created: 2026-11-21 ; Last modified: 2026-11-21
+#
+# End-to-end wide snnAcc (acc_snn_processor NUM_LANES>1, SP -> NP).
+# Sweeps: EB=32 LANES=1 (scalar baseline); EB in {8,16} x LANES in {2,4} (LANES<=32/EB) x PF in {0,1}.
+set -u
+RTL="acc_snn_processor.v spike_processing.v spike_processing_wide.v act_index_generator.v \
+     weight_generator.v syn_curr_update.v syn_curr_accum_wide.v update_state_for_neuron.v \
+     neuron_processing.v neuron_processing_wide.v np_fetch_sel.v np_line_fetch.v np_line_fetch_pf.v \
+     packer_wide.v ../shared/dataline_cache_with_xy.v ../shared/slice_and_align.v ../shared/packer.v \
+     tb_acc_snn_wide.v"
+fail=0
+# Scalar baseline (NUM_LANES=1, original modules) only supports 32-bit state:
+# the narrow 8/16-bit syn_curr/potential pipeline exists only in the wide path.
+# So: EB=32 -> LANES=1 (baseline); EB=8,16 -> LANES>=2 (wide).
+run() { # EB LANES PF
+  echo "=== acc_snn_wide EB=$1 LANES=$2 PF=$3 ==="
+  log="xrun_accwide_EB$1_L$2_PF$3.log"
+  xrun -sv -timescale 1ns/1ps -access wrc -top tb_acc_snn_wide \
+    -define LANES=$2 -define EB=$1 -define PF=$3 $RTL > "$log" 2>&1
+  if grep -q "PASS" "$log" && ! grep -q -E "FAIL|\*E," "$log"; then echo PASS; else echo "FAIL ($log)"; fail=1; fi
+}
+run 32 1 0
+for EB in 8 16; do
+  for LANES in 2 4; do
+    [ "$LANES" -gt $((32 / EB)) ] && continue
+    for PF in 0 1; do run $EB $LANES $PF; done
+  done
+done
+exit $fail

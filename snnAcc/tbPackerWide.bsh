@@ -1,0 +1,32 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude
+# Created: 2026-06-07 ; Last modified: 2026-06-07
+#
+# Sweeps packer_wide over EB in {1,8,16} x LANES in {1,2,4} (LANES<=EPW).
+# Fails the whole script if any config does not print PASS.
+set -u
+RTL="packer_wide.v tb_packer_wide.v"
+fail=0
+for EB in 1 8 16; do
+  for LANES in 1 2 4; do
+    # constraint: LANES <= EPW = 32/EB  (8->4, 16->2, 1->32)
+    EPW=$((32 / EB))
+    if [ "$LANES" -gt "$EPW" ]; then continue; fi
+    echo "=== packer_wide EB=$EB LANES=$LANES ==="
+    log="xrun_packer_EB${EB}_L${LANES}.log"
+    xrun -sv -timescale 1ns/1ps -access wrc -top tb_packer_wide \
+         -define EB=$EB -define LANES=$LANES $RTL > "$log" 2>&1
+    if grep -q '^PASS$' "$log" && ! grep -q '^FAIL' "$log"; then
+      echo "  PASS  (EB=$EB LANES=$LANES)"
+    else
+      echo "  FAIL  (EB=$EB LANES=$LANES)  -- see $log"
+      grep -E '^FAIL|Error|\*E' "$log" | head -10
+      fail=1
+    fi
+  done
+done
+echo "------------------------------------------------------------"
+if [ "$fail" -eq 0 ]; then echo "ALL PACKER_WIDE CONFIGS PASS"; else echo "PACKER_WIDE: SOME CONFIGS FAILED"; fi
+exit $fail

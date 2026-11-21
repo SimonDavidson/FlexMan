@@ -1,0 +1,33 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude
+# Created: 2026-06-07 ; Last modified: 2026-06-07
+#
+# Sweeps spike_processing_wide (FULL mode) over LANES in {1,2} x PF in {0,1}.
+# 8-bit weights & syn_curr (so the uniform-weight identity is an exact add).
+# Fails the whole script if any config does not print PASS.
+set -u
+RTL="spike_processing_wide.v syn_curr_accum_wide.v act_index_generator.v \
+     ../shared/dataline_cache_with_xy.v ../shared/slice_and_align.v np_fetch_sel.v np_line_fetch.v \
+     np_line_fetch_pf.v tb_spike_processing_wide.v"
+fail=0
+for LANES in 1 2; do
+  for PF in 0 1; do
+    echo "=== spike_processing_wide LANES=$LANES PF=$PF ==="
+    log="xrun_sp_L${LANES}_PF${PF}.log"
+    xrun -sv -timescale 1ns/1ps -access wrc -top tb_spike_processing_wide \
+         -define LANES=$LANES -define PF=$PF $RTL > "$log" 2>&1
+    if grep -q '^PASS$' "$log" && ! grep -q '^FAIL' "$log"; then
+      echo "  PASS  (LANES=$LANES PF=$PF)"
+      grep -E '^NOTE' "$log" | sed 's/^/    /'
+    else
+      echo "  FAIL  (LANES=$LANES PF=$PF)  -- see $log"
+      grep -E '^FAIL|Error|\*E' "$log" | head -10
+      fail=1
+    fi
+  done
+done
+echo "------------------------------------------------------------"
+if [ "$fail" -eq 0 ]; then echo "ALL SPIKE_PROC_WIDE CONFIGS PASS"; else echo "SPIKE_PROC_WIDE: SOME CONFIGS FAILED"; fi
+exit $fail

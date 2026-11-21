@@ -1,0 +1,36 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors: Simon Davidson & Claude
+# Created: 2026-06-07 ; Last modified: 2026-06-07
+#
+# Sweeps neuron_processing_wide over EB in {8,16} x LANES in {1,2,4} (LANES<=EPW)
+# x PF in {0,1}.  Lane- and prefetch-invariant goldens (np_ref_lif) -> identical
+# results across all configs is itself a strong equivalence check.
+# Fails the whole script if any config does not print PASS.
+set -u
+RTL="neuron_processing_wide.v np_fetch_sel.v np_line_fetch.v np_line_fetch_pf.v \
+     packer_wide.v update_state_for_neuron.v tb_neuron_processing_wide.v"
+fail=0
+for EB in 8 16; do
+  for LANES in 1 2 4; do
+    EPW=$((32 / EB))
+    if [ "$LANES" -gt "$EPW" ]; then continue; fi
+    for PF in 0 1; do
+      echo "=== neuron_processing_wide EB=$EB LANES=$LANES PF=$PF ==="
+      log="xrun_np_EB${EB}_L${LANES}_PF${PF}.log"
+      xrun -sv -timescale 1ns/1ps -access wrc -top tb_neuron_processing_wide \
+           -define EB=$EB -define LANES=$LANES -define PF=$PF $RTL > "$log" 2>&1
+      if grep -q '^PASS$' "$log" && ! grep -q '^FAIL' "$log"; then
+        echo "  PASS  (EB=$EB LANES=$LANES PF=$PF)"
+      else
+        echo "  FAIL  (EB=$EB LANES=$LANES PF=$PF)  -- see $log"
+        grep -E '^FAIL|Error|\*E' "$log" | head -10
+        fail=1
+      fi
+    done
+  done
+done
+echo "------------------------------------------------------------"
+if [ "$fail" -eq 0 ]; then echo "ALL NEURON_PROC_WIDE CONFIGS PASS"; else echo "NEURON_PROC_WIDE: SOME CONFIGS FAILED"; fi
+exit $fail
