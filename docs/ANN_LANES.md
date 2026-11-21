@@ -59,10 +59,36 @@ instead of two. Wider activations fall back to the original path.
 
 `tb_ann_tile_perf.v` is the performance variant (`-define NLANE=.. -define MACB=.. -define RR=..`).
 
-## Measured results (prototype, ideal memories, 8-bit weights)
+## Measured results (merged tree, 2026-11-21)
 
-Spike stage alone: 3.99 MACs/cycle at `NLANE = 4` (0.251-0.271 cycles/MAC) against 0.44-0.49 for the
-original path, i.e. 7.6-9.0x. Whole layer (including the unchanged neuron stage) 4.8-8.4x.
-Out-of-context Vivado synthesis (xcku3p-3, spike stage, no BRAM): original 1069 LUT / 4 DSP;
-`NLANE = 4` adds +1070 LUT / +8 DSP (`MAC_ACT_BITS = 32`) or +900 LUT / +4 DSP (`MAC_ACT_BITS = 8`).
-These were measured on the scratch prototype and are being re-measured on the merged tree.
+Cycles, `ann_processor` full chip, ideal 1-cycle memories, 8-bit weights and activations, ReLU
+(`tb_ann_tile_perf.v`; `NLANE = 1` is the original design). Spike stage (SP) and whole layer:
+
+| Layer | `REG_RETURN` | `NLANE=1` SP / total | `NLANE=4` SP / total | SP speed-up | Layer speed-up |
+|---|---|---|---|---|---|
+| 16 x 32 | 0 | 1156 / 1284 | 139 / 267 | 8.3x | 4.8x |
+| 64 x 64 | 0 | 9232 / 9488 | 1035 / 1291 | 8.9x | 7.3x |
+| 200 x 64 | 0 | 28850 / 29106 | 3211 / 3467 | 9.0x | 8.4x |
+| 16 x 32 | 2 | 1058 / 1156 | 139 / 237 | 7.6x | 4.9x |
+| 64 x 64 | 2 | 8322 / 8516 | 1035 / 1229 | 8.0x | 6.9x |
+
+The spike stage reaches 3.99 MACs/cycle asymptotically at `NLANE = 4` (0.25 cycles/MAC) against
+0.44-0.49 for the original path. The neuron stage is unchanged (4.0 cycles/neuron at
+`REG_RETURN = 0`, about 3.0 at `REG_RETURN = 2`), so it limits small layers. `REG_RETURN = 2` is
+the fairer baseline. 64 x 64 with 16-bit weights: 2055 SP cycles at `NLANE = 2`; `NLANE = 4`
+falls back to the original path (10256), as designed.
+
+Out-of-context Vivado synthesis of the whole `ann_processor` (xcku3p-3, no BRAM, 5 ns clock):
+
+| Config | LUTs | Registers | DSPs |
+|---|---|---|---|
+| `NLANE=1` (original) | 2586 | 964 | 8 |
+| `NLANE=2`, `MAC_ACT_BITS=8` | 3335 | 1293 | 10 |
+| `NLANE=4`, `MAC_ACT_BITS=8` | 3475 | 1352 | 12 |
+| `NLANE=4`, `MAC_ACT_BITS=32` | 3643 | 1481 | 16 |
+
+Post-synthesis worst slack is -1.055 ns at 5 ns (about 165 MHz, before place and route) in every
+configuration, including `NLANE = 1`. The worst path is in `neuron_processing`
+(`neuron_counter_r` to the update multiplier), not in the tile, so the lanes do not set Fmax at
+this stage. Place-and-route Fmax has not been measured. Throughput under memory back-pressure
+has not been measured.
