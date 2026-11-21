@@ -29,6 +29,8 @@ create_project $project_name $project_dir -part $fpga_part -force
 set src_files [list \
     $root_dir/top_module/flexman_fpga_wrap.v \
     $root_dir/top_module/flexman.v \
+    $root_dir/shared/shared_pool.v \
+    $root_dir/shared/bram_dist.v \
     $root_dir/shared/bram_sp.v \
     $root_dir/shared/bram_sdp.v \
     $root_dir/shared/bram_tdp.v \
