@@ -1,0 +1,26 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors      : Simon Davidson & Claude
+# Created      : 2026-11-21
+# Last modified: 2026-11-21
+#
+# annAcc NLANE tile path: directed + random scenarios (full ann_processor, SP only),
+# each run with and without random stalls, bit-exact vs a TB golden.
+# Sweep: NLANE in {1 (original path), 2, 4} x REG_RETURN in {0, 2}; plus MAC_ACT_BITS=8 at NLANE=4.
+set -u
+RTL="acc_snn_processor.v spike_processing.v ann_tile_path.v ann_tile_sp.v ann_lane_mac.v \
+     act_index_generator.v weight_generator.v syn_curr_update.v update_state_for_neuron.v neuron_processing.v \
+     ../shared/dataline_cache_with_xy.v ../shared/slice_and_align.v ../shared/packer.v tb_ann_tile.v"
+fail=0
+run() { # NLANE MACB RR
+  echo "=== tb_ann_tile NLANE=$1 MACB=$2 RR=$3 ==="
+  log="xrun_anntile_NL$1_M$2_R$3.log"
+  xrun -sv -timescale 1ns/1ps -access wrc -top tb_ann_tile -define NLANE=$1 -define MACB=$2 -define RR=$3 $RTL > "$log" 2>&1
+  if grep -q -E "FAIL|\*E,|\*F," "$log" || ! grep -q PASS "$log"; then echo "FAIL ($log)"; fail=1; else echo PASS; fi
+}
+for RR in 0 2; do
+  for NL in 1 2 4; do run $NL 32 $RR; done
+done
+run 4 8 0
+exit $fail

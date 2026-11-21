@@ -91,7 +91,10 @@ module example_app_top #(
     parameter PROG_ADDR_BITS      = 10,
     parameter PROG_DATA_BITS      = 32,
     parameter NUM_SCH_ENTRIES     = 4,
-    parameter COL_BUFF_ID_SZ      = 16
+    parameter COL_BUFF_ID_SZ      = 16,
+    // annAcc dense MAC lanes (1 = original; see docs/ANN_LANES.md)
+    parameter ANN_NLANE          = 1,
+    parameter ANN_MAC_ACT_BITS   = 32
 )(
     input  wire clk,
     input  wire reset,
@@ -1118,6 +1121,8 @@ acc_snn_processor #(
 
 // ─── annAcc (TGT_ACC_ID = 2) ─────────────────────────────────────────────────
 ann_processor #(
+    .NLANE                (ANN_NLANE),
+    .MAC_ACT_BITS         (ANN_MAC_ACT_BITS),
     .TGT_ACC_ID           (2),
     .TGT_CONFIG_BASE_ADDR (ANN_CFG_BASE),
     // annAcc already defaults NP_SYN_CURR/NP_POT slices to 32; spike_processing's

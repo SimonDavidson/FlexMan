@@ -5,7 +5,7 @@
 //
 // Authors      : Simon Davidson & Claude
 // Created      : 2026-06-30
-// Last modified: 2026-06-30
+// Last modified: 2026-11-21
 //
 // Port of snnAcc/tb_acc_snn_stress.v narrowed to the F9 surface for annAcc (top
 // module `ann_processor`): confirm the full-mode FC weight-cache phase fix (the
@@ -63,6 +63,9 @@
 `define POT_SLICE_BITS 32
 // CONFIG PARAMS END
 
+`ifndef NLANE
+ `define NLANE 1   // NLANE>1 exercises the tile path + legacy fallback (tbAccAnnStress.bsh sweeps 1,2,4)
+`endif
 module tb_acc_ann_stress;
 
     localparam CLK_PERIOD = 10;
@@ -138,7 +141,8 @@ module tb_acc_ann_stress;
     .NP_LUT_IDX_SZ(`NP_LUT_IDX_SZ), .NP_LUT_DATA_IDX_SZ(`NP_LUT_DATA_IDX_SZ),
     .NP_LUT_SLICE_SZ(`NP_LUT_SLICE_SZ), .NP_LUT_SLICE_BITS(`NP_LUT_SLICE_BITS),
     .NP_POT_SLICE_SZ(`POT_SLICE_SZ), .NP_POT_SLICE_BITS(`POT_SLICE_BITS),
-    .MEM_ADDR_BITS(`ADDR_SIZE)
+    .MEM_ADDR_BITS(`ADDR_SIZE),
+    .NLANE(`NLANE), .MAC_ACT_BITS(32)
     ) u_dut (
         .clk(clk), .reset(reset),
         .sys_req_i(sys_req_i), .sys_ack_o(sys_ack_o),

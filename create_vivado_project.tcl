@@ -54,6 +54,9 @@ set src_files [list \
     $root_dir/shared/packer.v \
     $root_dir/annAcc/acc_snn_processor.v \
     $root_dir/annAcc/spike_processing.v \
+    $root_dir/annAcc/ann_tile_path.v \
+    $root_dir/annAcc/ann_tile_sp.v \
+    $root_dir/annAcc/ann_lane_mac.v \
     $root_dir/annAcc/neuron_processing.v \
     $root_dir/annAcc/syn_curr_update.v \
     $root_dir/annAcc/update_state_for_neuron.v \

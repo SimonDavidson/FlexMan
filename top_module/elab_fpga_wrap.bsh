@@ -29,6 +29,9 @@ xrun -sv -elaborate -timescale 10ps/1ps -top flexman_fpga_wrap \
   ../shared/packer.v \
   ../annAcc/acc_snn_processor.v \
   ../annAcc/spike_processing.v \
+  ../annAcc/ann_tile_path.v \
+  ../annAcc/ann_tile_sp.v \
+  ../annAcc/ann_lane_mac.v \
   ../annAcc/neuron_processing.v \
   ../annAcc/syn_curr_update.v \
   ../annAcc/update_state_for_neuron.v \

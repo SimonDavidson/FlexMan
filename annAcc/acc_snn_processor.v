@@ -74,7 +74,11 @@ module ann_processor # (
     // (REG_RETURN) and weight_generator.v (REG_WROW_BASE).
     //----------------------------------------------------------------
     parameter REG_RETURN              = 0,
-    parameter REG_WROW_BASE           = 0
+    parameter REG_WROW_BASE           = 0,
+    // Optional output-stationary dense MAC lanes. NLANE = 1 (default): the tile
+    // path is not elaborated and the design is the original. See docs/WIDENING.md.
+    parameter NLANE                   = 1,
+    parameter MAC_ACT_BITS            = 32   // widest activation the tile path accepts
 )(
     input  wire clk,
     input  wire reset,
@@ -560,6 +564,61 @@ module ann_processor # (
     wire sp_go = np_bias_en_r ? pl_done_pulse : my_dispatch;
 
     //================================================================
+    // Optional NLANE tile path (NLANE > 1 only).  Legacy spike_processing
+    // outputs go through l_* wires; with NLANE == 1 they are wired straight
+    // to the ports, exactly as before.
+    //================================================================
+    wire                  sp_start_legacy;
+    wire                  l_fin, l_busy, l_afin;
+    wire                  l_w_rd, l_a_req, l_s_wr, l_s_rd;
+    wire [`ADDR_SIZE-1:0] l_w_addr, l_a_addr, l_s_addr;
+    wire  [`POT_BITS-1:0] l_s_dwr;
+    generate if (NLANE == 1) begin : g_sp_orig
+        assign sp_start_legacy         = sp_go;
+        assign spike_proc_finished_o   = l_fin;
+        assign sp_acc_busy             = l_busy;
+        assign sp_acc_finished         = l_afin;
+        assign weight_mem_rd_o         = l_w_rd;
+        assign weight_mem_addr_o       = l_w_addr;
+        assign act_mem_req_o           = l_a_req;
+        assign act_mem_addr_o          = l_a_addr;
+        assign sp_syn_curr_mem_wr      = l_s_wr;
+        assign sp_syn_curr_mem_rd      = l_s_rd;
+        assign sp_syn_curr_mem_addr    = l_s_addr;
+        assign sp_syn_curr_mem_data_wr = l_s_dwr;
+    end else begin : g_sp_tile
+        ann_tile_path # (
+            .NLANE(NLANE), .MAC_ACT_BITS(MAC_ACT_BITS),
+            .X_INPUT_SZ(SP_X_INPUT_SZ), .Y_INPUT_SZ(SP_Y_INPUT_SZ),
+            .X_OUTPUT_SZ(SP_X_OUTPUT_SZ), .Y_OUTPUT_SZ(SP_Y_OUTPUT_SZ),
+            .ROWS_PER_NEURON(SP_ROWS_PER_NEURON), .WEIGHT_SLICE_SZ(SP_WEIGHT_SLICE_SZ),
+            .MEM_ADDR_BITS(MEM_ADDR_BITS)
+        ) u_tile_path (
+            .clk(clk), .reset(reset), .start_i(sp_go),
+            .act_base_addr_i(sp_act_base_addr_r), .weight_base_addr_i(sp_weight_base_addr_r),
+            .syn_curr_base_addr_i(syn_curr_base_addr_r),
+            .weight_sz_i(sp_weight_sz_r), .weight_mode_i(sp_weight_mode_r),
+            .act_slice_sz_i(sp_act_sz_r), .act_signed_i(act_signed_r),
+            .in_x_len_i(sp_in_x_len_r), .in_y_len_i(sp_in_y_len_r),
+            .out_x_len_i(sp_out_x_len_r), .out_y_len_i(sp_out_y_len_r),
+            .rows_per_neuron_i(sp_rows_per_neuron_r),
+            .legacy_start_o(sp_start_legacy),
+            .l_fin_i(l_fin), .l_busy_i(l_busy), .l_afin_i(l_afin),
+            .l_w_rd_i(l_w_rd), .l_a_req_i(l_a_req), .l_s_wr_i(l_s_wr), .l_s_rd_i(l_s_rd),
+            .l_w_addr_i(l_w_addr), .l_a_addr_i(l_a_addr), .l_s_addr_i(l_s_addr), .l_s_dwr_i(l_s_dwr),
+            .spike_proc_finished_o(spike_proc_finished_o),
+            .acc_busy_o(sp_acc_busy), .acc_finished_o(sp_acc_finished),
+            .weight_mem_rd_o(weight_mem_rd_o), .weight_mem_addr_o(weight_mem_addr_o),
+            .act_mem_req_o(act_mem_req_o), .act_mem_addr_o(act_mem_addr_o),
+            .syn_curr_mem_wr_o(sp_syn_curr_mem_wr), .syn_curr_mem_rd_o(sp_syn_curr_mem_rd),
+            .syn_curr_mem_addr_o(sp_syn_curr_mem_addr), .syn_curr_mem_data_wr_o(sp_syn_curr_mem_data_wr),
+            .weight_mem_wait_i(weight_mem_wait_i), .weight_mem_data_i(weight_mem_data_i),
+            .act_mem_wait_i(act_mem_wait_i), .act_mem_data_i(act_mem_data_i),
+            .syn_curr_mem_wait_i(sp_syn_curr_mem_wait), .syn_curr_mem_data_rd_i(syn_curr_mem_data_i)
+        );
+    end endgenerate
+
+    //================================================================
     // spike_processing instantiation
     //================================================================
     ann_spike_processing # (
@@ -628,12 +687,12 @@ module ann_processor # (
         .act_signed_i           (act_signed_r),
 
         // Scheduler — gated dispatch (deferred past the §5.5 bias preload)
-        .start_new_block_i      (sp_go),
+        .start_new_block_i      (sp_start_legacy),
         .target_acc_i           (dispatched_target_acc_r),
         .buffer_info_i          (buffer_info_i),
-        .spike_proc_finished_o  (spike_proc_finished_o),
-        .acc_busy_o             (sp_acc_busy),
-        .acc_finished_o         (sp_acc_finished),
+        .spike_proc_finished_o  (l_fin),
+        .acc_busy_o             (l_busy),
+        .acc_finished_o         (l_afin),
 
         // Buffer addresses
         .src1_buff_addr_i       (sp_src1_buff_addr_i),
@@ -643,23 +702,23 @@ module ann_processor # (
         .weight_row_len_i       (sp_weight_row_len_i),
 
         // Weight memory
-        .weight_mem_rd_o        (weight_mem_rd_o),
+        .weight_mem_rd_o        (l_w_rd),
         .weight_mem_wait_i      (weight_mem_wait_i),
-        .weight_mem_addr_o      (weight_mem_addr_o),
+        .weight_mem_addr_o      (l_w_addr),
         .weight_mem_data_i      (weight_mem_data_i),
 
         // Activation memory
-        .act_mem_req_o          (act_mem_req_o),
+        .act_mem_req_o          (l_a_req),
         .act_mem_wait_i         (act_mem_wait_i),
-        .act_mem_addr_o         (act_mem_addr_o),
+        .act_mem_addr_o         (l_a_addr),
         .act_mem_data_i         (act_mem_data_i),
 
         // Synaptic current memory (via arbiter)
-        .syn_curr_mem_wr_o      (sp_syn_curr_mem_wr),
-        .syn_curr_mem_rd_o      (sp_syn_curr_mem_rd),
+        .syn_curr_mem_wr_o      (l_s_wr),
+        .syn_curr_mem_rd_o      (l_s_rd),
         .syn_curr_mem_wait_i    (sp_syn_curr_mem_wait),
-        .syn_curr_mem_addr_o    (sp_syn_curr_mem_addr),
-        .syn_curr_mem_data_wr_o (sp_syn_curr_mem_data_wr),
+        .syn_curr_mem_addr_o    (l_s_addr),
+        .syn_curr_mem_data_wr_o (l_s_dwr),
         .syn_curr_mem_data_rd_i (syn_curr_mem_data_i)
     );
 
