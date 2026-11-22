@@ -1,0 +1,42 @@
+#! /usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Simon Davidson, University of Manchester
+# Authors      : Simon Davidson & Claude
+# Created      : 2026-11-22
+# Last modified: 2026-11-22
+#
+# End-to-end: one dense 8-bit ANN layer (ReLU, requantised) compiled by gen_ann_layer.py
+# (flexman_backend ISA/cfgmem), loaded into the stock flexman_fpga_wrap memories and run
+# through scheduler + config manager + annAcc; output checked bit-exact against a Python
+# golden. Sweeps ANN_NLANE/ANN_MAC_ACT_BITS = 1/32 (original path) and 4/8 (tile path) on a
+# 64x64 layer, and 4/8 on 128x32. Prints the layer-execution window in cycles.
+set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"; FM="$HERE/../.."
+T=$(mktemp -d)
+trap 'rm -rf "$T"' EXIT
+run() { # NIN NOUT NLANE MACB
+  local I="$T/img_$1x$2/"; mkdir -p "$I"
+  python3 "$HERE/gen_ann_layer.py" $1 $2 1 "$I" > /dev/null || { echo "FAIL gen"; return 1; }
+  ( cd "$T" && python3 "$HERE/mkwrap.py" > /dev/null )
+  echo "=== ann layer $1x$2 NLANE=$3 MAC_ACT_BITS=$4 ==="
+  ( cd "$T" && xrun -sv -timescale 10ps/1ps -access wrc -top tb_flexman_ann_layer -incdir "$I" -incdir "$FM/top_module" \
+    -define ANN_NLANE=$3 -define ANN_MACB=$4 -define "IMG=\"$I\"" -define "WINFILE=\"window_nl$3.vh\"" \
+    -xmlibdirname "$T/xcelium.d" \
+    "$HERE/tb_flexman_ann_layer.v" "$T/fm_tb_wrap_rtl.v" \
+    "$FM/top_module/flexman.v" "$FM/shared/shared_pool.v" \
+    "$FM/shared/bram_sp.v" "$FM/shared/bram_sdp.v" "$FM/shared/bram_tdp.v" "$FM/shared/bram_dist.v" \
+    "$FM/scheduler/scheduler.v" "$FM/scheduler/sch_table.v" "$FM/scheduler/sch_entry.v" \
+    "$FM/scheduler/sch_buffer_state.v" "$FM/scheduler/buffer_state_entry.v" \
+    "$FM/scheduler/acc_hw_buffer_tracker.v" "$FM/scheduler/prog_cache.v" "$FM/config_manager/config_manager.v" \
+    "$FM/snnAcc/acc_snn_processor.v" "$FM/snnAcc/spike_processing.v" "$FM/snnAcc/neuron_processing.v" \
+    "$FM/snnAcc/act_index_generator.v" "$FM/snnAcc/weight_generator.v" "$FM/snnAcc/syn_curr_update.v" \
+    "$FM/snnAcc/update_state_for_neuron.v" "$FM/shared/dataline_cache_with_xy.v" "$FM/shared/slice_and_align.v" \
+    "$FM/shared/packer.v" "$FM/annAcc/acc_snn_processor.v" "$FM/annAcc/spike_processing.v" \
+    "$FM/annAcc/ann_tile_path.v" "$FM/annAcc/ann_tile_sp.v" "$FM/annAcc/ann_lane_mac.v" \
+    "$FM/annAcc/neuron_processing.v" "$FM/annAcc/syn_curr_update.v" "$FM/annAcc/update_state_for_neuron.v" \
+    "$FM/Hadamard/hadamard_unit.v" "$FM/Hadamard/hu_compute.v" "$FM/Hadamard/hu_config_regs.v" \
+    "$FM/Hadamard/stream_generator.v" "$FM/fillUnit/fill_unit.v" 2>&1 ) | grep -E "^\[(WINDOW|ACTIVITY|CHECK|MISMATCH|TIMEOUT)\]|\*E,|\*F,"
+}
+run 64 64 1 32
+run 64 64 4 8
+run 128 32 4 8
